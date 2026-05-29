@@ -202,6 +202,34 @@ select { appearance: none; -webkit-appearance: none; }
   backdrop-filter: blur(10px);
 }
 
+.data-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.15s;
+}
+.data-table th.sortable:hover { color: var(--text-primary); }
+
+/* Keyboard-visible focus ring (a11y) — distinct from hover */
+a:focus-visible,
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+.sortable:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--lux-champagne, #D4AF37);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 .data-table th.num,
 .data-table td.num {
   text-align: left;

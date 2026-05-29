@@ -119,6 +119,33 @@ const DB = (() => {
     return _tx(store, 'readwrite', obj => _req(obj.clear()));
   }
 
+  // ── Validation ──────────────────────────────────────────
+  function _vYear(y) {
+    const n = parseInt(y, 10);
+    if (isNaN(n) || n < 1900 || n > 2200) throw new Error('שנה לא תקינה (טווח 1900–2200)');
+    return n;
+  }
+  function _vMonth(m, { required = true } = {}) {
+    if (m == null || m === '') {
+      if (required) throw new Error('יש לבחור חודש');
+      return null;
+    }
+    const n = parseInt(m, 10);
+    if (isNaN(n) || n < 1 || n > 12) throw new Error('חודש לא תקין (1–12)');
+    return n;
+  }
+  function _vAmount(a, field = 'סכום') {
+    const n = parseFloat(a);
+    if (isNaN(n) || !isFinite(n)) throw new Error(`${field} חייב להיות מספר`);
+    if (n < 0) throw new Error(`${field} לא יכול להיות שלילי`);
+    return +n;
+  }
+  function _vRate(r) {
+    const n = parseFloat(r) || 0;
+    if (n < 0 || n > 100) throw new Error('שיעור עמלה חייב להיות בין 0 ל-100');
+    return n;
+  }
+
   // ── Clients ─────────────────────────────────────────────
   const clients = {
     getAll:  () => _getAll('clients'),
@@ -129,6 +156,7 @@ const DB = (() => {
     },
     update:  (record) => _put('clients', record),
     delete:  (id) => _delete('clients', id),
+    restore: (record) => _put('clients', record),   // re-insert with original id (undo)
   };
 
   // ── Cases ────────────────────────────────────────────────
@@ -143,7 +171,7 @@ const DB = (() => {
         caseNumber:      (data.caseNumber || '').trim(),
         description:     (data.description || '').trim(),
         caseType:        data.caseType || 'שוטף',      // שוטף | ליטיגציה | עסקה
-        commissionRate:  parseFloat(data.commissionRate) || 0,
+        commissionRate:  _vRate(data.commissionRate),
         arrangementType: (data.arrangementType || '').trim(),
         openDate:        data.openDate || null,
         createdAt:       Date.now(),
@@ -153,17 +181,20 @@ const DB = (() => {
 
     update: (record) => {
       if (record.commissionRate !== undefined) {
-        record.commissionRate = parseFloat(record.commissionRate) || 0;
+        record.commissionRate = _vRate(record.commissionRate);
       }
       return _put('cases', record);
     },
 
     delete: (id) => _delete('cases', id),
+    restore: (record) => _put('cases', record),   // re-insert with original id (undo)
 
     /** Find case by case number string (returns first match or null) */
     findByCaseNumber: async (caseNumber) => {
-      const all = await _getAll('cases');
-      return all.find(c => c.caseNumber === caseNumber.trim()) || null;
+      const v = (caseNumber || '').trim();
+      if (!v) return null;
+      const matches = await _getAllByIndex('cases', 'caseNumber', v);  // uses caseNumber index
+      return matches[0] || null;
     },
   };
 
@@ -180,16 +211,16 @@ const DB = (() => {
      * commission is auto-computed unless provided.
      */
     add: (data) => {
-      const amount         = parseFloat(data.amount) || 0;
-      const commissionRate = parseFloat(data.commissionRate) || 0;
+      const amount         = _vAmount(data.amount, 'סכום חשבונית');
+      const commissionRate = _vRate(data.commissionRate);
       const commission     = data.commission !== undefined
         ? parseFloat(data.commission)
         : +(amount * commissionRate / 100).toFixed(2);
 
       const record = {
         caseId:         data.caseId,
-        month:          parseInt(data.month, 10),   // 1–12
-        year:           parseInt(data.year, 10),
+        month:          _vMonth(data.month),        // 1–12
+        year:           _vYear(data.year),
         amount:         amount,
         commissionRate: commissionRate,
         commission:     commission,
@@ -201,14 +232,19 @@ const DB = (() => {
     },
 
     update: (record) => {
-      // Recompute commission if amount or rate changed
-      const amount = parseFloat(record.amount) || 0;
-      const rate   = parseFloat(record.commissionRate) || 0;
+      // Validate + recompute commission if amount or rate changed
+      const amount = _vAmount(record.amount, 'סכום חשבונית');
+      const rate   = _vRate(record.commissionRate);
+      if (record.month !== undefined) record.month = _vMonth(record.month);
+      if (record.year  !== undefined) record.year  = _vYear(record.year);
+      record.amount = amount;
+      record.commissionRate = rate;
       record.commission = +(amount * rate / 100).toFixed(2);
       return _put('invoices', record);
     },
 
     delete: (id) => _delete('invoices', id),
+    restore: (record) => _put('invoices', record),   // re-insert with original id (undo)
 
     /** Sum of commissions for a given year */
     totalCommissionForYear: async (year) => {
@@ -244,17 +280,23 @@ const DB = (() => {
 
     add: (data) => {
       const record = {
-        year:      parseInt(data.year, 10),
-        month:     data.month ? parseInt(data.month, 10) : null,
-        amount:    parseFloat(data.amount) || 0,
+        year:      _vYear(data.year),
+        month:     _vMonth(data.month, { required: false }),
+        amount:    _vAmount(data.amount, 'סכום תשלום'),
         notes:     (data.notes || '').trim(),
         createdAt: Date.now(),
       };
       return _add('payments', record);
     },
 
-    update: (record) => _put('payments', record),
+    update: (record) => {
+      record.year   = _vYear(record.year);
+      record.month  = _vMonth(record.month, { required: false });
+      record.amount = _vAmount(record.amount, 'סכום תשלום');
+      return _put('payments', record);
+    },
     delete: (id)     => _delete('payments', id),
+    restore: (record) => _put('payments', record),   // re-insert with original id (undo)
 
     totalForYear: async (year) => {
       const list = await _getAllByIndex('payments', 'year', year);
@@ -352,9 +394,38 @@ const DB = (() => {
       };
     },
 
+    /**
+     * Validate a backup object BEFORE any destructive action.
+     * Throws on malformed data; returns { clients, cases, invoices, payments } counts.
+     */
+    validate: (data) => {
+      if (!data || typeof data !== 'object') throw new Error('קובץ גיבוי לא תקין');
+      if (data.version !== 1)                throw new Error('גרסת גיבוי לא נתמכת');
+
+      const arr = (k) => {
+        if (data[k] != null && !Array.isArray(data[k])) throw new Error(`שדה "${k}" פגום בקובץ`);
+        return data[k] || [];
+      };
+      const clients = arr('clients'), cases = arr('cases');
+      const invoices = arr('invoices'), payments = arr('payments');
+      arr('balances'); arr('settings');
+
+      invoices.forEach((i, idx) => {
+        if (i.month != null && (i.month < 1 || i.month > 12))
+          throw new Error(`חשבונית #${idx + 1}: חודש לא תקין בקובץ הגיבוי`);
+      });
+
+      return {
+        clients:  clients.length,
+        cases:    cases.length,
+        invoices: invoices.length,
+        payments: payments.length,
+      };
+    },
+
     /** Import from a backup JSON object (replaces ALL data) */
     import: async (data) => {
-      if (!data || data.version !== 1) throw new Error('קובץ גיבוי לא תקין');
+      backup.validate(data);   // pre-flight — throws before anything is cleared
 
       const db = await open();
       const stores = ['clients','cases','invoices','payments','balances','settings'];

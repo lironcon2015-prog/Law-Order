@@ -88,22 +88,29 @@ const App = (() => {
   }
 
   async function importBackup(file) {
+    let data, counts;
     try {
       const text = await file.text();
-      const data = JSON.parse(text);
-      UI.confirm(
-        'שחזור גיבוי ידרוס את כל הנתונים הקיימים. האם להמשיך?',
-        async () => {
-          await DB.backup.import(data);
-          UI.toast('שחזור הושלם בהצלחה!', 'success');
-          UI.closeModal();
-          _initialised = {};
-          await navigate(_currentView);
-        }
-      );
+      data = JSON.parse(text);
+      counts = DB.backup.validate(data);   // pre-flight — throws before any destructive action
     } catch(err) {
       UI.toast('שגיאה בשחזור: ' + (err.message || 'קובץ לא תקין'), 'error');
+      return;
     }
+
+    UI.confirm(
+      `הקובץ תקין ויוחזרו ממנו:<br>
+       <strong>${counts.clients}</strong> לקוחות · <strong>${counts.cases}</strong> תיקים ·
+       <strong>${counts.invoices}</strong> חשבוניות · <strong>${counts.payments}</strong> תשלומים.<br>
+       <small style="color:var(--color-negative)">פעולה זו תדרוס את כל הנתונים הקיימים.</small>`,
+      async () => {
+        await DB.backup.import(data);
+        UI.toast('שחזור הושלם בהצלחה!', 'success');
+        UI.closeModal();
+        _initialised = {};
+        await navigate(_currentView);
+      }
+    );
   }
 
   // ── Wire nav clicks ────────────────────────────────────

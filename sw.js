@@ -7,7 +7,7 @@
  */
 
 const CACHE_PREFIX  = 'lexledger-v';
-const CACHE_VERSION = '2.2.0';           // ← עדכן בכל deploy
+const CACHE_VERSION = '2.3.0';           // ← עדכן בכל deploy
 const CACHE_NAME    = CACHE_PREFIX + CACHE_VERSION;
 
 const ASSETS = [
@@ -25,6 +25,8 @@ const ASSETS = [
   './settings.js',
   './drive.js',
   './version.json',
+  './manifest.json',
+  './icon.svg',
 ];
 
 // ── Install ────────────────────────────────────────────

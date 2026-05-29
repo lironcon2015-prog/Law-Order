@@ -167,6 +167,52 @@ const UI = (() => {
     }, duration);
   }
 
+  /**
+   * Toast with an "undo" action button.
+   * onUndo is invoked (and the toast removed) when the user clicks ביטול.
+   */
+  function toastUndo(msg, onUndo, duration = 6000) {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
+    const id  = 'toast-' + Date.now();
+    const el  = document.createElement('div');
+    el.id = id;
+    el.style.cssText = `
+      display:flex;align-items:center;gap:10px;
+      padding:11px 14px;border-radius:12px;
+      background:#fff;border:1px solid #E5E7EB;
+      box-shadow:0 8px 24px rgba(0,0,0,0.1),0 0 0 1px rgba(0,0,0,0.03);
+      min-width:240px;max-width:360px;
+      transition:opacity 0.25s,transform 0.25s;
+      border-right:3px solid #6B7280;
+    `.replace(/\s+/g, ' ').trim();
+
+    el.innerHTML = `
+      <span class="material-symbols-outlined flex-shrink-0" style="font-size:18px;color:#6B7280;font-variation-settings:'FILL' 1,'wght' 400,'GRAD' 0,'opsz' 20;">delete</span>
+      <span style="flex:1;font-size:0.83rem;font-family:'Assistant',sans-serif;color:#111827;line-height:1.45;">${msg}</span>
+      <button id="${id}-undo" style="flex-shrink:0;font-size:0.82rem;font-weight:700;color:#1D4ED8;background:rgba(29,78,216,0.07);border:none;border-radius:8px;padding:4px 10px;cursor:pointer;font-family:'Assistant',sans-serif;">ביטול</button>
+    `;
+
+    container.appendChild(el);
+
+    let done = false;
+    const remove = () => {
+      el.style.opacity = '0';
+      el.addEventListener('transitionend', () => el.remove(), { once: true });
+    };
+
+    document.getElementById(`${id}-undo`)?.addEventListener('click', async () => {
+      if (done) return;
+      done = true;
+      try { await onUndo(); }
+      catch (e) { toast(e.message || 'שגיאה בביטול', 'error'); }
+      remove();
+    });
+
+    setTimeout(() => { if (!done) remove(); }, duration);
+  }
+
   // ─── Modal ───────────────────────────────────────────────
   let _onConfirmFn = null;
 
@@ -424,6 +470,7 @@ const UI = (() => {
     populateClientSelect,
     // Toast & modals
     toast,
+    toastUndo,
     confirm,
     openModal,
     closeModal,

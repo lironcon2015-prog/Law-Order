@@ -6,6 +6,9 @@
 const Payments = (() => {
 
   let _filterYear = new Date().getFullYear();
+  let _search     = '';
+  let _sortKey    = null;   // null → default (month desc)
+  let _sortDir    = 1;
 
   // ── Init ───────────────────────────────────────────────
   async function init() {
@@ -16,8 +19,29 @@ const Payments = (() => {
       await render();
     });
 
+    document.getElementById('payment-search')?.addEventListener('input', async (e) => {
+      _search = e.target.value;
+      await render();
+    });
+
+    document.querySelectorAll('#payments-table thead th[data-sort]').forEach(th => {
+      th.addEventListener('click', async () => {
+        const key = th.dataset.sort;
+        if (_sortKey === key) _sortDir = -_sortDir;
+        else { _sortKey = key; _sortDir = 1; }
+        await render();
+      });
+    });
+
     document.getElementById('btn-add-payment').addEventListener('click', () => openPaymentModal());
     await render();
+  }
+
+  function _updateSortArrows() {
+    document.querySelectorAll('#payments-table thead th[data-sort]').forEach(th => {
+      const base = th.dataset.label || (th.dataset.label = th.textContent.replace(/[ ↑↓]+$/, ''));
+      th.textContent = base + (_sortKey === th.dataset.sort ? (_sortDir > 0 ? ' ↑' : ' ↓') : '');
+    });
   }
 
   // ── Render ─────────────────────────────────────────────
@@ -25,11 +49,30 @@ const Payments = (() => {
     const tbody = document.getElementById('payments-tbody');
     if (!tbody) return;
 
-    const payments = await DB.payments.getByYear(_filterYear);
-    payments.sort((a, b) => (b.month || 0) - (a.month || 0));
+    let payments = await DB.payments.getByYear(_filterYear);
+
+    // Free-text search
+    if (_search.trim()) {
+      const q = _search.trim().toLowerCase();
+      payments = payments.filter(p =>
+        (p.notes || '').toLowerCase().includes(q) ||
+        String(p.amount).includes(q) ||
+        (p.month ? UI.monthName(p.month).includes(q) : false)
+      );
+    }
+
+    // Sort
+    payments.sort((a, b) => {
+      if (!_sortKey) return (b.month || 0) - (a.month || 0);
+      let va = a[_sortKey], vb = b[_sortKey];
+      if (_sortKey === 'notes') return String(va || '').localeCompare(String(vb || ''), 'he') * _sortDir;
+      return ((va || 0) - (vb || 0)) * _sortDir;
+    });
+
+    _updateSortArrows();
 
     if (!payments.length) {
-      tbody.innerHTML = UI.emptyRow(5, 'אין תשלומים רשומים לשנה זו');
+      tbody.innerHTML = UI.emptyRow(5, _search.trim() ? 'לא נמצאו תוצאות' : 'אין תשלומים רשומים לשנה זו');
       return;
     }
 
@@ -121,13 +164,16 @@ const Payments = (() => {
     setTimeout(() => document.getElementById('f-pay-amount')?.focus(), 60);
   }
 
-  // ── Delete Payment ─────────────────────────────────────
-  function deletePayment(paymentId) {
-    UI.confirm('האם למחוק תשלום זה?', async () => {
-      await DB.payments.delete(paymentId);
-      UI.toast('תשלום נמחק', 'info');
-      UI.closeModal();
+  // ── Delete Payment (with undo) ─────────────────────────
+  async function deletePayment(paymentId) {
+    const rec = await DB.payments.get(paymentId);
+    if (!rec) return;
+    await DB.payments.delete(paymentId);
+    await render();
+    UI.toastUndo('תשלום נמחק', async () => {
+      await DB.payments.restore(rec);   // re-insert with original id
       await render();
+      UI.toast('התשלום שוחזר', 'success');
     });
   }
 

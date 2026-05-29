@@ -8,6 +8,9 @@ const Invoices = (() => {
 
   let _filterYear   = new Date().getFullYear();
   let _filterClient = '';
+  let _search       = '';
+  let _sortKey      = null;   // null → default (year desc, month desc)
+  let _sortDir      = 1;      // 1 asc, -1 desc
 
   // ── Init ───────────────────────────────────────────────
   async function init() {
@@ -24,9 +27,31 @@ const Invoices = (() => {
       await render();
     });
 
+    document.getElementById('invoice-search')?.addEventListener('input', async (e) => {
+      _search = e.target.value;
+      await render();
+    });
+
+    // Sortable headers
+    document.querySelectorAll('#invoices-table thead th[data-sort]').forEach(th => {
+      th.addEventListener('click', async () => {
+        const key = th.dataset.sort;
+        if (_sortKey === key) _sortDir = -_sortDir;
+        else { _sortKey = key; _sortDir = 1; }
+        await render();
+      });
+    });
+
     document.getElementById('btn-add-invoice').addEventListener('click', () => openInvoiceModal());
 
     await render();
+  }
+
+  function _updateSortArrows() {
+    document.querySelectorAll('#invoices-table thead th[data-sort]').forEach(th => {
+      const base = th.dataset.label || (th.dataset.label = th.textContent.replace(/[ ↑↓]+$/, ''));
+      th.textContent = base + (_sortKey === th.dataset.sort ? (_sortDir > 0 ? ' ↑' : ' ↓') : '');
+    });
   }
 
   // ── Render table ───────────────────────────────────────
@@ -53,20 +78,48 @@ const Invoices = (() => {
       filtered = invoices.filter(i => caseIds.includes(i.caseId));
     }
 
-    // Sort: year desc, month desc
-    filtered.sort((a, b) => b.year - a.year || b.month - a.month);
+    // Enrich with derived fields (client name, case record)
+    let enriched = filtered.map(inv => {
+      const c = caseMap[inv.caseId];
+      return { inv, c, client: c ? (clientMap[c.clientId] || '—') : '—' };
+    });
 
-    if (!filtered.length) {
-      tbody.innerHTML = UI.emptyRow(9, 'אין חשבוניות להצגה');
+    // Free-text search
+    if (_search.trim()) {
+      const q = _search.trim().toLowerCase();
+      enriched = enriched.filter(({ inv, c, client }) =>
+        client.toLowerCase().includes(q) ||
+        (c && (c.caseNumber || '').toLowerCase().includes(q)) ||
+        (c && (c.description || '').toLowerCase().includes(q)) ||
+        (inv.notes || '').toLowerCase().includes(q) ||
+        String(inv.amount).includes(q) ||
+        UI.monthName(inv.month).includes(q)
+      );
+    }
+
+    // Sort
+    enriched.sort((a, b) => {
+      if (!_sortKey) return b.inv.year - a.inv.year || b.inv.month - a.inv.month;
+      let va, vb;
+      if (_sortKey === 'client')          { va = a.client; vb = b.client; }
+      else if (_sortKey === 'caseNumber') { va = a.c ? a.c.caseNumber : ''; vb = b.c ? b.c.caseNumber : ''; }
+      else                                { va = a.inv[_sortKey]; vb = b.inv[_sortKey]; }
+      if (typeof va === 'string' || typeof vb === 'string')
+        return String(va).localeCompare(String(vb), 'he') * _sortDir;
+      return ((va || 0) - (vb || 0)) * _sortDir;
+    });
+
+    _updateSortArrows();
+
+    if (!enriched.length) {
+      tbody.innerHTML = UI.emptyRow(9, _search.trim() ? 'לא נמצאו תוצאות' : 'אין חשבוניות להצגה');
       return;
     }
 
     let rows = '';
     let totalAmt = 0, totalComm = 0;
 
-    filtered.forEach(inv => {
-      const c       = caseMap[inv.caseId];
-      const client  = c ? clientMap[c.clientId] : '—';
+    enriched.forEach(({ inv, c, client }) => {
       totalAmt  += inv.amount;
       totalComm += inv.commission;
 
@@ -87,7 +140,7 @@ const Invoices = (() => {
     });
 
     rows += `<tr class="summary-row">
-      <td colspan="4" style="font-size:0.8rem;">סה"כ (${filtered.length} חשבוניות)</td>
+      <td colspan="4" style="font-size:0.8rem;">סה"כ (${enriched.length} חשבוניות)</td>
       <td class="num">${UI.formatNumber(totalAmt)}</td>
       <td></td>
       <td class="num" style="color:#D4AF37;">${UI.formatNumber(totalComm)}</td>
@@ -233,13 +286,16 @@ const Invoices = (() => {
     if (prev) prev.textContent = amount > 0 ? UI.formatCurrency(+(amount*rate/100).toFixed(2)) : '—';
   }
 
-  // ── Delete Invoice ─────────────────────────────────────
-  function deleteInvoice(invoiceId) {
-    UI.confirm('האם למחוק חשבונית זו?', async () => {
-      await DB.invoices.delete(invoiceId);
-      UI.toast('חשבונית נמחקה', 'info');
-      UI.closeModal();
+  // ── Delete Invoice (with undo) ─────────────────────────
+  async function deleteInvoice(invoiceId) {
+    const rec = await DB.invoices.get(invoiceId);
+    if (!rec) return;
+    await DB.invoices.delete(invoiceId);
+    await render();
+    UI.toastUndo('חשבונית נמחקה', async () => {
+      await DB.invoices.restore(rec);   // re-insert with original id
       await render();
+      UI.toast('החשבונית שוחזרה', 'success');
     });
   }
 

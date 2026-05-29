@@ -4,6 +4,11 @@
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
 <title>LexLedger — ניהול שכר טרחה</title>
+<meta name="description" content="מערכת לניהול שכר טרחה, חשבוניות ותשלומים לעורכי דין"/>
+<meta name="theme-color" content="#0A0B0F"/>
+<link rel="manifest" href="manifest.json"/>
+<link rel="icon" type="image/svg+xml" href="icon.svg"/>
+<link rel="apple-touch-icon" href="icon.svg"/>
 <!-- Fonts -->
 <link href="https://fonts.googleapis.com" rel="preconnect"/>
 <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
@@ -156,7 +161,7 @@
   </style>
 </head>
 <body class="font-sans antialiased text-neutral-900 bg-exec-bg selection:bg-exec-sapphire/20 selection:text-exec-sapphire">
-<script>window._BUNDLE_VERSION = '2.2.0';</script>
+<script>window._BUNDLE_VERSION = '2.3.0';</script>
 <div class="flex h-screen overflow-hidden" id="app">
 <!-- SIDEBAR — Executive Carbon -->
 <aside class="w-64 flex-shrink-0 flex flex-col z-20" id="sidebar" style="background:#050505;border-left:none;">
@@ -470,6 +475,7 @@
       <p class="text-neutral-400 mt-0.5 text-sm">הזנה ידנית, קריאת PDF וצפייה בהיסטוריה</p>
     </div>
     <div class="flex flex-wrap items-center gap-2 bg-white p-2 rounded-2xl ring-1 ring-inset ring-gray-900/5 shadow-card">
+      <input type="search" id="invoice-search" placeholder="חיפוש לקוח/תיק/הערה…" aria-label="חיפוש חשבוניות" class="rounded-xl text-sm py-2 px-3 focus:outline-none w-44" style="border:1px solid #E5E7EB;background:#FAFAFA;font-family:'Assistant',sans-serif;" />
       <select class="rounded-xl text-sm font-medium py-2 px-3 focus:outline-none cursor-pointer" id="invoice-filter-year" style="border:1px solid #E5E7EB;background:#FAFAFA;font-family:'Inter',sans-serif;"></select>
       <select class="rounded-xl text-sm font-medium py-2 px-3 focus:outline-none cursor-pointer w-44" id="invoice-filter-client" style="border:1px solid #E5E7EB;background:#FAFAFA;">
         <option value="">כל הלקוחות</option>
@@ -494,16 +500,16 @@
       <h2 class="font-heading font-bold text-neutral-800" style="font-size:0.95rem;">היסטוריית חשבוניות</h2>
     </div>
     <div class="overflow-x-auto">
-      <table class="w-full text-sm text-right data-table" id="invoices-table">
+      <table class="w-full text-sm text-right data-table min-w-[820px]" id="invoices-table">
         <thead class="text-neutral-400" style="background:#FAFAFA;">
           <tr>
-            <th class="">לקוח</th>
-            <th class="">תיק</th>
-            <th class="">חודש</th>
-            <th class="">שנה</th>
-            <th class="num">סכום</th>
-            <th class="num">% עמלה</th>
-            <th class="num">עמלה</th>
+            <th class="sortable" data-sort="client">לקוח</th>
+            <th class="sortable" data-sort="caseNumber">תיק</th>
+            <th class="sortable" data-sort="month">חודש</th>
+            <th class="sortable" data-sort="year">שנה</th>
+            <th class="num sortable" data-sort="amount">סכום</th>
+            <th class="num sortable" data-sort="commissionRate">% עמלה</th>
+            <th class="num sortable" data-sort="commission">עמלה</th>
             <th class="">מקור</th>
             <th class=""></th>
           </tr>
@@ -522,7 +528,8 @@
       <h1 class="font-heading font-bold text-neutral-900 tracking-tight" style="font-size:1.6rem;letter-spacing:-0.03em;">תשלומים שהתקבלו</h1>
       <p class="text-neutral-400 mt-0.5 text-sm">רישום תשלומים בפועל</p>
     </div>
-    <div class="flex items-center gap-2 bg-white p-2 rounded-2xl ring-1 ring-inset ring-gray-900/5 shadow-card">
+    <div class="flex flex-wrap items-center gap-2 bg-white p-2 rounded-2xl ring-1 ring-inset ring-gray-900/5 shadow-card">
+      <input type="search" id="payment-search" placeholder="חיפוש הערה/סכום…" aria-label="חיפוש תשלומים" class="rounded-xl text-sm py-2 px-3 focus:outline-none w-44" style="border:1px solid #E5E7EB;background:#FAFAFA;font-family:'Assistant',sans-serif;" />
       <select class="rounded-xl text-sm font-medium py-2 px-3 focus:outline-none cursor-pointer" id="payments-filter-year" style="border:1px solid #E5E7EB;background:#FAFAFA;font-family:'Inter',sans-serif;"></select>
       <button class="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white rounded-xl hover:-translate-y-0.5 transition-all" id="btn-add-payment" style="background:#0A0B0F;box-shadow:0 1px 3px rgba(0,0,0,0.2);">
         <span class="material-symbols-outlined" style="font-size:16px;">add</span> תשלום חדש
@@ -531,13 +538,13 @@
   </header>
   <div class="bg-white rounded-2xl ring-1 ring-inset ring-gray-900/5 shadow-card overflow-hidden">
     <div class="overflow-x-auto">
-      <table class="w-full text-sm text-right data-table" id="payments-table">
+      <table class="w-full text-sm text-right data-table min-w-[560px]" id="payments-table">
         <thead class="text-neutral-400" style="background:#FAFAFA;">
           <tr>
-            <th class="">חודש</th>
-            <th class="">שנה</th>
-            <th class="num">סכום</th>
-            <th class="">הערות</th>
+            <th class="sortable" data-sort="month">חודש</th>
+            <th class="sortable" data-sort="year">שנה</th>
+            <th class="num sortable" data-sort="amount">סכום</th>
+            <th class="sortable" data-sort="notes">הערות</th>
             <th class=""></th>
           </tr>
         </thead>
@@ -753,6 +760,30 @@
         window.addEventListener('load', () => setTimeout(_checkAndUpdate, 2000));
       });
     }
+    // ── PWA install prompt ──────────────────────────────
+    let _deferredPrompt = null;
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      _deferredPrompt = e;
+      if (document.getElementById('btn-install-app')) return;
+      const btn = document.createElement('button');
+      btn.id = 'btn-install-app';
+      btn.innerHTML = '<span class="material-symbols-outlined" style="font-size:18px;">install_mobile</span> התקן אפליקציה';
+      btn.style.cssText = 'position:fixed;bottom:88px;left:16px;z-index:60;display:inline-flex;align-items:center;gap:6px;background:#0A0B0F;color:#fff;border:none;border-radius:12px;padding:10px 16px;font-family:Assistant,sans-serif;font-size:0.85rem;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,0.2);cursor:pointer;';
+      btn.addEventListener('click', async () => {
+        if (!_deferredPrompt) return;
+        _deferredPrompt.prompt();
+        await _deferredPrompt.userChoice;
+        _deferredPrompt = null;
+        btn.remove();
+      });
+      document.body.appendChild(btn);
+    });
+    window.addEventListener('appinstalled', () => {
+      document.getElementById('btn-install-app')?.remove();
+      _deferredPrompt = null;
+    });
+
     document.addEventListener('DOMContentLoaded', () => {
       const originalShowModal = window.UI ? window.UI.showModal : null;
       if (originalShowModal) {

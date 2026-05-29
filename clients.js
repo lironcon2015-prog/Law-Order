@@ -119,7 +119,7 @@ const Clients = (() => {
 
     const casesHTML = cases.length
       ? `<div style="overflow-x:auto;border-radius:12px;border:1px solid #E5E7EB;background:#fff;">
-          <table class="w-full text-right data-table" style="font-size:0.83rem;">
+          <table class="w-full text-right data-table" style="font-size:0.83rem;min-width:560px;">
             <thead style="background:#FAFAFA;">
               <tr>
                 <th style="padding:9px 14px;font-size:0.68rem;font-weight:700;color:#9CA3AF;text-transform:uppercase;letter-spacing:0.05em;text-align:right;border-bottom:1px solid #E5E7EB;">מספר תיק</th>
@@ -247,17 +247,26 @@ const Clients = (() => {
     UI.confirm(
       `האם למחוק את הלקוח <strong>${name}</strong> וכל התיקים המשויכים?<br><small style="color:var(--color-negative)">פעולה זו אינה הפיכה.</small>`,
       async () => {
-        // Delete all cases + their invoices
-        const cases = await DB.cases.getByClient(clientId);
+        // Capture full snapshot for undo, then cascade-delete
+        const client = await DB.clients.get(clientId);
+        const cases  = await DB.cases.getByClient(clientId);
+        const invsByCase = [];
         for (const c of cases) {
           const invs = await DB.invoices.getByCase(c.id);
+          invsByCase.push(...invs);
           for (const inv of invs) await DB.invoices.delete(inv.id);
           await DB.cases.delete(c.id);
         }
         await DB.clients.delete(clientId);
-        UI.toast('לקוח נמחק', 'info');
         UI.closeModal();
         await render();
+        UI.toastUndo('לקוח נמחק', async () => {
+          if (client) await DB.clients.restore(client);
+          for (const c of cases) await DB.cases.restore(c);
+          for (const inv of invsByCase) await DB.invoices.restore(inv);
+          await render();
+          UI.toast('הלקוח שוחזר', 'success');
+        });
       }
     );
   }
@@ -342,12 +351,18 @@ const Clients = (() => {
     UI.confirm(
       `האם למחוק את התיק <strong>${caseNumber}</strong>?<br><small style="color:var(--color-negative)">כל החשבוניות של תיק זה יימחקו.</small>`,
       async () => {
-        const invs = await DB.invoices.getByCase(caseId);
+        const caseRec = await DB.cases.get(caseId);
+        const invs    = await DB.invoices.getByCase(caseId);
         for (const inv of invs) await DB.invoices.delete(inv.id);
         await DB.cases.delete(caseId);
-        UI.toast('תיק נמחק', 'info');
         UI.closeModal();
         await render();
+        UI.toastUndo('תיק נמחק', async () => {
+          if (caseRec) await DB.cases.restore(caseRec);
+          for (const inv of invs) await DB.invoices.restore(inv);
+          await render();
+          UI.toast('התיק שוחזר', 'success');
+        });
       }
     );
   }
