@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>LexLedger · CRM פיתוח עסקי</title>
+  <meta name="description" content="מערכת CRM אישית לעו\"ד M&amp;A — ניהול לידים, מסלולי קריירה, הפניות ומעקב, offline-first." />
+
+  <meta name="theme-color" content="#131315" />
+  <meta name="color-scheme" content="dark" />
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+
+  <link rel="preload" href="./fonts/assistant-hebrew.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="./css/fonts.css" />
+  <link rel="stylesheet" href="./css/styles.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand__mark" data-icon="scale" aria-hidden="true"></span>
+        <span>
+          <span class="brand__title">LexLedger</span>
+          <span class="brand__sub">M&amp;A Business Development</span>
+        </span>
+      </div>
+
+      <div class="search">
+        <span class="search__icon" data-icon="search" aria-hidden="true"></span>
+        <input id="search-input" class="search__input" type="search"
+               placeholder="חיפוש שם, חברה, משקיע, תגית…" autocomplete="off" aria-label="חיפוש" />
+      </div>
+
+      <button id="btn-add-company" class="btn btn--ghost btn--sm" type="button" title="חברה חדשה">
+        <span data-icon="building" aria-hidden="true"></span>
+        <span class="hide-narrow">חברה</span>
+      </button>
+      <button id="btn-add" class="btn btn--primary btn--sm" type="button">
+        <span data-icon="plus" aria-hidden="true"></span>
+        <span class="hide-narrow">איש קשר</span>
+      </button>
+    </header>
+
+    <!-- Workspace -->
+    <div class="workspace">
+      <!-- Sidebar / list -->
+      <aside class="sidebar">
+        <div class="sidebar__top">
+          <div class="segmented" role="tablist" aria-label="תצוגת רשימה">
+            <button id="seg-all" class="segmented__btn" role="tab" aria-selected="true" type="button">
+              כל אנשי הקשר <span class="count">0</span>
+            </button>
+            <button id="seg-followup" class="segmented__btn" role="tab" aria-selected="false" type="button">
+              למעקב <span class="count">0</span>
+            </button>
+          </div>
+          <div id="chips" class="chips" role="group" aria-label="סינון לפי שלב במשפך"></div>
+        </div>
+        <div id="list" class="list" role="list" aria-label="אנשי קשר"></div>
+      </aside>
+
+      <!-- Main / detail -->
+      <main id="main" class="main" aria-live="polite"></main>
+    </div>
+  </div>
+
+  <!-- FAB (mobile) -->
+  <button id="fab" class="fab" type="button" aria-label="הוספת איש קשר">
+    <span data-icon="plus" aria-hidden="true"></span>
+  </button>
+
+  <!-- Modal -->
+  <dialog id="modal" class="modal" aria-modal="true"></dialog>
+
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>
