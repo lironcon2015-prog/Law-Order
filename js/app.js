@@ -12,6 +12,7 @@ const state = {
   searchTerm: '',
   view: 'all',          // 'all' | 'followup'
   statusFilter: 'all',  // 'all' | <status key>
+  detailTab: 'overview', // 'overview' | 'career' | 'referrals' | 'notes'
 };
 
 /* ---------- DOM refs ---------- */
@@ -80,12 +81,18 @@ function render() {
 function renderDetail() {
   const contact = state.contacts.find((c) => c.id === state.selectedContactId);
   if (contact) {
-    ui.renderDetail(refs.main, contact, state.companies);
+    ui.renderDetail(refs.main, contact, state.companies, state.detailTab);
     if (window.matchMedia('(max-width: 768px)').matches) document.body.classList.add('show-detail');
   } else {
     ui.renderDetailEmpty(refs.main);
     document.body.classList.remove('show-detail');
   }
+}
+
+// רינדור מחדש של תצוגת הפרטים בלבד (מעבר טאבים) — עם מעבר חלק
+function renderDetailOnly() {
+  if (document.startViewTransition) document.startViewTransition(() => renderDetail());
+  else renderDetail();
 }
 
 /* ---------- events ---------- */
@@ -133,8 +140,14 @@ async function onClick(e) {
   switch (action) {
     case 'open-contact':
       state.selectedContactId = id;
+      state.detailTab = 'overview';
       render();
       refs.main.scrollTop = 0;
+      break;
+    case 'detail-tab':
+      if (state.detailTab === target.dataset.tab) break;
+      state.detailTab = target.dataset.tab;
+      renderDetailOnly();
       break;
     case 'back':
       document.body.classList.remove('show-detail');

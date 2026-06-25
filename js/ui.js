@@ -111,7 +111,7 @@ export function renderList(container, contacts, companies, state) {
       'aria-current': state.selectedContactId === c.id ? 'true' : 'false',
     }, [
       el('div', { class: 'card__head' }, [
-        el('span', { class: 'avatar', 'aria-hidden': 'true', text: initials(c.fullName) }),
+        el('span', { class: 'avatar', 'aria-hidden': 'true', dataset: { tier: String(statusMeta(c.status).tier) }, text: initials(c.fullName) }),
         el('span', { class: 'card__id' }, [
           el('span', { class: 'card__name', text: c.fullName || 'ללא שם' }),
           el('span', { class: 'card__company', text: [c.role, c.companyName].filter(Boolean).join(' · ') || '—' }),
@@ -161,10 +161,19 @@ function dotColorForTier(tier) {
 /* ============================================================
    תצוגת פרטים (detail)
    ============================================================ */
-export function renderDetail(container, contact, companies) {
+const DETAIL_TABS = [
+  { key: 'overview',  label: 'סקירה',   ic: 'info' },
+  { key: 'career',    label: 'קריירה',  ic: 'briefcase' },
+  { key: 'referrals', label: 'הפניות',  ic: 'handshake' },
+  { key: 'notes',     label: 'הערות',   ic: 'notes' },
+];
+
+export function renderDetail(container, contact, companies, activeTab = 'overview') {
   container.replaceChildren();
   const [enriched] = withCompanyNames([contact], companies);
   const companyName = enriched.companyName;
+  const tier = statusMeta(contact.status).tier;
+  if (!DETAIL_TABS.some((t) => t.key === activeTab)) activeTab = 'overview';
 
   const detail = el('div', { class: 'detail' });
 
@@ -173,7 +182,7 @@ export function renderDetail(container, contact, companies) {
 
   // header
   detail.append(el('div', { class: 'detail__top' }, [
-    el('span', { class: 'detail__avatar', 'aria-hidden': 'true', text: initials(contact.fullName) }),
+    el('span', { class: 'detail__avatar', 'aria-hidden': 'true', dataset: { tier: String(tier) }, text: initials(contact.fullName) }),
     el('div', { class: 'detail__headings' }, [
       el('h1', { class: 'detail__name', text: contact.fullName || 'ללא שם' }),
       el('div', { class: 'detail__role', text: [contact.role, companyName].filter(Boolean).join(' · ') || '—' }),
@@ -188,22 +197,48 @@ export function renderDetail(container, contact, companies) {
     ]),
   ]));
 
-  // follow-up panel
-  detail.append(buildFollowUpPanel(contact));
+  // tab bar
+  const counts = {
+    career: contact.careerTimeline?.length || 0,
+    referrals: contact.referrals?.length || 0,
+    notes: contact.chronologicalNotes?.length || 0,
+  };
+  const tabs = el('div', { class: 'tabs', role: 'tablist' },
+    DETAIL_TABS.map((t) => el('button', {
+      class: 'tab', type: 'button', role: 'tab',
+      'aria-selected': t.key === activeTab ? 'true' : 'false',
+      dataset: { action: 'detail-tab', tab: t.key, id: contact.id },
+    }, [
+      icon(t.ic, 'ic'),
+      t.label,
+      counts[t.key] ? el('span', { class: 'tab-count', text: String(counts[t.key]) }) : null,
+    ])));
+  detail.append(el('div', { class: 'detail__tabs' }, tabs));
 
-  // contact info + tags
-  detail.append(buildInfoPanel(contact));
-
-  // career timeline
-  if (contact.careerTimeline?.length) detail.append(buildTimelinePanel(contact, companies));
-
-  // referrals / deals
-  if (contact.referrals?.length) detail.append(buildReferralsPanel(contact));
-
-  // notes
-  detail.append(buildNotesPanel(contact));
+  // active tab panels
+  const panels = el('div', { class: 'detail__panels', style: 'view-transition-name: detail' });
+  if (activeTab === 'overview') {
+    panels.append(buildFollowUpPanel(contact), buildInfoPanel(contact));
+  } else if (activeTab === 'career') {
+    panels.append(contact.careerTimeline?.length
+      ? buildTimelinePanel(contact, companies)
+      : tabEmpty('briefcase', 'אין עדיין מסלול קריירה. הוסיפו תפקידים דרך עריכת איש הקשר.'));
+  } else if (activeTab === 'referrals') {
+    panels.append(contact.referrals?.length
+      ? buildReferralsPanel(contact)
+      : tabEmpty('handshake', 'אין עדיין הפניות או עסקאות. הוסיפו דרך עריכת איש הקשר.'));
+  } else {
+    panels.append(buildNotesPanel(contact));
+  }
+  detail.append(panels);
 
   container.append(detail);
+}
+
+function tabEmpty(iconName, text) {
+  return el('div', { class: 'panel' }, [
+    el('div', { class: 'tab-empty' }, [icon(iconName), el('div', { text })]),
+  ]);
 }
 
 function buildFollowUpPanel(contact) {
