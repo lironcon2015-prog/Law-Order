@@ -64,6 +64,7 @@ export function normalizeContact(raw = {}) {
     currentCompanyId: raw.currentCompanyId || '',
     role: str(raw.role),
     origin: str(raw.origin),
+    photoUrl: str(raw.photoUrl),
     contactInfo: {
       phone: str(raw.contactInfo?.phone),
       email: str(raw.contactInfo?.email),
@@ -173,4 +174,28 @@ export function followUpRatio(contact) {
   const freq = contact.contactFrequencyDays || DEFAULT_FREQ_DAYS;
   if (days == null) return 1;
   return days / freq;
+}
+
+/** שווי עסקאות מצטבר לאיש קשר (סכום ההפניות) */
+export function dealValue(contact) {
+  return (contact.referrals || []).reduce((sum, r) => sum + (r.estimatedValue || 0), 0);
+}
+
+/** דחיפות מעקב לתג ה-Pipeline: 'overdue' | 'soon' | 'ok' */
+export function urgency(contact) {
+  if (contact.status === 'frozen') return 'ok';
+  const r = followUpRatio(contact);
+  if (r >= 1) return 'overdue';
+  if (r >= 0.7) return 'soon';
+  return 'ok';
+}
+
+/** קיבוץ אנשי קשר לפי שלב משפך → Map<statusKey, contact[]> */
+export function groupByStatus(contacts) {
+  const map = new Map(LEAD_STATUSES.map((s) => [s.key, []]));
+  for (const c of contacts) {
+    if (!map.has(c.status)) map.set(c.status, []);
+    map.get(c.status).push(c);
+  }
+  return map;
 }

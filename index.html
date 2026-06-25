@@ -32,6 +32,17 @@
         </span>
       </div>
 
+      <div class="viewtoggle" role="tablist" aria-label="מצב תצוגה">
+        <button id="view-pipeline" class="viewtoggle__btn" role="tab" aria-selected="true" type="button" title="Pipeline">
+          <span data-icon="kanban" aria-hidden="true"></span>
+          <span class="hide-narrow">Pipeline</span>
+        </button>
+        <button id="view-list" class="viewtoggle__btn" role="tab" aria-selected="false" type="button" title="רשימה">
+          <span data-icon="list" aria-hidden="true"></span>
+          <span class="hide-narrow">רשימה</span>
+        </button>
+      </div>
+
       <div class="search">
         <span class="search__icon" data-icon="search" aria-hidden="true"></span>
         <input id="search-input" class="search__input" type="search"
@@ -48,7 +59,10 @@
       </button>
     </header>
 
-    <!-- Workspace -->
+    <!-- Pipeline board (תצוגת ברירת מחדל) -->
+    <section id="board" class="board" aria-label="Pipeline"></section>
+
+    <!-- Workspace (תצוגת רשימה) -->
     <div class="workspace">
       <!-- Sidebar / list -->
       <aside class="sidebar">
@@ -75,6 +89,17 @@
   <button id="fab" class="fab" type="button" aria-label="הוספת איש קשר">
     <span data-icon="plus" aria-hidden="true"></span>
   </button>
+
+  <!-- Detail drawer (לתצוגת Pipeline) -->
+  <div id="drawer" class="drawer" hidden>
+    <div class="drawer__scrim" data-action="close-drawer" aria-hidden="true"></div>
+    <aside class="drawer__panel" role="dialog" aria-label="פרטי איש קשר">
+      <button class="drawer__close" type="button" data-action="close-drawer" aria-label="סגירה">
+        <span data-icon="close" aria-hidden="true"></span>
+      </button>
+      <div id="drawer-body" class="drawer__body"></div>
+    </aside>
+  </div>
 
   <!-- Modal -->
   <dialog id="modal" class="modal" aria-modal="true"></dialog>

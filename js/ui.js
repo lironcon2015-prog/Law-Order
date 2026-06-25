@@ -2,8 +2,9 @@
 // אייקונים הם SVG סטטי (ללא קלט משתמש) ולכן מותר innerHTML עבורם בלבד.
 
 import {
-  LEAD_STATUSES, statusMeta, withCompanyNames,
+  LEAD_STATUSES, statusMeta, withCompanyNames, companyNameMap,
   isOverdue, daysSinceContact, followUpRatio,
+  dealValue, urgency, groupByStatus,
 } from './store.js';
 
 /* ---------- אייקונים (Lucide-style, סטטי) ---------- */
@@ -27,6 +28,10 @@ export const ICONS = {
   check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>',
   users: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
   building: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="20" x="4" y="2" rx="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01"/><path d="M16 6h.01"/><path d="M12 6h.01"/><path d="M12 10h.01"/><path d="M12 14h.01"/><path d="M16 10h.01"/><path d="M16 14h.01"/><path d="M8 10h.01"/><path d="M8 14h.01"/></svg>',
+  kanban: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v16"/><path d="M5 3h4v10H5z"/><path d="M12 3h4v6h-4z"/><path d="M19 3h0v16"/><path d="M12 3v16"/><path d="M19 3h-7"/></svg>',
+  list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg>',
+  coins: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="m16.71 13.88.7.71-2.82 2.82"/></svg>',
+  camera: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>',
 };
 
 /* ---------- DOM helpers ---------- */
@@ -56,11 +61,48 @@ function initials(name) {
   return (parts[0][0] + (parts[1]?.[0] || '')).toUpperCase();
 }
 
+/** avatar עם תמונה (אם קיימת) או ראשי-תיבות, וטבעת לפי שלב הליד */
+function avatarEl(contact, cls = 'avatar') {
+  const tier = statusMeta(contact.status).tier;
+  const node = el('span', { class: cls, 'aria-hidden': 'true', dataset: { tier: String(tier) } });
+  if (contact.photoUrl) {
+    node.classList.add('has-photo');
+    node.style.backgroundImage = `url("${contact.photoUrl}")`;
+  } else {
+    node.textContent = initials(contact.fullName);
+  }
+  return node;
+}
+
+/** "לפני X" יחסי, לתצוגת אינטראקציה אחרונה */
+function timeAgo(iso) {
+  if (!iso) return 'אין קשר';
+  const d = new Date(iso);
+  if (isNaN(d)) return '—';
+  const days = Math.floor((Date.now() - d.getTime()) / 86400000);
+  if (days <= 0) return 'היום';
+  if (days === 1) return 'אתמול';
+  if (days < 7) return `לפני ${days} ימים`;
+  if (days < 30) return `לפני ${Math.floor(days / 7)} שבועות`;
+  if (days < 365) return `לפני ${Math.floor(days / 30)} חודשים`;
+  return `לפני ${Math.floor(days / 365)} שנים`;
+}
+
 /* ---------- formatting ---------- */
 const ILS = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'ILS', maximumFractionDigits: 0 });
 export function formatCurrency(v) {
   if (v == null || v === '') return '—';
   return ILS.format(v).replace('ILS', '₪').trim();
+}
+export function formatCompactCurrency(v) {
+  if (!v) return '';
+  const abs = Math.abs(v);
+  let s;
+  if (abs >= 1e9) s = (v / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
+  else if (abs >= 1e6) s = (v / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+  else if (abs >= 1e3) s = Math.round(v / 1e3) + 'K';
+  else s = String(v);
+  return '₪' + s;
 }
 export function formatDate(iso) {
   if (!iso) return '—';
@@ -111,7 +153,7 @@ export function renderList(container, contacts, companies, state) {
       'aria-current': state.selectedContactId === c.id ? 'true' : 'false',
     }, [
       el('div', { class: 'card__head' }, [
-        el('span', { class: 'avatar', 'aria-hidden': 'true', dataset: { tier: String(statusMeta(c.status).tier) }, text: initials(c.fullName) }),
+        avatarEl(c, 'avatar'),
         el('span', { class: 'card__id' }, [
           el('span', { class: 'card__name', text: c.fullName || 'ללא שם' }),
           el('span', { class: 'card__company', text: [c.role, c.companyName].filter(Boolean).join(' · ') || '—' }),
@@ -159,6 +201,77 @@ function dotColorForTier(tier) {
 }
 
 /* ============================================================
+   Pipeline (לוח קנבן לפי שלבי משפך)
+   ============================================================ */
+export function renderPipeline(container, contacts, companies, state) {
+  container.replaceChildren();
+  const names = companyNameMap(companies);
+  const groups = groupByStatus(contacts);
+
+  const lanes = el('div', { class: 'board__lanes' });
+  for (const s of LEAD_STATUSES) {
+    const items = groups.get(s.key) || [];
+    const total = items.reduce((sum, c) => sum + dealValue(c), 0);
+
+    const cards = el('div', { class: 'lane__cards', dataset: { drop: s.key } });
+    if (items.length) {
+      items.forEach((c) => cards.append(pipelineCard(c, names, state)));
+    } else {
+      cards.append(el('div', { class: 'lane__empty', text: 'גררו לכאן כרטיס' }));
+    }
+
+    lanes.append(el('div', { class: 'lane', dataset: { stage: s.key, tier: String(s.tier) } }, [
+      el('div', { class: 'lane__head' }, [
+        el('span', { class: 'lane__dot' }),
+        el('div', { class: 'lane__titles' }, [
+          el('span', { class: 'lane__name', text: s.label }),
+          el('span', { class: 'lane__sub' }, [
+            el('span', { class: 'lane__count num', text: String(items.length) }),
+            total ? el('span', { class: 'lane__value num', text: formatCompactCurrency(total) }) : null,
+          ]),
+        ]),
+      ]),
+      cards,
+    ]));
+  }
+  container.append(lanes);
+}
+
+function pipelineCard(c, names, state) {
+  const company = names.get(c.currentCompanyId) || '';
+  const u = urgency(c);
+  const val = dealValue(c);
+  const ci = c.contactInfo || {};
+  const channel = ci.linkedin ? 'linkedin' : ci.email ? 'mail' : ci.phone ? 'phone' : 'clock';
+  const tags = (c.tags || []).slice(0, 2);
+
+  return el('button', {
+    class: 'pcard', type: 'button', draggable: 'true',
+    dataset: { id: c.id, action: 'open-contact', tier: String(statusMeta(c.status).tier) },
+    'aria-current': state.selectedContactId === c.id ? 'true' : 'false',
+  }, [
+    el('div', { class: 'pcard__head' }, [
+      avatarEl(c, 'avatar avatar--sm'),
+      el('div', { class: 'pcard__id' }, [
+        el('span', { class: 'pcard__name', text: c.fullName || 'ללא שם' }),
+        el('span', { class: 'pcard__role', text: [c.role, company].filter(Boolean).join(' · ') || '—' }),
+      ]),
+      u !== 'ok' ? el('span', { class: `prio prio--${u}` }, [
+        el('span', { class: 'dot' }), u === 'overdue' ? 'פיגור' : 'למעקב',
+      ]) : null,
+    ]),
+    (val || tags.length) ? el('div', { class: 'pcard__metarow' }, [
+      val ? el('span', { class: 'pcard__value num' }, [icon('coins', 'pcard__coins'), formatCompactCurrency(val)]) : null,
+      ...tags.map((t) => el('span', { class: 'tag', text: t })),
+    ]) : null,
+    el('div', { class: 'pcard__foot' }, [
+      icon(channel, 'pcard__chan'),
+      el('span', { class: 'pcard__time', text: timeAgo(c.lastContactDate) }),
+    ]),
+  ]);
+}
+
+/* ============================================================
    תצוגת פרטים (detail)
    ============================================================ */
 const DETAIL_TABS = [
@@ -172,7 +285,6 @@ export function renderDetail(container, contact, companies, activeTab = 'overvie
   container.replaceChildren();
   const [enriched] = withCompanyNames([contact], companies);
   const companyName = enriched.companyName;
-  const tier = statusMeta(contact.status).tier;
   if (!DETAIL_TABS.some((t) => t.key === activeTab)) activeTab = 'overview';
 
   const detail = el('div', { class: 'detail' });
@@ -182,7 +294,7 @@ export function renderDetail(container, contact, companies, activeTab = 'overvie
 
   // header
   detail.append(el('div', { class: 'detail__top' }, [
-    el('span', { class: 'detail__avatar', 'aria-hidden': 'true', dataset: { tier: String(tier) }, text: initials(contact.fullName) }),
+    avatarEl(contact, 'detail__avatar'),
     el('div', { class: 'detail__headings' }, [
       el('h1', { class: 'detail__name', text: contact.fullName || 'ללא שם' }),
       el('div', { class: 'detail__role', text: [contact.role, companyName].filter(Boolean).join(' · ') || '—' }),
@@ -402,6 +514,7 @@ export function renderContactForm(contact, companies) {
 
   // basics
   form.append(field('שם מלא', input({ name: 'fullName', value: c.fullName, required: true, placeholder: 'שם פרטי ומשפחה' })));
+  form.append(photoField(c.photoUrl, c.fullName));
   form.append(el('div', { class: 'field--row' }, [
     field('תפקיד', input({ name: 'role', value: c.role, placeholder: 'למשל: סמנכ"ל כספים' })),
     field('שלב במשפך', statusSelect(c.status)),
@@ -500,6 +613,7 @@ export function readContactForm(form) {
       status: get('status'),
       currentCompanyId: get('currentCompanyId'),
       origin: get('origin'),
+      photoUrl: get('photoUrl'),
       contactInfo: { phone: get('phone'), email: get('email'), linkedin: get('linkedin') },
       tags: get('tags').split(',').map((t) => t.trim()).filter(Boolean),
       lastContactDate: get('lastContactDate'),
@@ -525,6 +639,59 @@ export function readCompanyForm(form) {
 /* ---------- small form builders ---------- */
 function field(label, control) {
   return el('div', { class: 'field' }, [el('label', { text: label }), control]);
+}
+
+/** שדה תמונת פרופיל — העלאת קובץ (נשמר מקומית) או הדבקת URL, עם תצוגה מקדימה */
+function photoField(photoUrl, fullName) {
+  const preview = el('span', { class: 'photo-preview', 'aria-hidden': 'true' });
+  const setPreview = (url) => {
+    if (url) { preview.classList.add('has-photo'); preview.style.backgroundImage = `url("${url}")`; preview.textContent = ''; }
+    else { preview.classList.remove('has-photo'); preview.style.backgroundImage = ''; preview.textContent = initials(fullName); }
+  };
+  setPreview(photoUrl);
+
+  const urlInput = input({ name: 'photoUrl', value: photoUrl, dir: 'ltr', placeholder: 'הדביקו קישור לתמונה — או העלו קובץ' });
+  const fileInput = el('input', { type: 'file', accept: 'image/*', class: 'photo-file' });
+  const uploadBtn = el('button', { class: 'btn btn--ghost btn--sm', type: 'button' }, [icon('camera'), 'העלאת תמונה']);
+
+  uploadBtn.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', async () => {
+    const f = fileInput.files[0];
+    if (!f) return;
+    try { const data = await downscaleImage(f, 256); urlInput.value = data; setPreview(data); }
+    catch { toast('טעינת התמונה נכשלה', 'alert'); }
+  });
+  urlInput.addEventListener('input', () => setPreview(urlInput.value.trim()));
+
+  return el('div', { class: 'field' }, [
+    el('label', { text: 'תמונת פרופיל' }),
+    el('div', { class: 'photo-row' }, [
+      preview,
+      el('div', { class: 'photo-controls' }, [urlInput, uploadBtn, fileInput]),
+    ]),
+  ]);
+}
+
+/** מקטין תמונה לריבוע ~max px ומחזיר dataURL (JPEG) — לאחסון מקומי קומפקטי */
+function downscaleImage(file, max) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = reject;
+      img.onload = () => {
+        const scale = Math.min(1, max / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+        const cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        cv.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(cv.toDataURL('image/jpeg', 0.85));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
 }
 function input(opts = {}) {
   const props = { class: opts.class || 'input', name: opts.name };

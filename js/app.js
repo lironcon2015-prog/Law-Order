@@ -13,6 +13,7 @@ const state = {
   view: 'all',          // 'all' | 'followup'
   statusFilter: 'all',  // 'all' | <status key>
   detailTab: 'overview', // 'overview' | 'career' | 'referrals' | 'notes'
+  mainView: 'pipeline', // 'pipeline' | 'list'
 };
 
 /* ---------- DOM refs ---------- */
@@ -42,6 +43,11 @@ function cacheRefs() {
   refs.modal = document.getElementById('modal');
   refs.segAll = document.getElementById('seg-all');
   refs.segFollow = document.getElementById('seg-followup');
+  refs.board = document.getElementById('board');
+  refs.drawer = document.getElementById('drawer');
+  refs.drawerBody = document.getElementById('drawer-body');
+  refs.viewPipeline = document.getElementById('view-pipeline');
+  refs.viewList = document.getElementById('view-list');
 }
 
 function paintIcons() {
@@ -64,29 +70,79 @@ function computeList() {
 
 /* ---------- render ---------- */
 function render() {
-  const list = computeList();
+  // מצב תצוגה (Pipeline / רשימה)
+  refs.viewPipeline.setAttribute('aria-selected', state.mainView === 'pipeline' ? 'true' : 'false');
+  refs.viewList.setAttribute('aria-selected', state.mainView === 'list' ? 'true' : 'false');
+  document.body.classList.toggle('view-pipeline', state.mainView === 'pipeline');
+  document.body.classList.toggle('view-list', state.mainView === 'list');
 
-  // segmented counts
+  if (state.mainView === 'pipeline') {
+    const items = search.filterContacts(state.contacts, state.companies, state.searchTerm);
+    ui.renderPipeline(refs.board, items, state.companies, state);
+    if (state.selectedContactId && !refs.drawer.hidden) renderDetail();
+    return;
+  }
+
+  // — תצוגת רשימה —
+  const list = computeList();
   const overdueCount = state.contacts.filter(store.isOverdue).length;
   refs.segAll.querySelector('.count').textContent = String(state.contacts.length);
   refs.segFollow.querySelector('.count').textContent = String(overdueCount);
   refs.segAll.setAttribute('aria-selected', state.view === 'all' ? 'true' : 'false');
   refs.segFollow.setAttribute('aria-selected', state.view === 'followup' ? 'true' : 'false');
-
   ui.renderChips(refs.chips, state.contacts, state.statusFilter);
   ui.renderList(refs.list, list, state.companies, state);
   renderDetail();
 }
 
+// יעד הרינדור של תצוגת הפרטים: drawer ב-Pipeline, main ברשימה
+function detailTarget() {
+  return state.mainView === 'pipeline' ? refs.drawerBody : refs.main;
+}
+
 function renderDetail() {
   const contact = state.contacts.find((c) => c.id === state.selectedContactId);
   if (contact) {
-    ui.renderDetail(refs.main, contact, state.companies, state.detailTab);
-    if (window.matchMedia('(max-width: 768px)').matches) document.body.classList.add('show-detail');
-  } else {
+    ui.renderDetail(detailTarget(), contact, state.companies, state.detailTab);
+    if (state.mainView === 'list' && window.matchMedia('(max-width: 768px)').matches) {
+      document.body.classList.add('show-detail');
+    }
+  } else if (state.mainView === 'list') {
     ui.renderDetailEmpty(refs.main);
     document.body.classList.remove('show-detail');
   }
+}
+
+/* ---------- view + drawer ---------- */
+function setMainView(view) {
+  if (state.mainView === view) return;
+  state.mainView = view;
+  if (view === 'list') hideDrawer();
+  render();
+}
+function openDrawer() {
+  refs.drawer.hidden = false;
+  requestAnimationFrame(() => document.body.classList.add('drawer-open'));
+}
+function hideDrawer() {
+  document.body.classList.remove('drawer-open');
+  refs.drawer.hidden = true;
+  refs.drawerBody.replaceChildren();
+}
+function closeDrawer() {
+  document.body.classList.remove('drawer-open');
+  state.selectedContactId = null;
+  render(); // עדכון הדגשת הכרטיס בלוח
+  setTimeout(() => { if (!state.selectedContactId) { refs.drawer.hidden = true; refs.drawerBody.replaceChildren(); } }, 300);
+}
+
+async function changeStatus(id, status) {
+  const c = state.contacts.find((x) => x.id === id);
+  if (!c || c.status === status) { render(); return; }
+  await store.saveContact({ ...c, status });
+  await loadData();
+  render();
+  ui.toast('שלב הליד עודכן');
 }
 
 // רינדור מחדש של תצוגת הפרטים בלבד (מעבר טאבים) — עם מעבר חלק
@@ -105,9 +161,16 @@ function wireEvents() {
     t = setTimeout(() => { state.searchTerm = v; render(); }, 140);
   });
 
-  // segmented view toggle
+  // segmented view toggle (list mode)
   refs.segAll.addEventListener('click', () => setView('all'));
   refs.segFollow.addEventListener('click', () => setView('followup'));
+
+  // main view toggle (Pipeline / List)
+  refs.viewPipeline.addEventListener('click', () => setMainView('pipeline'));
+  refs.viewList.addEventListener('click', () => setMainView('list'));
+
+  // pipeline drag-and-drop → שינוי שלב
+  wireBoardDnD();
 
   // global click delegation
   document.addEventListener('click', onClick);
@@ -132,6 +195,43 @@ function setView(view) {
   render();
 }
 
+/* ---------- pipeline drag & drop ---------- */
+function wireBoardDnD() {
+  let dragId = null;
+  const clearTargets = () => document.querySelectorAll('.lane.drop-target').forEach((l) => l.classList.remove('drop-target'));
+
+  refs.board.addEventListener('dragstart', (e) => {
+    const card = e.target.closest('.pcard');
+    if (!card) return;
+    dragId = card.dataset.id;
+    card.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    try { e.dataTransfer.setData('text/plain', dragId); } catch { /* noop */ }
+  });
+  refs.board.addEventListener('dragend', (e) => {
+    e.target.closest('.pcard')?.classList.remove('dragging');
+    clearTargets();
+    dragId = null;
+  });
+  refs.board.addEventListener('dragover', (e) => {
+    const zone = e.target.closest('.lane__cards');
+    if (!zone || !dragId) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const lane = zone.closest('.lane');
+    clearTargets();
+    lane.classList.add('drop-target');
+  });
+  refs.board.addEventListener('drop', (e) => {
+    const zone = e.target.closest('.lane__cards');
+    if (!zone || !dragId) return;
+    e.preventDefault();
+    const id = dragId;
+    clearTargets();
+    changeStatus(id, zone.dataset.drop);
+  });
+}
+
 async function onClick(e) {
   const target = e.target.closest('[data-action]');
   if (!target) return;
@@ -141,15 +241,20 @@ async function onClick(e) {
     case 'open-contact':
       state.selectedContactId = id;
       state.detailTab = 'overview';
+      if (state.mainView === 'pipeline') openDrawer();
       render();
-      refs.main.scrollTop = 0;
+      detailTarget().scrollTop = 0;
       break;
     case 'detail-tab':
       if (state.detailTab === target.dataset.tab) break;
       state.detailTab = target.dataset.tab;
       renderDetailOnly();
       break;
+    case 'close-drawer':
+      closeDrawer();
+      break;
     case 'back':
+      if (state.mainView === 'pipeline') { closeDrawer(); break; }
       document.body.classList.remove('show-detail');
       state.selectedContactId = null;
       render();
@@ -219,7 +324,10 @@ async function handleDeleteContact(id) {
   if (!contact) return;
   if (!confirm(`למחוק את "${contact.fullName}"? פעולה זו אינה הפיכה.`)) return;
   await store.deleteContact(id);
-  if (state.selectedContactId === id) state.selectedContactId = null;
+  if (state.selectedContactId === id) {
+    state.selectedContactId = null;
+    if (state.mainView === 'pipeline') hideDrawer();
+  }
   await loadData();
   render();
   ui.toast('איש הקשר נמחק', 'trash');
