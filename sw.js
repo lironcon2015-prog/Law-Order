@@ -1,7 +1,8 @@
-// sw.js — Service Worker: precache של app-shell + נכסים, אסטרטגיית cache-first.
-// offline-first מלא: לאחר הביקור הראשון האפליקציה והפונטים נטענים גם ללא רשת.
+// sw.js — Service Worker: precache של app-shell + נכסים.
+// אסטרטגיה: app-shell (HTML/JS/CSS/JSON) = network-first → פרסומים נכנסים לתוקף מיד.
+// פונטים/אייקונים = cache-first. offline עדיין עובד מלא (נפילה ל-cache).
 
-const CACHE = 'lexledger-v1';
+const CACHE = 'lexledger-v3';
 
 const ASSETS = [
   './',
@@ -46,21 +47,26 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return; // נכסים חיצוניים — לדפדפן
 
-  // ניווט (HTML): network-first עם נפילה ל-cache (כדי לקבל עדכונים כשיש רשת)
-  if (request.mode === 'navigate') {
+  // app-shell (HTML/JS/CSS/JSON): network-first → תמיד מקבל את הגרסה העדכנית כשיש רשת,
+  // נופל ל-cache במצב offline.
+  const isShell = request.mode === 'navigate' || /\.(?:js|css|json)$/i.test(url.pathname);
+  if (isShell) {
     event.respondWith(
       fetch(request)
         .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put('./index.html', copy));
+          if (res && res.status === 200) {
+            const copy = res.clone();
+            const key = request.mode === 'navigate' ? './index.html' : request;
+            caches.open(CACHE).then((c) => c.put(key, copy));
+          }
           return res;
         })
-        .catch(() => caches.match('./index.html'))
+        .catch(() => caches.match(request).then((c) => c || caches.match('./index.html')))
     );
     return;
   }
 
-  // נכסים סטטיים: cache-first עם רענון רקע
+  // נכסים יציבים (פונטים/אייקונים): cache-first עם רענון רקע
   event.respondWith(
     caches.match(request).then((cached) => {
       const network = fetch(request)
