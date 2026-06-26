@@ -5,6 +5,7 @@ import {
   LEAD_STATUSES, statusMeta, withCompanyNames, companyNameMap,
   isOverdue, daysSinceContact, followUpRatio,
   dealValue, urgency, groupByStatus,
+  CONTACT_TYPES, contactTypeLabel,
 } from './store.js';
 
 /* ---------- אייקונים (Lucide-style, סטטי) ---------- */
@@ -304,6 +305,7 @@ export function renderDetail(container, contact, companies, activeTab = 'overvie
       el('div', { class: 'detail__role', text: [contact.role, companyName].filter(Boolean).join(' · ') || '—' }),
       el('div', { class: 'card__meta', style: 'margin-top:10px' }, [
         statusPill(contact.status),
+        contact.contactType ? el('span', { class: 'type-chip' }, [contactTypeLabel(contact.contactType)]) : null,
         isOverdue(contact) ? el('span', { class: 'badge-overdue' }, [icon('alert'), 'פיגור בקשר']) : null,
       ]),
     ]),
@@ -426,7 +428,19 @@ function linkedinHref(v) {
 
 function buildTimelinePanel(contact, companies) {
   const names = new Map(companies.map((c) => [c.id, c.name]));
-  const items = [...contact.careerTimeline].sort((a, b) => (b.startYear || 0) - (a.startYear || 0));
+  // מיון כרונולוגי עולה: מהמוקדם למאוחר (לפי שנת התחלה, נפילה לשנת סיום).
+  // תפקידים ללא שנה כלל — בסוף, בסדר שהוזנו.
+  const yearOf = (e) => Number(e.startYear) || Number(e.endYear) || null;
+  const items = contact.careerTimeline
+    .map((e, i) => ({ e, i }))
+    .sort((a, b) => {
+      const ay = yearOf(a.e), by = yearOf(b.e);
+      if (ay == null && by == null) return a.i - b.i;
+      if (ay == null) return 1;
+      if (by == null) return -1;
+      return ay - by || a.i - b.i;
+    })
+    .map((x) => x.e);
   const ul = el('ul', { class: 'timeline' });
   items.forEach((e) => {
     const name = e.companyName || names.get(e.companyId) || '—';
@@ -450,7 +464,7 @@ function buildReferralsPanel(contact) {
     el('thead', {}, el('tr', {}, [
       el('th', { text: 'עסקה / הפניה' }),
       el('th', { text: 'סטטוס' }),
-      el('th', { text: 'שווי מוערך', style: 'text-align:start' }),
+      el('th', { text: 'שווי שנתי', style: 'text-align:start' }),
     ])),
   ]);
   const tbody = el('tbody');
@@ -520,12 +534,13 @@ export function renderContactForm(contact, companies) {
   form.append(field('שם מלא', input({ name: 'fullName', value: c.fullName, required: true, placeholder: 'שם פרטי ומשפחה' })));
   form.append(photoField(c.photoUrl, c.fullName));
   form.append(el('div', { class: 'field--row' }, [
-    field('תפקיד', input({ name: 'role', value: c.role, placeholder: 'למשל: סמנכ"ל כספים' })),
+    field('סוג איש קשר', contactTypeSelect(c.contactType)),
     field('שלב במשפך', statusSelect(c.status)),
   ]));
+  form.append(field('תפקיד', input({ name: 'role', value: c.role, placeholder: 'למשל: סמנכ"ל כספים / שותף / מתווך' })));
 
-  // company select + new
-  form.append(field('חברה נוכחית', companySelect(companies, c.currentCompanyId)));
+  // company select + new (אופציונלי — לא חובה לאיש קשר שאינו עובד בחברה)
+  form.append(field('חברה (אופציונלי)', companySelect(companies, c.currentCompanyId)));
   form.append(field('או הוספת חברה חדשה', input({ name: 'newCompanyName', placeholder: 'שם חברה חדשה (תיווצר אוטומטית)' })));
 
   // contact info
@@ -580,6 +595,44 @@ export function renderContactForm(contact, companies) {
   return form;
 }
 
+/** מנהל חברות: רשימת חברות קיימות (עם מחיקה) + טופס הוספה. מחזיר <form>. */
+export function renderCompanyManager(companies, contacts) {
+  const form = el('form', { class: 'company-form', id: 'company-form', novalidate: 'true' });
+  form.append(sectionLabel('החברות שלי'));
+  form.append(companyList(companies, contacts));
+  form.append(sectionLabel('הוספת חברה חדשה'));
+  form.append(field('שם החברה', input({ name: 'name', placeholder: 'שם החברה' })));
+  form.append(el('div', { class: 'field--row' }, [
+    field('סקטור', input({ name: 'sector', placeholder: 'היי-טק / נדל"ן / פיננסים' })),
+    field('אתר', input({ name: 'website', dir: 'ltr', placeholder: 'example.com' })),
+  ]));
+  form.append(field('משקיעים (מופרדים בפסיק)', input({ name: 'investors', placeholder: 'קרן א, קרן ב' })));
+  return form;
+}
+
+/** רשימת חברות עם כפתור מחיקה לכל אחת (מציג גם כמה אנשי קשר משויכים). */
+export function companyList(companies, contacts) {
+  const wrap = el('div', { class: 'company-list' });
+  if (!companies.length) {
+    wrap.append(el('div', { class: 'muted', style: 'padding:8px 2px', text: 'אין עדיין חברות.' }));
+    return wrap;
+  }
+  companies.forEach((c) => {
+    const count = (contacts || []).filter((x) => x.currentCompanyId === c.id).length;
+    wrap.append(el('div', { class: 'company-row' }, [
+      el('div', { class: 'company-row__info' }, [
+        el('span', { class: 'company-row__name', text: c.name || '—' }),
+        el('span', { class: 'company-row__meta', text: [c.sector, count ? `${count} אנשי קשר` : ''].filter(Boolean).join(' · ') || '—' }),
+      ]),
+      el('button', {
+        class: 'subrow__del', type: 'button', title: 'מחיקת חברה', 'aria-label': 'מחיקת חברה',
+        dataset: { action: 'delete-company', id: c.id }, html: ICONS.trash,
+      }),
+    ]));
+  });
+  return wrap;
+}
+
 /** טופס חברה. מחזיר <form>. */
 export function renderCompanyForm(company) {
   const c = company || {};
@@ -614,6 +667,7 @@ export function readContactForm(form) {
       id: get('id') || undefined,
       fullName: get('fullName'),
       role: get('role'),
+      contactType: get('contactType'),
       status: get('status'),
       currentCompanyId: get('currentCompanyId'),
       origin: get('origin'),
@@ -716,6 +770,15 @@ function statusSelect(value) {
   });
   return sel;
 }
+function contactTypeSelect(value) {
+  const sel = el('select', { class: 'select', name: 'contactType' });
+  CONTACT_TYPES.forEach((t) => {
+    const o = el('option', { value: t.key, text: t.label });
+    if (t.key === (value || '')) o.selected = true;
+    sel.append(o);
+  });
+  return sel;
+}
 function companySelect(companies, value) {
   const sel = el('select', { class: 'select', name: 'currentCompanyId' });
   sel.append(el('option', { value: '', text: '— ללא / בחרו חברה —' }));
@@ -743,7 +806,7 @@ function referralRow(r = {}) {
   return el('div', { class: 'subrow subrow--referral' }, [
     input({ name: 'r_name', value: r.dealName, placeholder: 'שם עסקה / הפניה' }),
     input({ name: 'r_status', value: r.status, placeholder: 'סטטוס' }),
-    input({ name: 'r_value', value: r.estimatedValue, type: 'number', placeholder: 'שווי ₪', class: 'input num' }),
+    input({ name: 'r_value', value: r.estimatedValue, type: 'number', placeholder: 'שווי שנתי ₪', class: 'input num' }),
     el('button', { class: 'subrow__del', type: 'button', 'aria-label': 'הסר', title: 'הסר', html: ICONS.trash }),
   ]);
 }

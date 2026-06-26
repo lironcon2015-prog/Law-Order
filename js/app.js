@@ -190,7 +190,7 @@ function wireEvents() {
   // FAB + header add
   document.getElementById('fab').addEventListener('click', () => openContactForm());
   document.getElementById('btn-add').addEventListener('click', () => openContactForm());
-  document.getElementById('btn-add-company').addEventListener('click', () => openCompanyForm());
+  document.getElementById('btn-add-company').addEventListener('click', () => openCompanyManager());
 
   // modal close on backdrop click
   refs.modal.addEventListener('click', (e) => { if (e.target === refs.modal) refs.modal.close(); });
@@ -324,6 +324,9 @@ async function onClick(e) {
     case 'delete-contact':
       await handleDeleteContact(id);
       break;
+    case 'delete-company':
+      await handleDeleteCompany(id);
+      break;
     case 'add-note':
       await handleAddNote(id, target);
       break;
@@ -356,18 +359,35 @@ function openContactForm(contact) {
   });
 }
 
-/* ---------- company form ---------- */
-function openCompanyForm(company) {
-  const form = ui.renderCompanyForm(company);
-  openModal(company ? 'עריכת חברה' : 'חברה חדשה', form, async () => {
+/* ---------- companies manager (רשימה + הוספה + מחיקה) ---------- */
+function openCompanyManager() {
+  const form = ui.renderCompanyManager(state.companies, state.contacts);
+  openModal('חברות', form, async () => {
     const data = ui.readCompanyForm(form);
-    if (!data.name) { ui.toast('יש להזין שם חברה', 'alert'); return false; }
-    await store.saveCompany(company ? { ...company, ...data } : data);
+    if (!data.name) return true; // אין הוספה — סגירה (מחיקות מתבצעות מיד מהרשימה)
+    await store.saveCompany(data);
     await loadData();
     render();
-    ui.toast(company ? 'החברה עודכנה' : 'החברה נוספה');
+    ui.toast('החברה נוספה');
     return true;
   });
+}
+
+async function handleDeleteCompany(id) {
+  const c = state.companies.find((x) => x.id === id);
+  if (!c) return;
+  const count = state.contacts.filter((x) => x.currentCompanyId === id).length;
+  const msg = count
+    ? `למחוק את "${c.name}"? ${count} אנשי קשר יישארו ללא שיוך חברה.`
+    : `למחוק את "${c.name}"?`;
+  if (!confirm(msg)) return;
+  await store.deleteCompany(id);
+  await loadData();
+  // רענון רשימת החברות בתוך המודאל הפתוח
+  const listWrap = refs.modal.querySelector('.company-list');
+  if (listWrap) listWrap.replaceWith(ui.companyList(state.companies, state.contacts));
+  render();
+  ui.toast('החברה נמחקה', 'trash');
 }
 
 /* ---------- delete ---------- */

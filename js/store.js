@@ -18,6 +18,19 @@ export const LEAD_STATUSES = [
   { key: 'frozen',   label: 'קפוא / לא רלוונטי', tier: -1 },
 ];
 
+/* סוגי איש קשר — לסיווג מי שאינו בהכרח עובד בחברת יעד (מתווך/בנקאי וכו') */
+export const CONTACT_TYPES = [
+  { key: '', label: 'בעל תפקיד בחברה' },
+  { key: 'intermediary', label: 'מתווך / מקשר' },
+  { key: 'banker', label: 'בנקאי השקעות' },
+  { key: 'investor', label: 'משקיע' },
+  { key: 'lawyer', label: 'עו"ד / יועץ' },
+  { key: 'other', label: 'אחר' },
+];
+export function contactTypeLabel(key) {
+  return (CONTACT_TYPES.find((t) => t.key === key) || CONTACT_TYPES[0]).label;
+}
+
 const STATUS_BY_KEY = new Map(LEAD_STATUSES.map((s) => [s.key, s]));
 
 export function statusMeta(key) {
@@ -72,6 +85,7 @@ export function normalizeContact(raw = {}) {
     status,
     currentCompanyId: raw.currentCompanyId || '',
     role: str(raw.role),
+    contactType: str(raw.contactType), // '' = בעל תפקיד בחברה · אחרת: מתווך/בנקאי/משקיע…
     origin: str(raw.origin),
     photoUrl: str(raw.photoUrl),
     contactInfo: {
