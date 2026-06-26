@@ -9,7 +9,7 @@ import * as db from './db.js';
    הגדרות — מזינים כאן את ה-OAuth Client ID לאחר יצירתו
    (Google Cloud Console → Web application, origin https://lironcon.com)
    ============================================================ */
-export const CLIENT_ID = ''; // ← הדביקו כאן את ה-Client ID (…apps.googleusercontent.com)
+export const CLIENT_ID = '674619661713-rcurrqdj0cngb9sv6k3r2phd8r499pfd.apps.googleusercontent.com';
 const SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const FILE_NAME = 'laworder-crm-backup.json';
 
