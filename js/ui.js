@@ -32,6 +32,10 @@ export const ICONS = {
   list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg>',
   coins: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="m16.71 13.88.7.71-2.82 2.82"/></svg>',
   camera: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>',
+  cloud: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 0 0 0-9h-1.8A7 7 0 1 0 4 16.3"/><path d="M12 12v9"/><path d="m8 17 4 4 4-4"/></svg>',
+  cloudUp: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 13v8"/><path d="m8 17 4-4 4 4"/><path d="M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25"/></svg>',
+  cloudDown: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 13v8"/><path d="m8 17 4 4 4-4"/><path d="M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25"/></svg>',
+  logout: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><path d="M21 12H9"/></svg>',
 };
 
 /* ---------- DOM helpers ---------- */
@@ -742,6 +746,29 @@ function referralRow(r = {}) {
     input({ name: 'r_value', value: r.estimatedValue, type: 'number', placeholder: 'שווי ₪', class: 'input num' }),
     el('button', { class: 'subrow__del', type: 'button', 'aria-label': 'הסר', title: 'הסר', html: ICONS.trash }),
   ]);
+}
+
+/* ---------- sync menu (popover) ---------- */
+export function syncMenu({ signedIn, lastSync }) {
+  const items = [];
+  if (signedIn) {
+    items.push(menuItem('cloudUp', 'גבה עכשיו', 'backup'));
+    items.push(menuItem('cloudDown', 'שחזר מהדרייב', 'restore'));
+    items.push(el('div', { class: 'sync-menu__sep' }));
+    items.push(menuItem('logout', 'התנתק', 'signout', true));
+  } else {
+    items.push(menuItem('cloud', 'התחבר ל-Google Drive', 'signin'));
+  }
+  const foot = lastSync
+    ? el('div', { class: 'sync-menu__foot', text: 'סונכרן: ' + new Date(lastSync).toLocaleString('he-IL') })
+    : el('div', { class: 'sync-menu__foot muted', text: 'גיבוי וסנכרון בין מכשירים' });
+  return el('div', { class: 'sync-menu', role: 'menu' }, [...items, foot]);
+}
+function menuItem(ic, label, action, danger) {
+  return el('button', {
+    class: 'sync-menu__item' + (danger ? ' sync-menu__item--danger' : ''),
+    type: 'button', role: 'menuitem', dataset: { syncAction: action },
+  }, [icon(ic), label]);
 }
 
 /* ---------- toast ---------- */

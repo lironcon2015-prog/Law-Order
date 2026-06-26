@@ -89,6 +89,15 @@ export async function remove(storeName, id) {
   return withStore(storeName, 'readwrite', (store) => promisifyRequest(store.delete(id)));
 }
 
+/** מחליף את כל תוכן ה-store ברשומות נתונות (clear + put-all) בטרנזקציה אחת.
+ *  משמש לשחזור/משיכה מ-Drive (last-writer-wins על כל הקובץ). */
+export async function replaceAll(storeName, records) {
+  return withStore(storeName, 'readwrite', (store) => {
+    store.clear();
+    for (const r of (records || [])) store.put(r);
+  });
+}
+
 /** שאילתה לפי אינדקס וערך מדויק */
 export async function queryIndex(storeName, indexName, value) {
   return withStore(storeName, 'readonly', (store) =>

@@ -3,6 +3,7 @@
 import * as store from './store.js';
 import * as search from './search.js';
 import * as ui from './ui.js';
+import * as sync from './sync.js';
 
 /* ---------- State יחיד (single source of truth) ---------- */
 const state = {
@@ -33,6 +34,13 @@ async function init() {
     ui.toast('שגיאה בטעינת הנתונים', 'alert');
   }
   render();
+
+  // סנכרון Drive: התראת מוטציה → push מבוזבז; auto-pull בטעינה
+  store.setMutationListener(sync.notifyMutation);
+  sync.init({
+    onChange: async () => { await loadData(); render(); },
+    toast: ui.toast,
+  });
 }
 
 function cacheRefs() {
@@ -48,6 +56,7 @@ function cacheRefs() {
   refs.drawerBody = document.getElementById('drawer-body');
   refs.viewPipeline = document.getElementById('view-pipeline');
   refs.viewList = document.getElementById('view-list');
+  refs.syncBtn = document.getElementById('sync-btn');
 }
 
 function paintIcons() {
@@ -172,6 +181,9 @@ function wireEvents() {
   // pipeline drag-and-drop → שינוי שלב
   wireBoardDnD();
 
+  // sync menu
+  refs.syncBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleSyncMenu(); });
+
   // global click delegation
   document.addEventListener('click', onClick);
 
@@ -193,6 +205,46 @@ function wireEvents() {
 function setView(view) {
   state.view = view;
   render();
+}
+
+/* ---------- sync menu (popover) ---------- */
+function toggleSyncMenu() {
+  const open = document.querySelector('.sync-menu');
+  if (open) { closeSyncMenu(); return; }
+
+  const menu = ui.syncMenu({
+    signedIn: sync.isSignedIn(),
+    lastSync: localStorage.getItem('lo_lastSyncAt'),
+  });
+  document.body.append(menu);
+
+  const r = refs.syncBtn.getBoundingClientRect();
+  menu.style.position = 'fixed';
+  menu.style.top = (r.bottom + 8) + 'px';
+  menu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 268)) + 'px';
+
+  menu.addEventListener('click', (e) => {
+    const item = e.target.closest('[data-sync-action]');
+    if (!item) return;
+    closeSyncMenu();
+    const a = item.dataset.syncAction;
+    if (a === 'signin') sync.signIn();
+    else if (a === 'backup') sync.backup();
+    else if (a === 'restore') sync.restore();
+    else if (a === 'signout') sync.signOut();
+  });
+
+  setTimeout(() => document.addEventListener('click', onDocCloseSyncMenu), 0);
+}
+function onDocCloseSyncMenu(e) {
+  const menu = document.querySelector('.sync-menu');
+  if (!menu) { document.removeEventListener('click', onDocCloseSyncMenu); return; }
+  if (menu.contains(e.target) || refs.syncBtn.contains(e.target)) return;
+  closeSyncMenu();
+}
+function closeSyncMenu() {
+  document.querySelector('.sync-menu')?.remove();
+  document.removeEventListener('click', onDocCloseSyncMenu);
 }
 
 /* ---------- pipeline drag & drop ---------- */

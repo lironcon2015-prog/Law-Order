@@ -24,6 +24,15 @@ export function statusMeta(key) {
   return STATUS_BY_KEY.get(key) || LEAD_STATUSES[0];
 }
 
+/* ----------------------------------------------------------------
+   התראת מוטציה — מאפשרת לשכבת הסנכרון לדעת מתי נכתבו נתונים
+   (כדי לתזמן push). שחזור/משיכה כותבים ישירות דרך db.replaceAll ולכן
+   לא מפעילים את ההתראה — אין לולאת סנכרון.
+---------------------------------------------------------------- */
+let _onMutate = null;
+export function setMutationListener(fn) { _onMutate = fn; }
+function notifyMutate() { try { _onMutate && _onMutate(); } catch (e) { void e; } }
+
 const DEFAULT_FREQ_DAYS = 90;
 
 /* ----------------------------------------------------------------
@@ -103,9 +112,10 @@ export async function getCompany(id) { return db.get('companies', id); }
 export async function saveCompany(raw) {
   const company = normalizeCompany(raw);
   await db.put('companies', company);
+  notifyMutate();
   return company;
 }
-export async function deleteCompany(id) { return db.remove('companies', id); }
+export async function deleteCompany(id) { const r = await db.remove('companies', id); notifyMutate(); return r; }
 
 /* ----------------------------------------------------------------
    Contacts CRUD
@@ -118,9 +128,10 @@ export async function getContact(id) { return db.get('contacts', id); }
 export async function saveContact(raw) {
   const contact = normalizeContact(raw);
   await db.put('contacts', contact);
+  notifyMutate();
   return contact;
 }
-export async function deleteContact(id) { return db.remove('contacts', id); }
+export async function deleteContact(id) { const r = await db.remove('contacts', id); notifyMutate(); return r; }
 
 /** מוסיף הערה כרונולוגית ושומר (מעדכן גם lastContactDate) */
 export async function addNote(contactId, noteText, touchContact = true) {
@@ -130,6 +141,7 @@ export async function addNote(contactId, noteText, touchContact = true) {
   norm.chronologicalNotes.push({ timestamp: new Date().toISOString(), noteText: str(noteText) });
   if (touchContact) norm.lastContactDate = new Date().toISOString().slice(0, 10);
   await db.put('contacts', norm);
+  notifyMutate();
   return norm;
 }
 

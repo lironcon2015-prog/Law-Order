@@ -14,6 +14,9 @@
   <link rel="preload" href="./fonts/assistant-hebrew.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="stylesheet" href="./css/fonts.css" />
   <link rel="stylesheet" href="./css/styles.css" />
+
+  <!-- Google Identity Services — לסנכרון Drive (client-side OAuth) -->
+  <script src="https://accounts.google.com/gsi/client" async></script>
 </head>
 <body>
   <!-- שכבות עומק/טקסטורה — אובסידיאן -->
@@ -48,6 +51,10 @@
         <input id="search-input" class="search__input" type="search"
                placeholder="חיפוש שם, חברה, משקיע, תגית…" autocomplete="off" aria-label="חיפוש" />
       </div>
+
+      <button id="sync-btn" class="sync-status" type="button" data-state="off" title="סנכרון" aria-label="סנכרון Drive">
+        <span data-icon="cloud" aria-hidden="true"></span>
+      </button>
 
       <button id="btn-add-company" class="btn btn--ghost btn--sm" type="button" title="חברה חדשה">
         <span data-icon="building" aria-hidden="true"></span>
