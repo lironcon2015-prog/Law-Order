@@ -461,11 +461,19 @@ function openModal(title, bodyEl, onSubmit) {
 
 /* ---------- service worker ---------- */
 function registerSW() {
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js').catch((err) => console.warn('SW registration failed', err));
-    });
-  }
+  if (!('serviceWorker' in navigator)) return;
+  // כשגרסת SW חדשה משתלטת — רענון אוטומטי פעם אחת (לא בהתקנה ראשונה),
+  // כדי שפרסומים ייכנסו לתוקף בלי hard-refresh ידני.
+  const hadController = !!navigator.serviceWorker.controller;
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (refreshing || !hadController) return;
+    refreshing = true;
+    window.location.reload();
+  });
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch((err) => console.warn('SW registration failed', err));
+  });
 }
 
 /* ---------- expose seed for console/dev ---------- */
