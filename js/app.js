@@ -14,7 +14,8 @@ const state = {
   view: 'all',          // 'all' | 'followup'
   statusFilter: 'all',  // 'all' | <status key>
   detailTab: 'overview', // 'overview' | 'career' | 'referrals' | 'notes'
-  mainView: 'pipeline', // 'pipeline' | 'list'
+  mainView: 'today',    // 'today' | 'pipeline' | 'network' | 'list'
+  networkTarget: '',    // חברת יעד נבחרת בתצוגת רשת
 };
 
 /* ---------- DOM refs ---------- */
@@ -52,9 +53,13 @@ function cacheRefs() {
   refs.segAll = document.getElementById('seg-all');
   refs.segFollow = document.getElementById('seg-followup');
   refs.board = document.getElementById('board');
+  refs.todayView = document.getElementById('today-view');
+  refs.networkView = document.getElementById('network-view');
   refs.drawer = document.getElementById('drawer');
   refs.drawerBody = document.getElementById('drawer-body');
+  refs.viewToday = document.getElementById('view-today');
   refs.viewPipeline = document.getElementById('view-pipeline');
+  refs.viewNetwork = document.getElementById('view-network');
   refs.viewList = document.getElementById('view-list');
   refs.syncBtn = document.getElementById('sync-btn');
 }
@@ -79,15 +84,19 @@ function computeList() {
 
 /* ---------- render ---------- */
 function render() {
-  // מצב תצוגה (Pipeline / רשימה)
-  refs.viewPipeline.setAttribute('aria-selected', state.mainView === 'pipeline' ? 'true' : 'false');
-  refs.viewList.setAttribute('aria-selected', state.mainView === 'list' ? 'true' : 'false');
-  document.body.classList.toggle('view-pipeline', state.mainView === 'pipeline');
-  document.body.classList.toggle('view-list', state.mainView === 'list');
+  // מצב תצוגה
+  const views = ['today', 'pipeline', 'network', 'list'];
+  const map = { today: refs.viewToday, pipeline: refs.viewPipeline, network: refs.viewNetwork, list: refs.viewList };
+  views.forEach((v) => {
+    map[v].setAttribute('aria-selected', state.mainView === v ? 'true' : 'false');
+    document.body.classList.toggle('view-' + v, state.mainView === v);
+  });
 
-  if (state.mainView === 'pipeline') {
+  if (state.mainView !== 'list') {
     const items = search.filterContacts(state.contacts, state.companies, state.searchTerm);
-    ui.renderPipeline(refs.board, items, state.companies, state);
+    if (state.mainView === 'today') ui.renderToday(refs.todayView, items, state.companies, state);
+    else if (state.mainView === 'network') ui.renderNetwork(refs.networkView, items, state.companies, state);
+    else ui.renderPipeline(refs.board, items, state.companies, state);
     if (state.selectedContactId && !refs.drawer.hidden) renderDetail();
     return;
   }
@@ -106,7 +115,7 @@ function render() {
 
 // יעד הרינדור של תצוגת הפרטים: drawer ב-Pipeline, main ברשימה
 function detailTarget() {
-  return state.mainView === 'pipeline' ? refs.drawerBody : refs.main;
+  return state.mainView === 'list' ? refs.main : refs.drawerBody;
 }
 
 function renderDetail() {
@@ -174,9 +183,19 @@ function wireEvents() {
   refs.segAll.addEventListener('click', () => setView('all'));
   refs.segFollow.addEventListener('click', () => setView('followup'));
 
-  // main view toggle (Pipeline / List)
+  // main view toggle (היום / צינור / רשת / רשימה)
+  refs.viewToday.addEventListener('click', () => setMainView('today'));
   refs.viewPipeline.addEventListener('click', () => setMainView('pipeline'));
+  refs.viewNetwork.addEventListener('click', () => setMainView('network'));
   refs.viewList.addEventListener('click', () => setMainView('list'));
+
+  // בחירת חברת יעד בתצוגת רשת
+  document.addEventListener('change', (e) => {
+    const t = e.target.closest('[data-action="network-target"]');
+    if (!t) return;
+    state.networkTarget = t.value;
+    render();
+  });
 
   // pipeline drag-and-drop → שינוי שלב
   wireBoardDnD();
@@ -293,7 +312,7 @@ async function onClick(e) {
     case 'open-contact':
       state.selectedContactId = id;
       state.detailTab = 'overview';
-      if (state.mainView === 'pipeline') openDrawer();
+      if (state.mainView !== 'list') openDrawer();
       render();
       detailTarget().scrollTop = 0;
       break;
@@ -306,7 +325,7 @@ async function onClick(e) {
       closeDrawer();
       break;
     case 'back':
-      if (state.mainView === 'pipeline') { closeDrawer(); break; }
+      if (state.mainView !== 'list') { closeDrawer(); break; }
       document.body.classList.remove('show-detail');
       state.selectedContactId = null;
       render();
@@ -326,6 +345,12 @@ async function onClick(e) {
       break;
     case 'delete-company':
       await handleDeleteCompany(id);
+      break;
+    case 'log-contact':
+      await store.markContacted(id);
+      await loadData();
+      render();
+      ui.toast('תועד קשר היום');
       break;
     case 'add-note':
       await handleAddNote(id, target);

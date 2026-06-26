@@ -36,9 +36,17 @@
       </div>
 
       <div class="viewtoggle" role="tablist" aria-label="מצב תצוגה">
-        <button id="view-pipeline" class="viewtoggle__btn" role="tab" aria-selected="true" type="button" title="Pipeline">
+        <button id="view-today" class="viewtoggle__btn" role="tab" aria-selected="true" type="button" title="היום">
+          <span data-icon="zap" aria-hidden="true"></span>
+          <span class="hide-narrow">היום</span>
+        </button>
+        <button id="view-pipeline" class="viewtoggle__btn" role="tab" aria-selected="false" type="button" title="Pipeline">
           <span data-icon="kanban" aria-hidden="true"></span>
-          <span class="hide-narrow">Pipeline</span>
+          <span class="hide-narrow">צינור</span>
+        </button>
+        <button id="view-network" class="viewtoggle__btn" role="tab" aria-selected="false" type="button" title="רשת">
+          <span data-icon="network" aria-hidden="true"></span>
+          <span class="hide-narrow">רשת</span>
         </button>
         <button id="view-list" class="viewtoggle__btn" role="tab" aria-selected="false" type="button" title="רשימה">
           <span data-icon="list" aria-hidden="true"></span>
@@ -66,7 +74,13 @@
       </button>
     </header>
 
-    <!-- Pipeline board (תצוגת ברירת מחדל) -->
+    <!-- "היום" — מנוע פעולה (תצוגת ברירת מחדל) -->
+    <section id="today-view" class="screen-wrap" aria-label="היום"></section>
+
+    <!-- רשת — warm-intro + ROI -->
+    <section id="network-view" class="screen-wrap" aria-label="רשת"></section>
+
+    <!-- Pipeline board -->
     <section id="board" class="board" aria-label="Pipeline"></section>
 
     <!-- Workspace (תצוגת רשימה) -->

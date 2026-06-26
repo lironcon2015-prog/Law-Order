@@ -159,6 +159,17 @@ export async function addNote(contactId, noteText, touchContact = true) {
   return norm;
 }
 
+/** מסמן "תועד קשר היום" — מאפס את שעון המעקב בלי הערה. */
+export async function markContacted(id, dateISO) {
+  const contact = await getContact(id);
+  if (!contact) return null;
+  const norm = normalizeContact(contact);
+  norm.lastContactDate = dateISO || new Date().toISOString().slice(0, 10);
+  await db.put('contacts', norm);
+  notifyMutate();
+  return norm;
+}
+
 /* ----------------------------------------------------------------
    Helpers — תצוגה ומשפך
 ---------------------------------------------------------------- */
@@ -224,4 +235,86 @@ export function groupByStatus(contacts) {
     map.get(c.status).push(c);
   }
   return map;
+}
+
+/* ----------------------------------------------------------------
+   מנוע "היום" — מי דורש פעולה עכשיו
+---------------------------------------------------------------- */
+const WHALE_VALUE = 1_000_000; // סף "לווייתן" לשווי הפניות מצטבר
+
+/** מחלק אנשי קשר לקבוצות פעולה. frozen מוחרג. בכל קבוצה: שווי יורד → דחיפות יורדת. */
+export function actionBuckets(contacts) {
+  const active = contacts.filter((c) => c.status !== 'frozen');
+  const byPriority = (a, b) => (dealValue(b) - dealValue(a)) || (followUpRatio(b) - followUpRatio(a));
+  const overdue = [], soon = [], noContact = [];
+  for (const c of active) {
+    if (!c.lastContactDate) noContact.push(c);
+    else if (isOverdue(c)) overdue.push(c);
+    else if (urgency(c) === 'soon') soon.push(c);
+  }
+  overdue.sort(byPriority); soon.sort(byPriority); noContact.sort(byPriority);
+  return { overdue, soon, noContact };
+}
+
+/** סיבת הדגל לתצוגה ("למה זה כאן"). */
+export function actionReason(contact) {
+  const big = dealValue(contact) >= WHALE_VALUE;
+  if (!contact.lastContactDate) return big ? 'לווייתן · ללא תיעוד קשר' : 'ללא תיעוד קשר';
+  const days = daysSinceContact(contact);
+  if (isOverdue(contact)) return (big ? 'לווייתן · ' : '') + `פיגור ${days} ימים`;
+  return 'מתקרב לסף המעקב';
+}
+
+/* ----------------------------------------------------------------
+   אינטליגנציית רשת — warm-intro + ROI
+---------------------------------------------------------------- */
+function companyKey(name) { return (name || '').trim().toLowerCase(); }
+
+/** מאגד מי-מקושר-לאיזו-חברה מתוך מסלולי הקריירה + החברה הנוכחית.
+ *  מחזיר מערך ממוין: [{ name, links:[{contact, relation:'current'|'past'}] }] */
+export function companyConnections(contacts, companies) {
+  const names = companyNameMap(companies);
+  const map = new Map(); // key → { name, links: Map<contactId,{contact,relation}> }
+  const add = (rawName, contact, relation) => {
+    const name = (rawName || '').trim();
+    if (!name) return;
+    const k = companyKey(name);
+    if (!map.has(k)) map.set(k, { name, links: new Map() });
+    const entry = map.get(k);
+    const prev = entry.links.get(contact.id);
+    // 'current' גובר על 'past'
+    if (!prev || (relation === 'current' && prev.relation !== 'current')) {
+      entry.links.set(contact.id, { contact, relation });
+    }
+  };
+  for (const c of contacts) {
+    const curName = names.get(c.currentCompanyId);
+    if (curName) add(curName, c, 'current');
+    for (const e of (c.careerTimeline || [])) {
+      const nm = e.companyName || names.get(e.companyId);
+      const relation = !e.endYear ? 'current' : 'past';
+      add(nm, c, relation);
+    }
+  }
+  return [...map.values()]
+    .map((v) => ({ name: v.name, links: [...v.links.values()] }))
+    .sort((a, b) => b.links.length - a.links.length || a.name.localeCompare(b.name, 'he'));
+}
+
+/** דירוג אנשי קשר מקושרים לחברת-יעד: current → tier גבוה → קשר עדכני. */
+export function rankIntroLinks(links) {
+  return [...links].sort((a, b) => {
+    if ((a.relation === 'current') !== (b.relation === 'current')) return a.relation === 'current' ? -1 : 1;
+    const t = statusMeta(b.contact.status).tier - statusMeta(a.contact.status).tier;
+    if (t) return t;
+    return (daysSinceContact(a.contact) ?? 1e9) - (daysSinceContact(b.contact) ?? 1e9);
+  });
+}
+
+/** קשרים לפי שווי הפניות מצטבר (ROI). value>0 בלבד, יורד. */
+export function topRelationshipsByValue(contacts) {
+  return contacts
+    .map((c) => ({ contact: c, value: dealValue(c), count: (c.referrals || []).length }))
+    .filter((x) => x.value > 0)
+    .sort((a, b) => b.value - a.value);
 }

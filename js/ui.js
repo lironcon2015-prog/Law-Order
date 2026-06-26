@@ -6,6 +6,8 @@ import {
   isOverdue, daysSinceContact, followUpRatio,
   dealValue, urgency, groupByStatus,
   CONTACT_TYPES, contactTypeLabel,
+  actionBuckets, actionReason,
+  companyConnections, rankIntroLinks, topRelationshipsByValue,
 } from './store.js';
 
 /* ---------- אייקונים (Lucide-style, סטטי) ---------- */
@@ -37,6 +39,9 @@ export const ICONS = {
   cloudUp: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 13v8"/><path d="m8 17 4-4 4 4"/><path d="M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25"/></svg>',
   cloudDown: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 13v8"/><path d="m8 17 4 4 4-4"/><path d="M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25"/></svg>',
   logout: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><path d="M21 12H9"/></svg>',
+  zap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></svg>',
+  network: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/></svg>',
+  trending: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>',
 };
 
 /* ---------- DOM helpers ---------- */
@@ -203,6 +208,147 @@ export function renderChips(container, contacts, activeStatus) {
 function dotColorForTier(tier) {
   const map = { '-1': '#6b7280', '0': '#6b7280', '1': '#c9c5be', '2': '#d9be7a', '3': '#e6c468', '4': '#f2ca50', '5': '#f2ca50' };
   return `background:${map[String(tier)] || '#6b7280'}`;
+}
+
+/* ============================================================
+   "היום" — מנוע פעולה
+   ============================================================ */
+export function renderToday(container, contacts, companies, state) {
+  container.replaceChildren();
+  const names = companyNameMap(companies);
+  const { overdue, soon, noContact } = actionBuckets(contacts);
+  const openValue = [...overdue, ...soon, ...noContact].reduce((s, c) => s + dealValue(c), 0);
+
+  const wrap = el('div', { class: 'screen today' });
+  wrap.append(el('div', { class: 'today__summary' }, [
+    statCard(String(overdue.length), 'בפיגור', 'over'),
+    statCard(String(soon.length), 'השבוע', 'warn'),
+    statCard(formatCompactCurrency(openValue) || '₪0', 'שווי פתוח', 'gold'),
+  ]));
+
+  if (!(overdue.length + soon.length + noContact.length)) {
+    wrap.append(el('div', { class: 'panel' }, [
+      el('div', { class: 'tab-empty' }, [icon('check'), el('div', { text: 'הכל מעודכן — אין פעולות פתוחות היום 👌' })]),
+    ]));
+  } else {
+    if (overdue.length) wrap.append(actionGroup('בפיגור — תפוס עכשיו', 'alert', overdue, names, 'over'));
+    if (noContact.length) wrap.append(actionGroup('ללא תיעוד קשר', 'info', noContact, names, 'new'));
+    if (soon.length) wrap.append(actionGroup('מתקרב לסף — השבוע', 'clock', soon, names, 'warn'));
+  }
+  container.append(wrap);
+}
+
+function statCard(num, label, tone) {
+  return el('div', { class: `stat-card stat-card--${tone}` }, [
+    el('span', { class: 'stat-card__num num', text: num }),
+    el('span', { class: 'stat-card__label', text: label }),
+  ]);
+}
+function actionGroup(title, ic, items, names, tone) {
+  return el('div', { class: 'panel' }, [
+    el('div', { class: 'panel__title' }, [icon(ic), el('h3', { text: title }), el('span', { class: 'pill-count', text: String(items.length) })]),
+    el('div', { class: 'action-list' }, items.map((c) => actionRow(c, names, tone))),
+  ]);
+}
+function actionRow(c, names, tone) {
+  const company = names.get(c.currentCompanyId) || '';
+  const val = dealValue(c);
+  const ci = c.contactInfo || {};
+  const chan = (cond, ic, href, label, ext) => cond
+    ? el('a', { class: 'chan-btn', href, title: label, 'aria-label': label, target: ext ? '_blank' : null, rel: ext ? 'noopener noreferrer' : null }, [icon(ic)])
+    : null;
+  return el('div', { class: `action-row tone-${tone}` }, [
+    el('button', { class: 'action-row__main', type: 'button', dataset: { action: 'open-contact', id: c.id } }, [
+      avatarEl(c, 'avatar avatar--sm'),
+      el('div', { class: 'action-row__id' }, [
+        el('span', { class: 'action-row__name', text: c.fullName || 'ללא שם' }),
+        el('span', { class: 'action-row__sub', text: [c.role, company].filter(Boolean).join(' · ') || '—' }),
+        el('span', { class: 'why-chip', text: actionReason(c) }),
+      ]),
+      val ? el('span', { class: 'action-row__val num', text: formatCompactCurrency(val) }) : null,
+    ]),
+    el('div', { class: 'action-row__tools' }, [
+      el('div', { class: 'action-row__chans' }, [
+        chan(ci.phone, 'phone', `tel:${ci.phone}`, 'חיוג'),
+        chan(ci.email, 'mail', `mailto:${ci.email}`, 'מייל'),
+        chan(ci.linkedin, 'linkedin', linkedinHref(ci.linkedin), 'לינקדאין', true),
+      ]),
+      el('button', { class: 'btn btn--primary btn--sm', type: 'button', dataset: { action: 'log-contact', id: c.id } }, [icon('check'), 'תועד קשר']),
+    ]),
+  ]);
+}
+
+/* ============================================================
+   רשת — warm-intro + ROI
+   ============================================================ */
+export function renderNetwork(container, contacts, companies, state) {
+  container.replaceChildren();
+  const conns = companyConnections(contacts, companies);
+  const names = companyNameMap(companies);
+  const wrap = el('div', { class: 'screen network' });
+
+  const introPanel = el('div', { class: 'panel' }, [
+    el('div', { class: 'panel__title' }, [icon('network'), el('h3', { text: 'מסלול חם — מי ברשת שלך מקשר ליעד' })]),
+  ]);
+  if (!conns.length) {
+    introPanel.append(el('div', { class: 'tab-empty' }, [icon('network'),
+      el('div', { text: 'אין עדיין נתוני קריירה לבניית רשת. הוסיפו תפקידים/חברות לאנשי הקשר.' })]));
+  } else {
+    const sel = el('select', { class: 'select', dataset: { action: 'network-target' } });
+    sel.append(el('option', { value: '', text: '— בחרו חברת יעד —' }));
+    conns.forEach((co) => {
+      const o = el('option', { value: co.name, text: `${co.name} (${co.links.length})` });
+      if (co.name === state.networkTarget) o.selected = true;
+      sel.append(o);
+    });
+    introPanel.append(el('div', { class: 'field' }, [sel]));
+    introPanel.append(el('div', { class: 'intro-results' }, introResults(conns, state.networkTarget)));
+  }
+  wrap.append(introPanel);
+
+  const roi = topRelationshipsByValue(contacts);
+  const roiPanel = el('div', { class: 'panel' }, [
+    el('div', { class: 'panel__title' }, [icon('trending'), el('h3', { text: 'קשרים בעלי הערך הגבוה' }), el('span', { class: 'pill-count', text: String(roi.length) })]),
+  ]);
+  if (!roi.length) {
+    roiPanel.append(el('div', { class: 'tab-empty' }, [icon('handshake'), el('div', { text: 'אין עדיין הפניות עם שווי שנתי.' })]));
+  } else {
+    roiPanel.append(el('div', { class: 'roi-list' }, roi.map((r, i) => roiRow(r, i, names))));
+  }
+  wrap.append(roiPanel);
+  container.append(wrap);
+}
+
+function introResults(conns, target) {
+  if (!target) return [el('div', { class: 'muted', style: 'padding:10px 2px', text: 'בחרו חברת יעד כדי לראות מי ברשת שלך מקושר אליה.' })];
+  const co = conns.find((c) => c.name === target);
+  if (!co) return [el('div', { class: 'muted', text: '—' })];
+  return rankIntroLinks(co.links).map((lnk) => el('button', {
+    class: 'intro-row', type: 'button', dataset: { action: 'open-contact', id: lnk.contact.id },
+  }, [
+    avatarEl(lnk.contact, 'avatar avatar--sm'),
+    el('div', { class: 'intro-row__id' }, [
+      el('span', { class: 'intro-row__name', text: lnk.contact.fullName || 'ללא שם' }),
+      el('span', { class: 'intro-row__sub', text: lnk.contact.role || '—' }),
+    ]),
+    el('span', { class: `rel-chip rel-${lnk.relation}`, text: lnk.relation === 'current' ? 'עובד שם כעת' : 'עבר שם' }),
+    statusPill(lnk.contact.status),
+  ]));
+}
+function roiRow(r, i, names) {
+  const company = names.get(r.contact.currentCompanyId) || '';
+  return el('button', { class: 'roi-row', type: 'button', dataset: { action: 'open-contact', id: r.contact.id } }, [
+    el('span', { class: 'roi-row__rank num', text: String(i + 1) }),
+    avatarEl(r.contact, 'avatar avatar--sm'),
+    el('div', { class: 'roi-row__id' }, [
+      el('span', { class: 'roi-row__name', text: r.contact.fullName || 'ללא שם' }),
+      el('span', { class: 'roi-row__sub', text: [r.contact.role, company].filter(Boolean).join(' · ') || '—' }),
+    ]),
+    el('div', { class: 'roi-row__val' }, [
+      el('span', { class: 'roi-row__amount num', text: formatCompactCurrency(r.value) }),
+      el('span', { class: 'roi-row__count', text: `${r.count} הפניות` }),
+    ]),
+  ]);
 }
 
 /* ============================================================
