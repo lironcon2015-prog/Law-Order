@@ -1255,6 +1255,53 @@ body.view-pipeline .board { display: block; }
 .roi-row__amount { font-weight: 800; color: var(--text-strong); font-size: 0.92rem; }
 .roi-row__count { font-size: 0.7rem; color: var(--text-faint); }
 
+/* ---------- "active" toggle + markers ---------- */
+.switch { display: flex; align-items: center; gap: 11px; cursor: pointer; margin-bottom: 16px; user-select: none; }
+.switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.switch__track {
+  position: relative; flex: 0 0 auto;
+  width: 44px; height: 25px; border-radius: 9999px;
+  background: var(--surface-3); border: 1px solid var(--line);
+  transition: background var(--t-fast), border-color var(--t-fast);
+}
+.switch__thumb {
+  position: absolute; top: 2px; inset-inline-start: 2px;
+  width: 19px; height: 19px; border-radius: 50%;
+  background: var(--text-secondary); box-shadow: 0 1px 2px rgba(0,0,0,0.5);
+  transition: transform var(--t-fast) var(--ease-out), background var(--t-fast);
+}
+.switch input:checked + .switch__track { background: var(--gold-grad); border-color: var(--gold-line); }
+.switch input:checked + .switch__track .switch__thumb { transform: translateX(-19px); background: var(--on-gold); }
+.switch input:focus-visible + .switch__track { box-shadow: 0 0 0 3px rgba(242,202,80,0.2); }
+.switch__label { font-size: 0.86rem; color: var(--text-secondary); font-weight: 600; }
+
+.count-toggle { display: flex; align-items: center; gap: 5px; font-size: 0.74rem; color: var(--text-muted); white-space: nowrap; cursor: pointer; user-select: none; }
+.count-toggle input { width: 15px; height: 15px; accent-color: var(--gold); }
+
+table.deals tbody tr.not-counted td { opacity: 0.5; }
+.dup-tag {
+  margin-inline-start: 8px; vertical-align: middle;
+  font-size: 0.62rem; font-weight: 700; color: var(--text-faint);
+  background: rgba(255,255,255,0.06); border: 1px solid var(--line-soft);
+  border-radius: var(--radius-pill); padding: 1px 7px;
+}
+
+.active-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 0.7rem; font-weight: 800; color: #ff9d5c;
+  background: rgba(251,113,36,0.13); border: 1px solid rgba(251,113,36,0.32);
+  padding: 2px 9px; border-radius: var(--radius-pill);
+}
+.active-chip svg { width: 11px; height: 11px; }
+.active-dot { display: inline-grid; place-items: center; flex: 0 0 auto; color: #ff9d5c; filter: drop-shadow(0 0 5px rgba(251,113,36,0.6)); }
+.active-dot svg { width: 15px; height: 15px; }
+.detail__active { color: var(--text-muted); }
+.detail__active.is-active {
+  color: #ff9d5c; border-color: rgba(251,113,36,0.4);
+  background: rgba(251,113,36,0.12); box-shadow: 0 0 14px -4px rgba(251,113,36,0.6);
+}
+.tone-active .why-chip { color: #ff9d5c; background: rgba(251,113,36,0.13); border: 1px solid rgba(251,113,36,0.32); }
+
 /* ---------- Pipeline board ---------- */
 .board {
   min-height: 0;

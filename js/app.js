@@ -352,6 +352,14 @@ async function onClick(e) {
       render();
       ui.toast('תועד קשר היום');
       break;
+    case 'toggle-active': {
+      const c = state.contacts.find((x) => x.id === id);
+      const saved = await store.setActive(id, !(c && c.isActive));
+      await loadData();
+      render();
+      ui.toast(saved && saved.isActive ? 'סומן במעקב פעיל' : 'הוסר ממעקב פעיל');
+      break;
+    }
     case 'add-note':
       await handleAddNote(id, target);
       break;

@@ -42,6 +42,7 @@ export const ICONS = {
   zap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></svg>',
   network: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/></svg>',
   trending: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>',
+  flame: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>',
 };
 
 /* ---------- DOM helpers ---------- */
@@ -170,6 +171,7 @@ export function renderList(container, contacts, companies, state) {
         ]),
       ]),
       el('div', { class: 'card__meta' }, [
+        c.isActive ? el('span', { class: 'active-chip', title: 'במעקב פעיל' }, [icon('flame'), 'פעיל']) : null,
         statusPill(c.status),
         overdue ? el('span', { class: 'badge-overdue' }, [icon('alert'), 'פיגור בקשר']) : null,
         ...(c.tags || []).slice(0, 2).map((t) => el('span', { class: 'tag', text: t })),
@@ -216,8 +218,8 @@ function dotColorForTier(tier) {
 export function renderToday(container, contacts, companies, state) {
   container.replaceChildren();
   const names = companyNameMap(companies);
-  const { overdue, soon, noContact } = actionBuckets(contacts);
-  const openValue = [...overdue, ...soon, ...noContact].reduce((s, c) => s + dealValue(c), 0);
+  const { active, overdue, soon, noContact } = actionBuckets(contacts);
+  const openValue = [...active, ...overdue, ...soon, ...noContact].reduce((s, c) => s + dealValue(c), 0);
 
   const wrap = el('div', { class: 'screen today' });
   wrap.append(el('div', { class: 'today__summary' }, [
@@ -226,11 +228,12 @@ export function renderToday(container, contacts, companies, state) {
     statCard(formatCompactCurrency(openValue) || '₪0', 'שווי פתוח', 'gold'),
   ]));
 
-  if (!(overdue.length + soon.length + noContact.length)) {
+  if (!(active.length + overdue.length + soon.length + noContact.length)) {
     wrap.append(el('div', { class: 'panel' }, [
       el('div', { class: 'tab-empty' }, [icon('check'), el('div', { text: 'הכל מעודכן — אין פעולות פתוחות היום 👌' })]),
     ]));
   } else {
+    if (active.length) wrap.append(actionGroup('במעקב פעיל — מו״מ / הבאה', 'flame', active, names, 'active'));
     if (overdue.length) wrap.append(actionGroup('בפיגור — תפוס עכשיו', 'alert', overdue, names, 'over'));
     if (noContact.length) wrap.append(actionGroup('ללא תיעוד קשר', 'info', noContact, names, 'new'));
     if (soon.length) wrap.append(actionGroup('מתקרב לסף — השבוע', 'clock', soon, names, 'warn'));
@@ -263,7 +266,7 @@ function actionRow(c, names, tone) {
       el('div', { class: 'action-row__id' }, [
         el('span', { class: 'action-row__name', text: c.fullName || 'ללא שם' }),
         el('span', { class: 'action-row__sub', text: [c.role, company].filter(Boolean).join(' · ') || '—' }),
-        el('span', { class: 'why-chip', text: actionReason(c) }),
+        el('span', { class: 'why-chip', text: tone === 'active' ? 'במעקב פעיל' : actionReason(c) }),
       ]),
       val ? el('span', { class: 'action-row__val num', text: formatCompactCurrency(val) }) : null,
     ]),
@@ -407,6 +410,7 @@ function pipelineCard(c, names, state) {
         el('span', { class: 'pcard__name', text: c.fullName || 'ללא שם' }),
         el('span', { class: 'pcard__role', text: [c.role, company].filter(Boolean).join(' · ') || '—' }),
       ]),
+      c.isActive ? el('span', { class: 'active-dot', title: 'במעקב פעיל' }, [icon('flame')]) : null,
       u !== 'ok' ? el('span', { class: `prio prio--${u}` }, [
         el('span', { class: 'dot' }), u === 'overdue' ? 'פיגור' : 'למעקב',
       ]) : null,
@@ -456,6 +460,11 @@ export function renderDetail(container, contact, companies, activeTab = 'overvie
       ]),
     ]),
     el('div', { class: 'detail__actions' }, [
+      el('button', {
+        class: 'btn btn--icon detail__active' + (contact.isActive ? ' is-active' : ''), type: 'button',
+        title: contact.isActive ? 'במעקב פעיל — לחץ לביטול' : 'סמן במעקב פעיל',
+        'aria-label': 'מעקב פעיל', dataset: { action: 'toggle-active', id: contact.id },
+      }, [icon('flame')]),
       el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'edit-contact', id: contact.id } }, [icon('edit'), 'עריכה']),
       el('button', { class: 'btn btn--danger btn--icon', type: 'button', title: 'מחיקה', 'aria-label': 'מחיקה', dataset: { action: 'delete-contact', id: contact.id } }, [icon('trash')]),
     ]),
@@ -615,10 +624,14 @@ function buildReferralsPanel(contact) {
   ]);
   const tbody = el('tbody');
   contact.referrals.forEach((r) => {
-    tbody.append(el('tr', {}, [
+    const counted = r.countInValue !== false;
+    tbody.append(el('tr', { class: counted ? '' : 'not-counted' }, [
       el('td', { text: r.dealName || '—' }),
       el('td', { text: r.status || '—' }),
-      el('td', { class: 'amount num', text: formatCurrency(r.estimatedValue) }),
+      el('td', { class: 'amount num' }, [
+        formatCurrency(r.estimatedValue),
+        counted ? null : el('span', { class: 'dup-tag', text: 'כפילות' }),
+      ]),
     ]));
   });
   table.append(tbody);
@@ -679,6 +692,11 @@ export function renderContactForm(contact, companies) {
   // basics
   form.append(field('שם מלא', input({ name: 'fullName', value: c.fullName, required: true, placeholder: 'שם פרטי ומשפחה' })));
   form.append(photoField(c.photoUrl, c.fullName));
+  form.append(el('label', { class: 'switch' }, [
+    el('input', { type: 'checkbox', name: 'isActive', checked: c.isActive }),
+    el('span', { class: 'switch__track' }, [el('span', { class: 'switch__thumb' })]),
+    el('span', { class: 'switch__label', text: 'במעקב פעיל (מו״מ / הבאה אקטיבית) — תמיד יופיע ב"היום"' }),
+  ]));
   form.append(el('div', { class: 'field--row' }, [
     field('סוג איש קשר', contactTypeSelect(c.contactType)),
     field('שלב במשפך', statusSelect(c.status)),
@@ -806,6 +824,7 @@ export function readContactForm(form) {
     dealName: row.querySelector('[name="r_name"]').value.trim(),
     status: row.querySelector('[name="r_status"]').value.trim(),
     estimatedValue: row.querySelector('[name="r_value"]').value.trim(),
+    countInValue: row.querySelector('[name="r_count"]').checked,
   })).filter((r) => r.dealName);
 
   return {
@@ -816,6 +835,7 @@ export function readContactForm(form) {
       contactType: get('contactType'),
       status: get('status'),
       currentCompanyId: get('currentCompanyId'),
+      isActive: !!form.elements['isActive']?.checked,
       origin: get('origin'),
       photoUrl: get('photoUrl'),
       contactInfo: { phone: get('phone'), email: get('email'), linkedin: get('linkedin') },
@@ -953,6 +973,10 @@ function referralRow(r = {}) {
     input({ name: 'r_name', value: r.dealName, placeholder: 'שם עסקה / הפניה' }),
     input({ name: 'r_status', value: r.status, placeholder: 'סטטוס' }),
     input({ name: 'r_value', value: r.estimatedValue, type: 'number', placeholder: 'שווי שנתי ₪', class: 'input num' }),
+    el('label', { class: 'count-toggle', title: 'בטל אם זו כפילות של עסקה משותפת עם איש קשר אחר' }, [
+      el('input', { type: 'checkbox', name: 'r_count', checked: r.countInValue !== false }),
+      'נספר',
+    ]),
     el('button', { class: 'subrow__del', type: 'button', 'aria-label': 'הסר', title: 'הסר', html: ICONS.trash }),
   ]);
 }

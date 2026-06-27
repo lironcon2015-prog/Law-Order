@@ -86,6 +86,7 @@ export function normalizeContact(raw = {}) {
     currentCompanyId: raw.currentCompanyId || '',
     role: str(raw.role),
     contactType: str(raw.contactType), // '' = בעל תפקיד בחברה · אחרת: מתווך/בנקאי/משקיע…
+    isActive: !!raw.isActive,          // במעקב פעיל (מו״מ/הבאה) — תמיד מופיע ב"היום"
     origin: str(raw.origin),
     photoUrl: str(raw.photoUrl),
     contactInfo: {
@@ -105,6 +106,7 @@ export function normalizeContact(raw = {}) {
       dealName: str(r?.dealName),
       status: str(r?.status),
       estimatedValue: numOrNull(r?.estimatedValue),
+      countInValue: r?.countInValue !== false, // ברירת מחדל true; false = כפילות עסקה משותפת
     })),
     chronologicalNotes: arr(raw.chronologicalNotes).map((n) => ({
       timestamp: n?.timestamp || new Date().toISOString(),
@@ -170,6 +172,17 @@ export async function markContacted(id, dateISO) {
   return norm;
 }
 
+/** מסמן/מבטל "במעקב פעיל". */
+export async function setActive(id, val) {
+  const contact = await getContact(id);
+  if (!contact) return null;
+  const norm = normalizeContact(contact);
+  norm.isActive = !!val;
+  await db.put('contacts', norm);
+  notifyMutate();
+  return norm;
+}
+
 /* ----------------------------------------------------------------
    Helpers — תצוגה ומשפך
 ---------------------------------------------------------------- */
@@ -213,9 +226,11 @@ export function followUpRatio(contact) {
   return days / freq;
 }
 
-/** שווי עסקאות מצטבר לאיש קשר (סכום ההפניות) */
+/** שווי עסקאות מצטבר לאיש קשר. מתעלם מהפניות שסומנו "לא נספר" (כפילות עסקה משותפת). */
 export function dealValue(contact) {
-  return (contact.referrals || []).reduce((sum, r) => sum + (r.estimatedValue || 0), 0);
+  return (contact.referrals || [])
+    .filter((r) => r.countInValue !== false)
+    .reduce((sum, r) => sum + (r.estimatedValue || 0), 0);
 }
 
 /** דחיפות מעקב לתג ה-Pipeline: 'overdue' | 'soon' | 'ok' */
@@ -244,16 +259,17 @@ const WHALE_VALUE = 1_000_000; // סף "לווייתן" לשווי הפניות 
 
 /** מחלק אנשי קשר לקבוצות פעולה. frozen מוחרג. בכל קבוצה: שווי יורד → דחיפות יורדת. */
 export function actionBuckets(contacts) {
-  const active = contacts.filter((c) => c.status !== 'frozen');
+  const pool = contacts.filter((c) => c.status !== 'frozen');
   const byPriority = (a, b) => (dealValue(b) - dealValue(a)) || (followUpRatio(b) - followUpRatio(a));
-  const overdue = [], soon = [], noContact = [];
-  for (const c of active) {
+  const active = [], overdue = [], soon = [], noContact = [];
+  for (const c of pool) {
+    if (c.isActive) { active.push(c); continue; } // פעילים תמיד נכנסים — ולא נספרים שוב בקבוצות אחרות
     if (!c.lastContactDate) noContact.push(c);
     else if (isOverdue(c)) overdue.push(c);
     else if (urgency(c) === 'soon') soon.push(c);
   }
-  overdue.sort(byPriority); soon.sort(byPriority); noContact.sort(byPriority);
-  return { overdue, soon, noContact };
+  [active, overdue, soon, noContact].forEach((g) => g.sort(byPriority));
+  return { active, overdue, soon, noContact };
 }
 
 /** סיבת הדגל לתצוגה ("למה זה כאן"). */
