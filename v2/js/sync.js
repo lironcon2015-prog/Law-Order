@@ -21,6 +21,8 @@ const LS = {
   lastPull: 'lo_lastPullAt',     // לוגיקת קונפליקט בלבד
   lastSync: 'lo_lastSyncAt',     // תצוגה בלבד
   migrated: 'lo_unifiedMigrated', // מיגרציה חד-פעמית מקובץ ה-CRM הישן הושלמה
+  legacyTime: 'lo_legacyTimeAtMigrate', // modifiedTime של הקובץ הישן בזמן המיגרציה/מיזוג אחרון
+  legacyDismiss: 'lo_legacyDriftDismiss', // גרסת קובץ ישן שהמשתמש בחר להתעלם ממנה
 };
 
 /* ---------- module state ---------- */
@@ -105,7 +107,7 @@ function _initClient() {
       if (action === 'backup') { backup(); return; }
       if (action === 'restore') { restore(); return; }
       setState('syncing');
-      migrateFromLegacy().then(autoPull).then(() => setState('idle')).catch(() => setState('error'));
+      migrateFromLegacy().then(autoPull).then(checkLegacyDrift).then(() => setState('idle')).catch(() => setState('error'));
     },
   });
   return true;
@@ -236,6 +238,7 @@ async function migrateFromLegacy() {
         }
       } finally { _suppressPush = false; }
       if (_onChange) await _onChange();
+      localStorage.setItem(LS.legacyTime, legacy.modifiedTime || ''); // נקודת-ייחוס לזיהוי דריפט עתידי
     }
   } catch (e) { console.warn('[sync] legacy migrate pull', e); }
   // כתיבת הקובץ המאוחד החדש (CRM מהישן + חיוב מקומי). אם אין מה לגבות — נדלג.
@@ -247,6 +250,43 @@ async function migrateFromLegacy() {
     localStorage.setItem(LS.lastSync, new Date().toISOString());
     localStorage.setItem(LS.migrated, '1');
   } catch (e) { console.warn('[sync] migrate upload', e); }
+}
+
+/* ============================================================
+   זיהוי דריפט: עדכון בקובץ ה-CRM הישן אחרי המיגרציה → הצעת מיזוג
+   ============================================================ */
+async function checkLegacyDrift() {
+  if (localStorage.getItem(LS.migrated) !== '1') return;
+  let legacy;
+  try { legacy = await findByName(LEGACY_CRM_FILE); } catch { return; }
+  if (!legacy || !legacy.modifiedTime) return;
+  const ref = localStorage.getItem(LS.legacyTime) || '';
+  const dismissed = localStorage.getItem(LS.legacyDismiss) || '';
+  if (!ref || legacy.modifiedTime <= ref) return;          // אין שינוי חדש בישן
+  if (dismissed && legacy.modifiedTime <= dismissed) return; // המשתמש כבר דחה את הגרסה הזו
+
+  const ok = confirm(
+    'גיבוי ה-CRM הישן עודכן אחרי המעבר לאפליקציה המאוחדת.\n\n' +
+    'אישור = למשוך את נתוני ה-CRM (אנשי קשר/חברות) מהאפליקציה הישנה ולהחליף בהם את אלה שבמאוחדת. נתוני החיוב לא יושפעו.\n' +
+    'ביטול = להתעלם מהעדכון הזה.'
+  );
+  if (!ok) { localStorage.setItem(LS.legacyDismiss, legacy.modifiedTime); return; }
+
+  try {
+    setState('syncing');
+    const res = await _authedFetch('GET', `https://www.googleapis.com/drive/v3/files/${legacy.id}?alt=media`);
+    const data = await res.json();
+    _suppressPush = true;
+    try {
+      if (Array.isArray(data.companies)) await db.replaceAll('companies', data.companies);
+      if (Array.isArray(data.contacts)) await db.replaceAll('contacts', data.contacts);
+    } finally { _suppressPush = false; }
+    if (_onChange) await _onChange();
+    localStorage.setItem(LS.legacyTime, legacy.modifiedTime);
+    localStorage.removeItem(LS.legacyDismiss);
+    await push(); // העלאת הקובץ המאוחד עם ה-CRM הממוזג
+    toastFn('שינויי ה-CRM מהאפליקציה הישנה מוזגו');
+  } catch (e) { console.warn('[sync] legacy drift merge', e); setState('error'); }
 }
 
 /* ============================================================
@@ -377,7 +417,7 @@ async function autoSyncInit() {
   const ok = await silentSignIn();
   if (!ok) { setState('signed-out'); return; }
   setState('syncing');
-  try { await migrateFromLegacy(); await autoPull(); setState('idle'); } catch { setState('error'); }
+  try { await migrateFromLegacy(); await autoPull(); await checkLegacyDrift(); setState('idle'); } catch { setState('error'); }
 }
 
 export function init({ onChange, toast } = {}) {

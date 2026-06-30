@@ -59,7 +59,8 @@ IA יחיד (sidebar), מושג לקוח משותף, דשבורד מאוחד. ל
 - [x] `v2/js/sync.js` — `collectBackupData`/`applyBackupData` מאוחדים: **קובץ Drive נפרד** `lexledger-unified-backup.json` (מבודד מה-CRM הישן → אפס דריסה), עם כל ה-stores (CRM + חיוב).
 - [x] **מיגרציה חד-פעמית** (`migrateFromLegacy`): בכניסה הראשונה לסנכרון, אם אין קובץ מאוחד — מושך אוטומטית את גיבוי ה-CRM הישן (`laworder-crm-backup.json`), ממזג עם החיוב המקומי (שיובא מ-JSON), וכותב לקובץ המאוחד החדש. דגל `lo_unifiedMigrated`.
 - [x] מרגע זה: כל מוטציה (CRM/חיוב) + **כל ייבוא** מתזמנים push מאוחד; autoPull בטעינה — בדיוק כמו ב-CRM. UI ייבוא/ייצוא במסך הגדרות. `app.js`: רענון CRM+חיוב אחרי ייבוא/pull.
-- [x] אימות Chromium: ייבוא חיוב+CRM נטענו, מאזן מיובא נכון (1,000+5,000−2,000=4,000), טעינה+ניווט נקיים, 0 שגיאות. SW `unified-v10`. *(זרימת OAuth/Drive עצמה — נבדקת רק אצל המשתמש.)*
+- [x] **זיהוי דריפט** (`checkLegacyDrift`): אם קובץ ה-CRM הישן עודכן אחרי המיגרציה — אזהרה במאוחדת עם הצעה למשוך ולמזג את שינויי ה-CRM (בלחיצה). דחייה נזכרת לפי גרסת-קובץ (`lo_legacyDriftDismiss`), נקודת-ייחוס `lo_legacyTimeAtMigrate`.
+- [x] אימות Chromium: ייבוא חיוב+CRM נטענו, מאזן מיובא נכון (1,000+5,000−2,000=4,000), טעינה+ניווט נקיים, 0 שגיאות. SW `unified-v11`. *(זרימת OAuth/Drive עצמה — נבדקת רק אצל המשתמש.)*
 
 ### ☐ Phase 5 — Bridge (סינרגיה)
 - [ ] קישור CRM contact/company ↔ billing client (מושג לקוח משותף).
