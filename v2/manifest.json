@@ -1,0 +1,19 @@
+{
+  "name": "LexLedger · CRM פיתוח עסקי",
+  "short_name": "LexLedger",
+  "description": "מערכת CRM אישית לעורך דין M&A — לידים, מסלולי קריירה, הפניות ומעקב. עובד גם ללא חיבור.",
+  "lang": "he",
+  "dir": "rtl",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#131315",
+  "theme_color": "#131315",
+  "categories": ["business", "productivity"],
+  "icons": [
+    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
