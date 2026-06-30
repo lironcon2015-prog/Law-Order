@@ -40,12 +40,13 @@ async function init() {
   }
   render();
 
-  // מודול החיוב (כספים) — delegation עצמאי על מכלי התצוגה
+  // מודול החיוב (כספים) — delegation עצמאי על מכלי התצוגה.
+  // אחרי ייבוא: רענון CRM + render + תזמון push מאוחד לדרייב (כמו מוטציה רגילה ב-CRM)
   billingApp.init({
     clients: refs.clientsView, invoices: refs.invoicesView,
     payments: refs.paymentsView, finSettings: refs.finSettingsView,
     analysis: refs.analysisView, dashboard: refs.todayView,
-  }, async () => { await loadData(); render(); }); // רענון CRM אחרי ייבוא
+  }, async () => { await loadData(); render(); sync.notifyMutation(); });
 
   // סנכרון Drive: התראת מוטציה → push מבוזבז; auto-pull בטעינה
   store.setMutationListener(sync.notifyMutation);
