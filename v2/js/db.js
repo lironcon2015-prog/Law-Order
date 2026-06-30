@@ -1,8 +1,9 @@
 // db.js — שכבת IndexedDB גנרית מבוססת Promises
-// DB יחיד עם שני object stores: companies, contacts.
+// DB יחיד מאוחד: CRM (companies, contacts) + חיוב (clients, cases, invoices,
+// payments, balances, billingSettings). v2 הוסיף את ה-stores של החיוב.
 
 const DB_NAME = 'maCrmDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbPromise = null;
 
@@ -49,6 +50,34 @@ export function openDB() {
         contacts.createIndex('currentCompanyId', 'currentCompanyId', { unique: false });
         contacts.createIndex('status', 'status', { unique: false });
       }
+
+      /* ---------- חיוב (Lawfee) — נוסף ב-v2 ---------- */
+      if (!db.objectStoreNames.contains('clients')) {
+        const clients = db.createObjectStore('clients', { keyPath: 'id', autoIncrement: true });
+        clients.createIndex('name', 'name', { unique: false });
+      }
+      if (!db.objectStoreNames.contains('cases')) {
+        const cases = db.createObjectStore('cases', { keyPath: 'id', autoIncrement: true });
+        cases.createIndex('clientId', 'clientId', { unique: false });
+        cases.createIndex('caseNumber', 'caseNumber', { unique: false });
+      }
+      if (!db.objectStoreNames.contains('invoices')) {
+        const invoices = db.createObjectStore('invoices', { keyPath: 'id', autoIncrement: true });
+        invoices.createIndex('caseId', 'caseId', { unique: false });
+        invoices.createIndex('year', 'year', { unique: false });
+        invoices.createIndex('yearMonth', ['year', 'month'], { unique: false });
+      }
+      if (!db.objectStoreNames.contains('payments')) {
+        const payments = db.createObjectStore('payments', { keyPath: 'id', autoIncrement: true });
+        payments.createIndex('year', 'year', { unique: false });
+        payments.createIndex('yearMonth', ['year', 'month'], { unique: false });
+      }
+      if (!db.objectStoreNames.contains('balances')) {
+        db.createObjectStore('balances', { keyPath: 'year' });
+      }
+      if (!db.objectStoreNames.contains('billingSettings')) {
+        db.createObjectStore('billingSettings', { keyPath: 'key' });
+      }
       void event;
     };
 
@@ -82,6 +111,11 @@ export async function get(storeName, id) {
 /** שומר/מעדכן רשומה (put). מחזיר את ה-key */
 export async function put(storeName, obj) {
   return withStore(storeName, 'readwrite', (store) => promisifyRequest(store.put(obj)));
+}
+
+/** מוסיף רשומה ל-store עם autoIncrement; מחזיר את ה-key שנוצר */
+export async function addAuto(storeName, obj) {
+  return withStore(storeName, 'readwrite', (store) => promisifyRequest(store.add(obj)));
 }
 
 /** מוחק רשומה לפי מפתח */

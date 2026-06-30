@@ -1790,3 +1790,101 @@ body.drawer-open .drawer__panel { transform: translateX(0); }
   }
   .hide-wide { display: inline-flex !important; }
 }
+
+/* ============================================================
+   כספים (Billing) — מסכים בעיצוב Obsidian Gold
+   ============================================================ */
+body.view-clients      #clients-view      { display: block; }
+body.view-invoices     #invoices-view     { display: block; }
+body.view-payments     #payments-view     { display: block; }
+body.view-fin-settings #fin-settings-view { display: block; }
+
+.fin-wrap { max-width: 1040px; margin: 0 auto; padding: 26px 30px 90px; }
+.fin-wrap .view-h { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 24px; }
+.fin-wrap .view-h h1 { font-size: 1.6rem; font-weight: 800; letter-spacing: -0.01em; }
+.fin-wrap .view-h p { font-size: 0.86rem; color: var(--text-muted); margin-top: 4px; }
+.view-h__tools { display: flex; align-items: center; gap: 10px; }
+
+.num.accent, .accent { color: var(--gold); }
+.num.pos, .pos { color: var(--positive); }
+
+/* year selector */
+.bil-year-wrap { display: inline-flex; align-items: center; gap: 8px; padding: 0 12px; height: 40px;
+  background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius-pill); box-shadow: var(--elev-1); }
+.bil-year-wrap .ic { color: var(--gold); width: 16px; height: 16px; display: inline-grid; place-items: center; }
+.bil-year-wrap .ic svg { width: 16px; height: 16px; }
+.bil-year { background: transparent; border: 0; color: var(--text-primary); font-weight: 700; font-size: 0.92rem; padding-inline-end: 6px; }
+.bil-year:focus { outline: none; }
+
+/* icon buttons */
+.icon-btn { width: 32px; height: 32px; display: inline-grid; place-items: center; border-radius: 9px;
+  background: transparent; border: 1px solid transparent; color: var(--text-muted); transition: all var(--t-fast); }
+.icon-btn:hover { background: var(--surface-2); color: var(--text-primary); border-color: var(--line); }
+.icon-btn--danger:hover { color: var(--negative); border-color: rgba(248,113,113,0.3); background: var(--negative-soft); }
+.icon-btn svg { width: 16px; height: 16px; }
+.fin-row__tools, .fin-td-tools { display: inline-flex; gap: 4px; }
+
+/* empty state */
+.fin-empty { text-align: center; padding: 64px 20px; color: var(--text-muted); display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.fin-empty .ic-lg svg { width: 38px; height: 38px; opacity: 0.5; }
+.fin-empty p { font-size: 0.95rem; }
+
+/* KPI strip */
+.fin-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin-bottom: 22px; }
+.fin-kpi { background: var(--glass); border: 1px solid var(--glass-border); border-radius: var(--radius-md);
+  padding: 16px 18px; box-shadow: var(--elev-1); display: flex; flex-direction: column; gap: 6px; }
+.fin-kpi__label { font-size: 0.72rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+.fin-kpi__val { font-size: 1.5rem; font-weight: 700; }
+
+/* client cards + cases */
+.fin-client { background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius-lg);
+  box-shadow: var(--elev-1); margin-bottom: 14px; overflow: hidden; }
+.fin-client__head { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 15px 18px; border-bottom: 1px solid var(--line-soft); }
+.fin-client__id { display: flex; flex-direction: column; gap: 2px; }
+.fin-client__name { font-weight: 700; font-size: 1rem; }
+.fin-client__sub { font-size: 0.78rem; }
+.fin-cases { display: flex; flex-direction: column; }
+.fin-case { display: flex; align-items: center; gap: 12px; padding: 11px 18px; border-bottom: 1px solid var(--line-soft); }
+.fin-case:last-child { border-bottom: 0; }
+.fin-case__id { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.fin-case__num { font-weight: 600; font-size: 0.9rem; }
+.fin-case__desc { font-size: 0.78rem; }
+.fin-case__rate { font-size: 0.85rem; color: var(--gold); font-weight: 700; }
+.fin-cases-empty { padding: 14px 18px; font-size: 0.84rem; }
+
+/* case-type badges */
+.bil-type { font-size: 0.68rem; font-weight: 700; padding: 3px 10px; border-radius: var(--radius-pill); white-space: nowrap; flex: 0 0 auto; }
+.bil-type--info { background: rgba(56,189,248,0.12); color: #7dd3fc; }
+.bil-type--neg  { background: var(--negative-soft); color: var(--negative); }
+.bil-type--plum { background: rgba(192,132,252,0.12); color: #c084fc; }
+
+/* tables */
+.fin-table-wrap { background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--elev-1); overflow: hidden; }
+.fin-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.fin-table th { text-align: start; padding: 12px 16px; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-faint); font-weight: 700; background: var(--surface-2); border-bottom: 1px solid var(--line); }
+.fin-table td { padding: 12px 16px; border-bottom: 1px solid var(--line-soft); vertical-align: middle; }
+.fin-table tbody tr:hover { background: var(--surface-2); }
+.fin-table tbody tr:last-child td { border-bottom: 0; }
+.fin-cell-2 { display: flex; flex-direction: column; gap: 1px; }
+.fin-cell-2 .muted { font-size: 0.76rem; }
+.fin-table__total td { background: var(--surface-2); font-weight: 800; border-top: 1px solid var(--gold-line); border-bottom: 0; }
+.fin-td-tools { white-space: nowrap; }
+
+/* settings / ledger */
+.fin-settings { margin-bottom: 18px; }
+.fin-balance-row { display: flex; gap: 10px; align-items: center; }
+.fin-balance-row .input { max-width: 240px; }
+.fin-hint { font-size: 0.78rem; margin-top: 12px; }
+.fin-ledger__row { display: flex; align-items: center; justify-content: space-between; padding: 11px 2px; border-bottom: 1px solid var(--line-soft); font-size: 0.92rem; }
+.fin-ledger__row:last-child { border-bottom: 0; }
+.fin-ledger__row .num { font-size: 1rem; font-weight: 700; }
+.fin-ledger__row--total { margin-top: 6px; padding-top: 14px; border-top: 1px solid var(--gold-line); border-bottom: 0; font-weight: 800; }
+.fin-ledger__row--total .num { font-size: 1.25rem; color: var(--gold); }
+
+/* invoice commission preview */
+.fin-comm-preview { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px;
+  background: var(--gold-softer); border: 1px solid var(--gold-line); border-radius: var(--radius-md); margin-bottom: 16px; }
+.fin-comm-out { font-size: 1.1rem; font-weight: 800; }
+.field__hint { display: block; font-size: 0.72rem; margin-top: 5px; }

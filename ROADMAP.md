@@ -1,7 +1,7 @@
 # ROADMAP — LexLedger מאוחד (CRM + חיוב)
 
 > מסמך חי. מעדכנים בסוף כל שלב: לסמן ✅ מה שבוצע, להזיז סעיפים, לעדכן "החלטות מפתח".
-> עדכון אחרון: 2026-06-30
+> עדכון אחרון: 2026-06-30 (Phase 2 הושלם)
 
 ## מטרה
 לאחד את **Law-Order** (CRM פיתוח עסקי) ו-**Lawfee-2.0** (חיוב/כספים) לאפליקציה אחת אורגנית —
@@ -40,12 +40,13 @@ IA יחיד (sidebar), מושג לקוח משותף, דשבורד מאוחד. ל
 - [x] `app.js` ניווט sidebar (`body.view-*`); שאר ה-JS זהה לשורש.
 - [x] אימות Chromium + seed: 5 מסכים, 0 שגיאות. SW `unified-v3`.
 
-### ☐ Phase 2 — פורט חיוב
-- [ ] `v2/js/db.js` → schema v2: stores `clients` · `cases` · `invoices` · `payments` · `balances` · `billingSettings`
-      (+ helpers `addAuto`, `getAllByIndex`).
-- [ ] `v2/js/billing.js` — דומיין החיוב (מתוך `db.js` של Lawfee): חישובי ledger, עמלות, `computeLedger`.
-- [ ] מסכים בעיצוב Obsidian Gold: **לקוחות ותיקים · חשבוניות · תשלומים · הגדרות**.
-- [ ] מקטע "כספים" ב-sidebar (IA מאוחד).
+### ✅ Phase 2 — פורט חיוב  *(הושלם)*
+- [x] `v2/js/db.js` → schema v2 (DB אחד `maCrmDB`): stores `clients` · `cases` · `invoices` · `payments` · `balances` · `billingSettings` + `addAuto`.
+- [x] `v2/js/billing.js` — דומיין החיוב (פורט מ-Lawfee): clients/cases/invoices/payments/balances/settings, `computeLedger`, עמלה אוטומטית, `collect/applyBackupData`.
+- [x] `v2/js/billing-app.js` — controller + רינדור 4 מסכים בעיצוב Obsidian Gold (delegation עצמאי `data-bil*`, modal מקומי, demo seed).
+- [x] מסכים: **לקוחות ותיקים · חשבוניות · תשלומים · הגדרות** (KPI strip, טבלאות, type-badges, מאזן שנתי, חישוב עמלה חי).
+- [x] מקטע "כספים" ב-sidebar + routing ב-`app.js` (mainView: clients/invoices/payments/fin-settings).
+- [x] אימות Chromium + seed: 4 מסכים + טופס, מאזן נכון (3,193+12,800−8,732=7,261), 0 שגיאות. SW `unified-v4`.
 
 ### ☐ Phase 3 — דשבורד מאוחד + אנליזה
 - [ ] KPI hero (ledger) + BarChart/Donut (SVG משלנו, fintech) + תצוגת "היום".

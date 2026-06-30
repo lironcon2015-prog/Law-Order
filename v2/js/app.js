@@ -4,6 +4,10 @@ import * as store from './store.js';
 import * as search from './search.js';
 import * as ui from './ui.js';
 import * as sync from './sync.js';
+import * as billingApp from './billing-app.js';
+import * as billing from './billing.js';
+
+const BILLING_VIEWS = ['clients', 'invoices', 'payments', 'fin-settings'];
 
 /* ---------- State יחיד (single source of truth) ---------- */
 const state = {
@@ -36,8 +40,15 @@ async function init() {
   }
   render();
 
+  // מודול החיוב (כספים) — delegation עצמאי על מכלי התצוגה
+  billingApp.init({
+    clients: refs.clientsView, invoices: refs.invoicesView,
+    payments: refs.paymentsView, finSettings: refs.finSettingsView,
+  });
+
   // סנכרון Drive: התראת מוטציה → push מבוזבז; auto-pull בטעינה
   store.setMutationListener(sync.notifyMutation);
+  billing.setMutationListener(sync.notifyMutation);
   sync.init({
     onChange: async () => { await loadData(); render(); },
     toast: ui.toast,
@@ -62,6 +73,15 @@ function cacheRefs() {
   refs.viewNetwork = document.getElementById('view-network');
   refs.viewList = document.getElementById('view-list');
   refs.syncBtn = document.getElementById('sync-btn');
+  // כספים
+  refs.viewClients = document.getElementById('view-clients');
+  refs.viewInvoices = document.getElementById('view-invoices');
+  refs.viewPayments = document.getElementById('view-payments');
+  refs.viewFinSettings = document.getElementById('view-fin-settings');
+  refs.clientsView = document.getElementById('clients-view');
+  refs.invoicesView = document.getElementById('invoices-view');
+  refs.paymentsView = document.getElementById('payments-view');
+  refs.finSettingsView = document.getElementById('fin-settings-view');
 }
 
 function paintIcons() {
@@ -85,12 +105,20 @@ function computeList() {
 /* ---------- render ---------- */
 function render() {
   // מצב תצוגה
-  const views = ['today', 'pipeline', 'network', 'list'];
-  const map = { today: refs.viewToday, pipeline: refs.viewPipeline, network: refs.viewNetwork, list: refs.viewList };
-  views.forEach((v) => {
+  const map = {
+    today: refs.viewToday, pipeline: refs.viewPipeline, network: refs.viewNetwork, list: refs.viewList,
+    clients: refs.viewClients, invoices: refs.viewInvoices, payments: refs.viewPayments, 'fin-settings': refs.viewFinSettings,
+  };
+  Object.keys(map).forEach((v) => {
     map[v].setAttribute('aria-selected', state.mainView === v ? 'true' : 'false');
     document.body.classList.toggle('view-' + v, state.mainView === v);
   });
+
+  // — תצוגות כספים — מנותבות למודול החיוב —
+  if (BILLING_VIEWS.includes(state.mainView)) {
+    billingApp.renderView(state.mainView);
+    return;
+  }
 
   if (state.mainView !== 'list') {
     const items = search.filterContacts(state.contacts, state.companies, state.searchTerm);
@@ -135,7 +163,8 @@ function renderDetail() {
 function setMainView(view) {
   if (state.mainView === view) return;
   state.mainView = view;
-  if (view === 'list') hideDrawer();
+  if (view === 'list' || BILLING_VIEWS.includes(view)) hideDrawer();
+  document.body.classList.remove('nav-open');
   render();
 }
 function openDrawer() {
@@ -188,6 +217,11 @@ function wireEvents() {
   refs.viewPipeline.addEventListener('click', () => setMainView('pipeline'));
   refs.viewNetwork.addEventListener('click', () => setMainView('network'));
   refs.viewList.addEventListener('click', () => setMainView('list'));
+  // כספים
+  refs.viewClients.addEventListener('click', () => setMainView('clients'));
+  refs.viewInvoices.addEventListener('click', () => setMainView('invoices'));
+  refs.viewPayments.addEventListener('click', () => setMainView('payments'));
+  refs.viewFinSettings.addEventListener('click', () => setMainView('fin-settings'));
 
   // mobile nav toggle (sidebar)
   document.getElementById('nav-toggle')?.addEventListener('click', () => document.body.classList.toggle('nav-open'));
@@ -534,7 +568,7 @@ function registerSW() {
 
 /* ---------- expose seed for console/dev ---------- */
 import('./seed.js').then((m) => {
-  window.seedDemo = async () => { await m.seedDemo(store); await loadData(); render(); ui.toast('נטענו נתוני דמו'); };
+  window.seedDemo = async () => { await m.seedDemo(store); await billingApp.seedDemo(); await loadData(); render(); ui.toast('נטענו נתוני דמו'); };
 }).catch(() => {});
 
 init();
