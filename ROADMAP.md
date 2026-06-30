@@ -56,11 +56,10 @@ IA יחיד (sidebar), מושג לקוח משותף, דשבורד מאוחד. ל
 
 ### ✅ Phase 4 — ייבוא + סנכרון מאוחד  *(הושלם)*
 - [x] `v2/js/importer.js` — `detectFormat` (billing / CRM / unified) + `applyImport` (החלפה לפי דומיין → אפשר לייבא את שני הגיבויים בנפרד) + `collectAll` (ייצוא מאוחד). ממפה `settings`→`billingSettings` של Lawfee.
-- [x] `v2/js/sync.js` — `collectBackupData`/`applyBackupData` מאוחדים: קובץ Drive יחיד עם כל ה-stores (CRM + חיוב), תאימות-לאחור לגיבוי v1 CRM-only. (drive.js של Lawfee לא פורט.)
-- [x] UI ייבוא/ייצוא במסך הגדרות (זיהוי פורמט + אישור עם ספירות). `app.js`: רענון CRM+חיוב אחרי ייבוא/pull.
-- [x] **מיגרציה/איחוד**: הסנכרון ממשיך את **אותו קובץ Drive של ה-CRM** (`laworder-crm-backup.json`) — autoPull מושך את נתוני ה-CRM הקיימים, ייבוא ה-JSON של Lawfee מוסיף חיוב, ואחרי ייבוא מתוזמן **push מאוחד** → מאותו רגע הקובץ מאחד את שתי המערכות ומסונכרן אוטומטית כמו ב-CRM (debounce על מוטציה + autoPull בטעינה).
-- [x] אימות Chromium: ייבוא גיבוי חיוב (Lawfee) + גיבוי CRM דרך ה-UI — שניהם נטענו, מאזן מיובא נכון (1,000+5,000−2,000=4,000), push-אחרי-ייבוא ללא קריסה, 0 שגיאות. SW `unified-v9`.
-- ⚠️ *קוויאט: כל עוד אפליקציית ה-CRM הישנה (שורש) פעילה וכותבת לאותו שם קובץ — היא עלולה לדרוס את חלק החיוב בקובץ. אופציה: שם קובץ מאוחד נפרד (לבחירת המשתמש).*
+- [x] `v2/js/sync.js` — `collectBackupData`/`applyBackupData` מאוחדים: **קובץ Drive נפרד** `lexledger-unified-backup.json` (מבודד מה-CRM הישן → אפס דריסה), עם כל ה-stores (CRM + חיוב).
+- [x] **מיגרציה חד-פעמית** (`migrateFromLegacy`): בכניסה הראשונה לסנכרון, אם אין קובץ מאוחד — מושך אוטומטית את גיבוי ה-CRM הישן (`laworder-crm-backup.json`), ממזג עם החיוב המקומי (שיובא מ-JSON), וכותב לקובץ המאוחד החדש. דגל `lo_unifiedMigrated`.
+- [x] מרגע זה: כל מוטציה (CRM/חיוב) + **כל ייבוא** מתזמנים push מאוחד; autoPull בטעינה — בדיוק כמו ב-CRM. UI ייבוא/ייצוא במסך הגדרות. `app.js`: רענון CRM+חיוב אחרי ייבוא/pull.
+- [x] אימות Chromium: ייבוא חיוב+CRM נטענו, מאזן מיובא נכון (1,000+5,000−2,000=4,000), טעינה+ניווט נקיים, 0 שגיאות. SW `unified-v10`. *(זרימת OAuth/Drive עצמה — נבדקת רק אצל המשתמש.)*
 
 ### ☐ Phase 5 — Bridge (סינרגיה)
 - [ ] קישור CRM contact/company ↔ billing client (מושג לקוח משותף).

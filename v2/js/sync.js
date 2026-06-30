@@ -12,13 +12,15 @@ import * as billing from './billing.js';
    ============================================================ */
 export const CLIENT_ID = '674619661713-rcurrqdj0cngb9sv6k3r2phd8r499pfd.apps.googleusercontent.com';
 const SCOPE = 'https://www.googleapis.com/auth/drive.file';
-const FILE_NAME = 'laworder-crm-backup.json';
+const UNIFIED_FILE = 'lexledger-unified-backup.json'; // הקובץ המאוחד (CRM + חיוב)
+const LEGACY_CRM_FILE = 'laworder-crm-backup.json';   // גיבוי ה-CRM הישן — למיגרציה חד-פעמית בלבד
 
 const LS = {
   enabled: 'lo_autoSyncEnabled', // flag: כבר התחבר פעם → ננסה silent
-  fileId: 'lo_backupFileId',     // הקובץ ש"נעולים" עליו
+  fileId: 'lo_unifiedFileId',    // הקובץ המאוחד ש"נעולים" עליו
   lastPull: 'lo_lastPullAt',     // לוגיקת קונפליקט בלבד
   lastSync: 'lo_lastSyncAt',     // תצוגה בלבד
+  migrated: 'lo_unifiedMigrated', // מיגרציה חד-פעמית מקובץ ה-CRM הישן הושלמה
 };
 
 /* ---------- module state ---------- */
@@ -103,7 +105,7 @@ function _initClient() {
       if (action === 'backup') { backup(); return; }
       if (action === 'restore') { restore(); return; }
       setState('syncing');
-      autoPull().then(() => setState('idle')).catch(() => setState('error'));
+      migrateFromLegacy().then(autoPull).then(() => setState('idle')).catch(() => setState('error'));
     },
   });
   return true;
@@ -158,15 +160,18 @@ async function tryGetFile(id) {
     return await res.json();
   } catch { return null; }
 }
-async function findRemoteFile() {
-  let byName = null;
+/** חיפוש קובץ לפי שם בלבד (ללא side-effects) — משמש למיגרציה */
+async function findByName(name) {
   try {
-    const q = encodeURIComponent(`name='${FILE_NAME}' and trashed=false`);
+    const q = encodeURIComponent(`name='${name}' and trashed=false`);
     const res = await _authedFetch('GET',
       `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,modifiedTime)&orderBy=modifiedTime desc&pageSize=5`);
     const j = await res.json();
-    byName = (j.files && j.files[0]) || null;
-  } catch { byName = null; }
+    return (j.files && j.files[0]) || null;
+  } catch { return null; }
+}
+async function findRemoteFile() {
+  const byName = await findByName(UNIFIED_FILE);
   const savedId = localStorage.getItem(LS.fileId);
   const byId = savedId ? await tryGetFile(savedId) : null;
   const best = chooseRemote(byId, byName);
@@ -201,9 +206,53 @@ async function applyBackupData(data) {
 }
 
 /* ============================================================
+   מיגרציה חד-פעמית: איחוד גיבוי ה-CRM הישן לקובץ המאוחד החדש
+   ============================================================ */
+async function migrateFromLegacy() {
+  if (localStorage.getItem(LS.migrated) === '1') return;
+  // אם כבר קיים קובץ מאוחד בענן — אין מה למזג, רק לנעול עליו
+  const unified = await findByName(UNIFIED_FILE);
+  if (unified) {
+    localStorage.setItem(LS.fileId, unified.id);
+    localStorage.setItem(LS.migrated, '1');
+    return;
+  }
+  // משיכת גיבוי ה-CRM הישן (אם קיים) ומיזוגו עם הנתונים המקומיים (כולל חיוב שיובא)
+  try {
+    const legacy = await findByName(LEGACY_CRM_FILE);
+    if (legacy) {
+      const res = await _authedFetch('GET', `https://www.googleapis.com/drive/v3/files/${legacy.id}?alt=media`);
+      const data = await res.json();
+      _suppressPush = true;
+      try {
+        if (Array.isArray(data.companies)) await db.replaceAll('companies', data.companies);
+        if (Array.isArray(data.contacts)) await db.replaceAll('contacts', data.contacts);
+        if (data.clients || data.cases || data.invoices || data.payments || data.balances || data.billingSettings) {
+          await billing.applyBackupData({
+            clients: data.clients, cases: data.cases, invoices: data.invoices,
+            payments: data.payments, balances: data.balances,
+            billingSettings: data.billingSettings || data.settings,
+          });
+        }
+      } finally { _suppressPush = false; }
+      if (_onChange) await _onChange();
+    }
+  } catch (e) { console.warn('[sync] legacy migrate pull', e); }
+  // כתיבת הקובץ המאוחד החדש (CRM מהישן + חיוב מקומי). אם אין מה לגבות — נדלג.
+  try {
+    const payload = JSON.stringify(await collectBackupData());
+    const result = await uploadFile(payload, null, UNIFIED_FILE);
+    if (result.id) localStorage.setItem(LS.fileId, result.id);
+    localStorage.setItem(LS.lastPull, result.modifiedTime || new Date().toISOString());
+    localStorage.setItem(LS.lastSync, new Date().toISOString());
+    localStorage.setItem(LS.migrated, '1');
+  } catch (e) { console.warn('[sync] migrate upload', e); }
+}
+
+/* ============================================================
    העלאה (create-or-update)
    ============================================================ */
-async function uploadFile(payload, existingId) {
+async function uploadFile(payload, existingId, name = UNIFIED_FILE) {
   if (existingId) {
     const res = await _authedFetch('PATCH',
       `https://www.googleapis.com/upload/drive/v3/files/${existingId}?uploadType=media&fields=id,modifiedTime`,
@@ -211,7 +260,7 @@ async function uploadFile(payload, existingId) {
     return res.json();
   }
   const boundary = '----laworder' + Date.now();
-  const meta = { name: FILE_NAME, mimeType: 'application/json' };
+  const meta = { name, mimeType: 'application/json' };
   const multipart =
     `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n` +
     `--${boundary}\r\nContent-Type: application/json\r\n\r\n${payload}\r\n--${boundary}--`;
@@ -328,7 +377,7 @@ async function autoSyncInit() {
   const ok = await silentSignIn();
   if (!ok) { setState('signed-out'); return; }
   setState('syncing');
-  try { await autoPull(); setState('idle'); } catch { setState('error'); }
+  try { await migrateFromLegacy(); await autoPull(); setState('idle'); } catch { setState('error'); }
 }
 
 export function init({ onChange, toast } = {}) {
