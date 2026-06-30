@@ -20,7 +20,14 @@ const state = {
   ledger: null,
   loaded: false,
   crmCtx: { contacts: [], companies: [] }, // נשמר עבור הדשבורד המאוחד
+  donutMetric: 'amount',  // 'amount' (הכנסות) | 'commission' (עמלות) — דונאט בדשבורד
+  cmMetric: 'amount',     // 'amount' | 'commission' — טבלת פירוט חודשי לפי לקוח
 };
+
+const MONTHS_SHORT = ['', 'ינ', 'פבר', 'מרץ', 'אפר', 'מאי', 'יוני', 'יולי', 'אוג', 'ספט', 'אוק', 'נוב', 'דצמ'];
+const DONUT_PALETTE = ['#f2ca50', '#86dfff', '#c084fc', '#34d399', '#f87171', '#fbbf24'];
+const fmtNum = (v) => Math.round(v || 0).toLocaleString('he-IL');
+const maxMonthFor = (year) => (year === new Date().getFullYear() ? new Date().getMonth() + 1 : 12);
 
 let refs = {};
 let onMutate = null; // callback ל-app (רענון/סנכרון)
@@ -295,14 +302,37 @@ function monthlySeries() {
   state.payments.forEach((p) => { if (p.month >= 1 && p.month <= 12) pay[p.month - 1] += p.amount || 0; });
   return { comm, pay };
 }
-function commByType() {
-  const map = {};
+/** פילוח לפי לקוח (top-5 + "אחרים"), לפי המטריקה הנבחרת */
+function clientSegments(metric) {
+  const byClient = {};
   state.invoices.forEach((inv) => {
     const cs = state.cases.find((c) => c.id === inv.caseId);
-    const t = cs ? cs.caseType : 'שוטף';
-    map[t] = (map[t] || 0) + (inv.commission || 0);
+    if (!cs) return;
+    byClient[cs.clientId] = (byClient[cs.clientId] || 0) + (metric === 'commission' ? (inv.commission || 0) : (inv.amount || 0));
   });
-  return billing.CASE_TYPES.map((t) => ({ label: t, value: map[t] || 0, color: TYPE_COLOR[t] }));
+  let rows = Object.entries(byClient)
+    .map(([cid, v]) => ({ name: clientName(parseInt(cid, 10)), val: v }))
+    .filter((r) => r.val > 0)
+    .sort((a, b) => b.val - a.val);
+  if (rows.length > 5) {
+    const rest = rows.slice(5);
+    rows = [...rows.slice(0, 5), { name: `${rest.length} אחרים`, val: rest.reduce((s, r) => s + r.val, 0) }];
+  }
+  return rows.map((r, i) => ({ label: r.name, value: r.val, color: DONUT_PALETTE[i] || '#9ca3af' }));
+}
+
+function donutPanel() {
+  const metric = state.donutMetric;
+  const segs = clientSegments(metric);
+  const total = segs.reduce((s, x) => s + x.value, 0);
+  const title = metric === 'commission' ? 'פילוח עמלות לפי לקוח' : 'פילוח הכנסות לפי לקוח';
+  const toggle = el('button', { class: 'btn btn--ghost btn--sm panel__toggle', 'data-bil-action': 'toggle-donut', text: metric === 'commission' ? 'הצג הכנסות' : 'הצג עמלות' });
+  return el('div', { class: 'panel' }, [
+    el('div', { class: 'panel__title' }, [icon('coins'), el('h3', { text: title }), toggle]),
+    segs.length
+      ? donut({ segments: segs, centerLabel: 'סה״כ', centerValue: formatCompactCurrency(total) || '₪0' })
+      : el('div', { class: 'fin-empty', text: `אין נתונים לשנת ${state.year}` }),
+  ]);
 }
 
 function drawDashboard(container) {
@@ -313,17 +343,18 @@ function drawDashboard(container) {
   const hero = el('div', { class: 'dash-hero' }, [
     el('div', { class: 'dash-hero__top' }, [
       el('span', { class: 'dash-hero__brand', text: 'LexLedger' }),
-      el('span', { class: 'dash-hero__label', text: `יתרה לתשלום · ${state.year}` }),
+      el('span', { class: 'dash-hero__label', text: `הכנסה כוללת · ${state.year}` }),
     ]),
-    el('div', { class: 'dash-hero__val num', text: formatCurrency(L.closingBalance) }),
-    el('div', { class: 'dash-hero__sub muted', text: `עמלות ${formatCurrency(L.totalCommissions)} − תשלומים ${formatCurrency(L.totalPayments)} + פתיחה ${formatCurrency(L.openingBalance)}` }),
+    el('div', { class: 'dash-hero__val num', text: formatCurrency(L.totalAmount) }),
+    el('div', { class: 'dash-hero__sub muted', text: `עמלות שנצברו ${formatCurrency(L.totalCommissions)} · ${state.invoices.length} חשבוניות` }),
   ]);
 
+  // סדר לוגי לפי זרימת המאזן: פתיחה → עמלות → תשלומים → יתרה לתשלום
   const kpis = el('div', { class: 'fin-kpis dash-kpis' }, [
-    kpiSmall('הכנסה כוללת', L.totalAmount),
     kpiSmall('יתרת פתיחה', L.openingBalance),
-    kpiSmall('תשלומים שהתקבלו', L.totalPayments, 'pos'),
     kpiSmall('עמלות שנצברו', L.totalCommissions, 'accent'),
+    kpiSmall('תשלומים שהתקבלו', L.totalPayments, 'pos'),
+    kpiSmall('יתרה לתשלום', L.closingBalance, 'total'),
   ]);
 
   const charts = el('div', { class: 'dash-charts' }, [
@@ -334,10 +365,7 @@ function drawDashboard(container) {
         { name: 'תשלומים', color: '#34d399', values: pay },
       ] }),
     ]),
-    el('div', { class: 'panel' }, [
-      el('div', { class: 'panel__title' }, [icon('coins'), el('h3', { text: 'עמלות לפי סוג תיק' })]),
-      donut({ segments: commByType(), centerLabel: 'עמלות', centerValue: formatCompactCurrency(L.totalCommissions) || '₪0' }),
-    ]),
+    donutPanel(),
   ]);
 
   const todaySection = el('div', { class: 'dash-today' }, [
@@ -355,73 +383,178 @@ function drawDashboard(container) {
   container.replaceChildren(wrap);
 }
 
-/* ============================================================ אנליזה (טבלאות) ============================================================ */
+/* ============================================================ אנליזה — בדיוק כמו עמוד הבית של Lawfee ============================================================ */
+const expName = (name, cid, scope) => el('span', { class: 'exp-name' }, [el('span', { class: 'chevron', html: ICONS.back }), name]);
+const caseMap = () => Object.fromEntries(state.cases.map((c) => [c.id, c]));
+
 function renderAnalysis(container) {
   const wrap = el('div', { class: 'fin-wrap' }, [
     el('div', { class: 'view-h' }, [
-      el('div', {}, [el('h1', { text: 'אנליזה' }), el('p', { text: 'פירוט חשבונות ולקוחות' })]),
+      el('div', {}, [el('h1', { text: 'אנליזה' }), el('p', { text: 'פירוט חשבוניות, לקוחות ותיקים' })]),
       yearSelect(),
     ]),
   ]);
 
-  // — סיכום לפי לקוח —
-  const perClient = state.clients.map((cl) => {
-    const caseIds = state.cases.filter((c) => c.clientId === cl.id).map((c) => c.id);
-    const invs = state.invoices.filter((i) => caseIds.includes(i.caseId));
-    return {
-      name: cl.name, casesN: caseIds.length,
-      amount: invs.reduce((s, i) => s + (i.amount || 0), 0),
-      comm: invs.reduce((s, i) => s + (i.commission || 0), 0),
-    };
-  }).filter((r) => r.casesN || r.amount).sort((a, b) => b.comm - a.comm);
-
-  wrap.append(el('div', { class: 'panel-h', text: 'סיכום לפי לקוח' }));
-  if (perClient.length) {
-    const rows = perClient.map((r) => el('tr', {}, [
-      el('td', { text: r.name }),
-      el('td', { class: 'num', text: String(r.casesN) }),
-      el('td', { class: 'num', text: formatCurrency(r.amount) }),
-      el('td', { class: 'num accent', text: formatCurrency(r.comm) }),
-    ]));
-    const foot = el('tr', { class: 'fin-table__total' }, [
-      el('td', { text: 'סה״כ' }), el('td', {}),
-      el('td', { class: 'num', text: formatCurrency(perClient.reduce((s, r) => s + r.amount, 0)) }),
-      el('td', { class: 'num accent', text: formatCurrency(perClient.reduce((s, r) => s + r.comm, 0)) }),
-    ]);
-    wrap.append(finTable(['לקוח', 'תיקים', 'סה״כ חיובים', 'עמלות'], rows, foot));
-  } else {
-    wrap.append(el('div', { class: 'fin-empty' }, [icon('users', 'ic-lg'), el('p', { text: `אין נתונים לשנת ${state.year}` })]));
+  if (!state.invoices.length) {
+    wrap.append(el('div', { class: 'fin-empty' }, [icon('receipt', 'ic-lg'), el('p', { text: `אין נתוני חשבוניות לשנת ${state.year}` })]));
+    container.replaceChildren(wrap);
+    return;
   }
 
-  // — סיכום לפי סוג תיק —
-  const byType = commByType().map((seg) => {
-    const n = state.invoices.filter((inv) => {
-      const cs = state.cases.find((c) => c.id === inv.caseId);
-      return (cs ? cs.caseType : 'שוטף') === seg.label;
-    });
-    return { type: seg.label, color: seg.color, count: n.length, amount: n.reduce((s, i) => s + (i.amount || 0), 0), comm: seg.value };
-  }).filter((r) => r.count);
-
-  if (byType.length) {
-    wrap.append(el('div', { class: 'panel-h', text: 'סיכום לפי סוג תיק' }));
-    const rows = byType.map((r) => el('tr', {}, [
-      el('td', {}, [el('span', { class: `bil-type bil-type--${TYPE_TONE[r.type] || 'info'}`, text: r.type })]),
-      el('td', { class: 'num', text: String(r.count) }),
-      el('td', { class: 'num', text: formatCurrency(r.amount) }),
-      el('td', { class: 'num accent', text: formatCurrency(r.comm) }),
-    ]));
-    wrap.append(finTable(['סוג', 'חשבוניות', 'סה״כ חיובים', 'עמלות'], rows, null));
-  }
-
+  wrap.append(el('div', { class: 'panel-h', text: 'פירוט חודשי' }), monthlyBreakdownTable());
+  wrap.append(el('div', { class: 'panel-h', text: 'פירוט לפי לקוח' }), clientBreakdownTable());
+  wrap.append(clientMonthlyHeader(), clientMonthlyTable());
   container.replaceChildren(wrap);
+}
+
+/* —— טבלה 1: פירוט חודשי (יתרה מתגלגלת) —— */
+function monthlyBreakdownTable() {
+  const L = state.ledger || {};
+  const invM = {}, payM = {};
+  state.invoices.forEach((i) => { invM[i.month] = invM[i.month] || { a: 0, c: 0 }; invM[i.month].a += i.amount || 0; invM[i.month].c += i.commission || 0; });
+  state.payments.forEach((p) => { const m = (p.month >= 1 && p.month <= 12) ? p.month : 0; payM[m] = (payM[m] || 0) + (p.amount || 0); });
+
+  const maxM = maxMonthFor(state.year);
+  let running = L.openingBalance || 0, tA = 0, tC = 0, tP = 0;
+  const rows = [];
+  for (let m = 1; m <= maxM; m++) {
+    const inv = invM[m] || { a: 0, c: 0 }; const pay = payM[m] || 0;
+    running += inv.c - pay; tA += inv.a; tC += inv.c; tP += pay;
+    const has = inv.a > 0 || pay > 0;
+    rows.push(el('tr', { class: has ? '' : 'row-dim' }, [
+      el('td', { text: MONTHS[m] }),
+      el('td', { class: 'num', text: inv.a ? fmtNum(inv.a) : '—' }),
+      el('td', { class: 'num accent', text: inv.c ? fmtNum(inv.c) : '—' }),
+      el('td', { class: 'num pos', text: pay ? fmtNum(pay) : '—' }),
+      el('td', { class: `num ${running < 0 ? 'neg' : ''}`, text: fmtNum(running) }),
+    ]));
+  }
+  if (payM[0]) { running -= payM[0]; tP += payM[0];
+    rows.push(el('tr', { class: 'row-dim' }, [el('td', { text: 'ללא חודש' }), el('td', { class: 'num', text: '—' }), el('td', { class: 'num', text: '—' }), el('td', { class: 'num pos', text: fmtNum(payM[0]) }), el('td', { class: 'num', text: fmtNum(running) })]));
+  }
+  const foot = el('tr', { class: 'fin-table__total' }, [
+    el('td', { text: 'סה״כ' }),
+    el('td', { class: 'num', text: fmtNum(tA) }),
+    el('td', { class: 'num accent', text: fmtNum(tC) }),
+    el('td', { class: 'num pos', text: fmtNum(tP) }),
+    el('td', { class: 'num', text: fmtNum(L.closingBalance) }),
+  ]);
+  return finTable(['חודש', 'הכנסות', 'עמלות', 'תשלומים', 'יתרה'], rows, foot);
+}
+
+/* —— טבלה 2: פירוט לפי לקוח (נפתח לתיקים) —— */
+function clientBreakdownTable() {
+  const cm = caseMap();
+  const byCase = {};
+  state.invoices.forEach((inv) => { byCase[inv.caseId] = byCase[inv.caseId] || { a: 0, c: 0 }; byCase[inv.caseId].a += inv.amount || 0; byCase[inv.caseId].c += inv.commission || 0; });
+  const byClient = {};
+  Object.entries(byCase).forEach(([cid, agg]) => {
+    const cs = cm[cid]; if (!cs) return;
+    const k = cs.clientId;
+    byClient[k] = byClient[k] || { a: 0, c: 0, cases: [] };
+    byClient[k].a += agg.a; byClient[k].c += agg.c; byClient[k].cases.push({ ...agg, cs });
+  });
+  const sorted = Object.entries(byClient).sort((a, b) => b[1].c - a[1].c);
+
+  let tA = 0, tC = 0; const rows = [];
+  sorted.forEach(([cid, data]) => {
+    tA += data.a; tC += data.c;
+    data.cases.sort((a, b) => b.c - a.c);
+    rows.push(el('tr', { class: 'client-row', 'data-bil-action': 'exp-client', dataset: { cid, scope: 'cb' } }, [
+      el('td', {}, [expName(clientName(parseInt(cid, 10)))]),
+      el('td', { class: 'muted', text: `${data.cases.length} תיקים` }),
+      el('td', { class: 'num muted', text: '—' }),
+      el('td', { class: 'num', text: fmtNum(data.a) }),
+      el('td', { class: 'num accent', text: fmtNum(data.c) }),
+      el('td', { class: 'ta-c muted', text: '—' }),
+    ]));
+    data.cases.forEach((r) => {
+      const c = r.cs;
+      rows.push(el('tr', { class: 'case-row', hidden: true, dataset: { parent: `cb-${cid}` } }, [
+        el('td', {}),
+        el('td', {}, [el('span', { class: 'case-num', text: c.caseNumber || '—' }), c.description && c.description !== c.caseNumber ? el('span', { class: 'muted', text: ' ' + c.description }) : null]),
+        el('td', { class: 'num muted', text: `${c.commissionRate}%` }),
+        el('td', { class: 'num', text: fmtNum(r.a) }),
+        el('td', { class: 'num accent', text: fmtNum(r.c) }),
+        el('td', { class: 'ta-c' }, [el('span', { class: `bil-type bil-type--${TYPE_TONE[c.caseType] || 'info'}`, text: c.caseType })]),
+      ]));
+    });
+  });
+  const foot = el('tr', { class: 'fin-table__total' }, [
+    el('td', { colspan: '3', text: 'סה״כ' }),
+    el('td', { class: 'num', text: fmtNum(tA) }),
+    el('td', { class: 'num accent', text: fmtNum(tC) }),
+    el('td', {}),
+  ]);
+  return finTable(['לקוח / תיק', 'תיקים', 'אחוז', 'הכנסות', 'עמלות', 'סטטוס'], rows, foot);
+}
+
+/* —— טבלה 3: פירוט חודשי לפי לקוח (pivot, נפתח, מתג מטריקה) —— */
+function clientMonthlyHeader() {
+  return el('div', { class: 'panel-h panel-h--row' }, [
+    el('span', { text: 'פירוט חודשי לפי לקוח' }),
+    el('button', { class: 'btn btn--ghost btn--sm', 'data-bil-action': 'toggle-cm', text: state.cmMetric === 'commission' ? 'הצג הכנסות' : 'הצג עמלות' }),
+  ]);
+}
+function clientMonthlyTable() {
+  const cm = caseMap();
+  const metric = state.cmMetric === 'commission' ? 'c' : 'a';
+  const maxM = maxMonthFor(state.year);
+  const clients = {};
+  state.invoices.forEach((inv) => {
+    const cs = cm[inv.caseId]; if (!cs) return;
+    const k = cs.clientId;
+    clients[k] = clients[k] || { months: {}, cases: {} };
+    clients[k].months[inv.month] = clients[k].months[inv.month] || { a: 0, c: 0 };
+    clients[k].months[inv.month].a += inv.amount || 0; clients[k].months[inv.month].c += inv.commission || 0;
+    clients[k].cases[inv.caseId] = clients[k].cases[inv.caseId] || { months: {}, cs };
+    clients[k].cases[inv.caseId].months[inv.month] = clients[k].cases[inv.caseId].months[inv.month] || { a: 0, c: 0 };
+    clients[k].cases[inv.caseId].months[inv.month].a += inv.amount || 0; clients[k].cases[inv.caseId].months[inv.month].c += inv.commission || 0;
+  });
+  const sortedIds = Object.keys(clients).sort((a, b) => clientName(parseInt(a, 10)).localeCompare(clientName(parseInt(b, 10)), 'he'));
+
+  const monthCells = (months) => {
+    let total = 0; const cells = [];
+    for (let m = 1; m <= maxM; m++) { const v = (months[m] || {})[metric] || 0; total += v; cells.push(el('td', { class: `num ${v ? '' : 'muted'}`, text: v ? fmtNum(v) : '—' })); }
+    return { cells, total };
+  };
+
+  const monthTotals = {}; let grand = 0; const rows = [];
+  sortedIds.forEach((cid) => {
+    const data = clients[cid];
+    const { cells, total } = monthCells(data.months);
+    for (let m = 1; m <= maxM; m++) monthTotals[m] = (monthTotals[m] || 0) + ((data.months[m] || {})[metric] || 0);
+    grand += total;
+    rows.push(el('tr', { class: 'client-row', 'data-bil-action': 'exp-client', dataset: { cid, scope: 'cm' } }, [
+      el('td', { class: 'nowrap' }, [expName(clientName(parseInt(cid, 10)))]),
+      ...cells,
+      el('td', { class: `num ${metric === 'c' ? 'accent' : ''}`, text: fmtNum(total) }),
+    ]));
+    Object.keys(data.cases).sort((a, b) => (data.cases[a].cs.caseNumber || '').localeCompare(data.cases[b].cs.caseNumber || '')).forEach((caseId) => {
+      const cd = data.cases[caseId]; const c = cd.cs;
+      const { cells: ccells, total: ctotal } = monthCells(cd.months);
+      rows.push(el('tr', { class: 'case-row', hidden: true, dataset: { parent: `cm-${cid}` } }, [
+        el('td', { class: 'nowrap' }, [el('span', { class: 'case-num', text: (c.caseNumber || '—') + (c.description && c.description !== c.caseNumber ? ' — ' + c.description : '') })]),
+        ...ccells,
+        el('td', { class: 'num muted', text: fmtNum(ctotal) }),
+      ]));
+    });
+  });
+  const totalCells = []; for (let m = 1; m <= maxM; m++) { const v = monthTotals[m] || 0; totalCells.push(el('td', { class: 'num', text: v ? fmtNum(v) : '—' })); }
+  const foot = el('tr', { class: 'fin-table__total' }, [el('td', { text: 'סה״כ חודשי' }), ...totalCells, el('td', { class: `num ${metric === 'c' ? 'accent' : ''}`, text: fmtNum(grand) })]);
+
+  const headLabels = ['לקוח / תיק', ...Array.from({ length: maxM }, (_, i) => MONTHS_SHORT[i + 1]), 'סה״כ'];
+  const thead = el('thead', {}, [el('tr', {}, headLabels.map((h) => el('th', { class: 'num', text: h })))]);
+  return el('div', { class: 'fin-table-wrap fin-table-wrap--scroll' }, [el('table', { class: 'fin-table fin-table--pivot' }, [thead, el('tbody', {}, rows), el('tfoot', {}, [foot])])]);
 }
 
 /* ---------- shared widgets ---------- */
 function kpiSmall(label, value, tone) {
   const isCurrency = tone !== 'plain';
-  return el('div', { class: 'fin-kpi' }, [
+  const valTone = tone === 'accent' || tone === 'total' ? 'accent' : tone === 'pos' ? 'pos' : '';
+  return el('div', { class: `fin-kpi${tone === 'total' ? ' fin-kpi--hl' : ''}` }, [
     el('span', { class: 'fin-kpi__label', text: label }),
-    el('span', { class: `fin-kpi__val num ${tone === 'accent' ? 'accent' : tone === 'pos' ? 'pos' : ''}`, text: isCurrency ? formatCurrency(value) : String(value) }),
+    el('span', { class: `fin-kpi__val num ${valTone}`, text: isCurrency ? formatCurrency(value) : String(value) }),
   ]);
 }
 function finTable(headCells, rows, footRow) {
@@ -471,8 +604,24 @@ async function onClick(e) {
     case 'edit-payment': return paymentForm(state.payments.find((p) => p.id === id));
     case 'del-payment': return delPayment(id);
     case 'save-opening': return saveOpening();
+    case 'toggle-donut':
+      state.donutMetric = state.donutMetric === 'commission' ? 'amount' : 'commission';
+      return renderDashboard(refs.dashboard, state.crmCtx);
+    case 'toggle-cm':
+      state.cmMetric = state.cmMetric === 'commission' ? 'amount' : 'commission';
+      return renderAnalysis(refs.analysis);
+    case 'exp-client': return toggleExpand(t);
     default: void view;
   }
+}
+
+/** הרחבת/כיווץ שורת לקוח → תיקים (טבלאות אנליזה) */
+function toggleExpand(rowEl) {
+  const tr = rowEl.closest('tr');
+  const { cid, scope } = tr.dataset;
+  const open = tr.classList.toggle('expanded');
+  tr.querySelector('.chevron')?.classList.toggle('open', open);
+  tr.closest('table').querySelectorAll(`tr.case-row[data-parent="${scope}-${cid}"]`).forEach((r) => { r.hidden = !open; });
 }
 
 /* ---------- delete handlers ---------- */

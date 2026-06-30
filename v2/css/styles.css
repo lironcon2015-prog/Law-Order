@@ -1943,3 +1943,29 @@ body.view-analysis #analysis-view { display: block; }
   .dash-hero__val { font-size: 2.4rem; }
   .donut { justify-content: center; }
 }
+
+/* ---------- אנליזה: שורות נפתחות, pivot, מתגים ---------- */
+.panel__toggle { margin-inline-start: auto; }
+.panel-h--row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+
+.exp-name { display: inline-flex; align-items: center; gap: 7px; }
+.chevron { display: inline-grid; place-items: center; color: var(--text-muted); transition: transform 0.2s var(--ease-out); }
+.chevron svg { width: 15px; height: 15px; }
+.chevron.open { transform: rotate(90deg); }
+
+.client-row { cursor: pointer; }
+.client-row:hover { background: var(--surface-2); }
+.case-row > td { background: rgba(0, 0, 0, 0.18); }
+.case-num { font-size: 0.8rem; color: var(--text-secondary); }
+.row-dim { opacity: 0.4; }
+.ta-c { text-align: center; }
+.nowrap { white-space: nowrap; }
+.fin-table .num.neg { color: var(--negative); }
+
+.fin-kpi--hl { border-color: var(--gold-line); background: var(--gold-grad-soft);
+  box-shadow: var(--elev-1), 0 0 20px -8px var(--gold-glow); }
+
+/* pivot table (פירוט חודשי לפי לקוח) */
+.fin-table-wrap--scroll { overflow-x: auto; }
+.fin-table--pivot th, .fin-table--pivot td { padding: 9px 12px; font-size: 0.8rem; white-space: nowrap; }
+.fin-table--pivot th.num, .fin-table--pivot td.num { text-align: start; }
