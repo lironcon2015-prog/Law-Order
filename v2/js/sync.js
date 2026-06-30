@@ -4,6 +4,7 @@
 
 import * as store from './store.js';
 import * as db from './db.js';
+import * as billing from './billing.js';
 
 /* ============================================================
    הגדרות — מזינים כאן את ה-OAuth Client ID לאחר יצירתו
@@ -178,7 +179,8 @@ async function findRemoteFile() {
    ============================================================ */
 async function collectBackupData() {
   const [contacts, companies] = await Promise.all([store.getContacts(), store.getCompanies()]);
-  return { app: 'laworder-crm', version: 1, exportedAt: new Date().toISOString(), contacts, companies };
+  const bil = await billing.collectBackupData(); // clients/cases/invoices/payments/balances/billingSettings
+  return { app: 'lexledger-unified', version: 2, exportedAt: new Date().toISOString(), contacts, companies, ...bil };
 }
 async function applyBackupData(data) {
   if (!isValidShape(data)) throw new Error('schema');
@@ -186,6 +188,14 @@ async function applyBackupData(data) {
   try {
     if (Array.isArray(data.companies)) await db.replaceAll('companies', data.companies);
     if (Array.isArray(data.contacts)) await db.replaceAll('contacts', data.contacts);
+    // חיוב (v2+) — מיושם רק אם קיים בקובץ (תאימות לאחור עם גיבוי CRM ישן v1)
+    if (data.clients || data.cases || data.invoices || data.payments || data.balances || data.billingSettings) {
+      await billing.applyBackupData({
+        clients: data.clients, cases: data.cases, invoices: data.invoices,
+        payments: data.payments, balances: data.balances,
+        billingSettings: data.billingSettings || data.settings,
+      });
+    }
   } finally { _suppressPush = false; }
   if (_onChange) await _onChange();
 }

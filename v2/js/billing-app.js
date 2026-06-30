@@ -5,6 +5,7 @@
 import * as billing from './billing.js';
 import { ICONS, toast, formatCurrency, formatCompactCurrency, buildToday } from './ui.js';
 import { barChart, donut } from './charts.js';
+import * as importer from './importer.js';
 
 const MONTHS = ['', 'ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
 const TYPE_TONE = { 'שוטף': 'info', 'ליטיגציה': 'neg', 'עסקה': 'plum' };
@@ -54,9 +55,9 @@ const icon = (name, cls = 'ic') => el('span', { class: cls, html: ICONS[name] ||
 const num = (v) => el('span', { class: 'num', text: formatCurrency(v) });
 
 /* ============================================================ init + data ============================================================ */
-export function init(containers, mutateCb) {
-  refs = containers; // { clients, invoices, payments, finSettings }
-  onMutate = mutateCb;
+export function init(containers, appRefresh) {
+  refs = containers; // { clients, invoices, payments, finSettings, analysis, dashboard }
+  onMutate = appRefresh; // רענון CRM מלא (loadData+render) — מופעל אחרי ייבוא
   document.addEventListener('click', onClick);
   document.addEventListener('change', onChange);
 }
@@ -82,7 +83,6 @@ export async function loadData() {
 async function reload(view) {
   await loadData();
   renderView(view);
-  if (onMutate) onMutate();
 }
 
 /* ============================================================ render dispatch ============================================================ */
@@ -281,6 +281,14 @@ function renderSettings(container) {
       ledgerRow('עמלות שנצברו', L.totalCommissions, 'accent'),
       ledgerRow('תשלומים שהתקבלו', L.totalPayments, 'pos'),
       ledgerRow('יתרה לתשלום', L.closingBalance, 'total'),
+    ]),
+    el('div', { class: 'panel' }, [
+      el('div', { class: 'panel__title' }, [icon('cloud'), el('h3', { text: 'ייבוא וייצוא נתונים' })]),
+      el('p', { class: 'muted fin-hint', text: 'ייבא גיבוי קיים — CRM (אנשי קשר/חברות) או חיוב (לקוחות/חשבוניות). האפליקציה מזהה את הפורמט אוטומטית ומחליפה את אותו דומיין בלבד, כך שאפשר לייבא את שני הגיבויים. ייצוא יוצר קובץ גיבוי מאוחד יחיד.' }),
+      el('div', { class: 'fin-io-row' }, [
+        el('label', { class: 'btn btn--ghost btn--sm' }, [icon('cloudDown'), el('span', { text: 'ייבוא גיבוי' }), el('input', { id: 'fin-import', type: 'file', accept: 'application/json,.json', hidden: true })]),
+        el('button', { class: 'btn btn--ghost btn--sm', 'data-bil-action': 'export-backup' }, [icon('cloudUp'), el('span', { text: 'ייצוא גיבוי מאוחד' })]),
+      ]),
     ]),
   ]);
   container.replaceChildren(wrap);
@@ -576,10 +584,42 @@ function currentView() {
 }
 
 async function onChange(e) {
+  if (e.target.id === 'fin-import') { handleImport(e.target); return; }
   const t = e.target.closest('[data-bil-action="year"]');
   if (!t) return;
   state.year = parseInt(t.value, 10);
   await reload(currentView());
+}
+
+/* ---------- ייבוא / ייצוא ---------- */
+async function handleImport(inputEl) {
+  const file = inputEl.files && inputEl.files[0];
+  inputEl.value = ''; // לאפשר ייבוא חוזר של אותו קובץ
+  if (!file) return;
+  let data;
+  try { data = await importer.readJsonFile(file); } catch { toast('קובץ JSON לא תקין', 'alert'); return; }
+  const fmt = importer.detectFormat(data);
+  if (!fmt) { toast('פורמט גיבוי לא מזוהה', 'alert'); return; }
+  if (!confirm(`זוהה: ${importer.describeFormat(fmt)}\n${importer.summarize(data, fmt)}\n\nהייבוא יחליף את הנתונים הקיימים בדומיין זה. להמשיך?`)) return;
+  try {
+    await importer.applyImport(data, fmt);
+    await loadData();
+    if (onMutate) await onMutate(); // רענון CRM + render
+    renderView(currentView() || 'fin-settings');
+    toast('הנתונים יובאו בהצלחה');
+  } catch (err) { console.error(err); toast('הייבוא נכשל', 'alert'); }
+}
+
+async function exportBackup() {
+  try {
+    const data = await importer.collectAll();
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = el('a', { href: url, download: `lexledger-backup-${new Date().toISOString().slice(0, 10)}.json` });
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+    toast('קובץ הגיבוי נוצר');
+  } catch (err) { console.error(err); toast('הייצוא נכשל', 'alert'); }
 }
 
 async function onClick(e) {
@@ -603,6 +643,7 @@ async function onClick(e) {
     case 'edit-payment': return paymentForm(state.payments.find((p) => p.id === id));
     case 'del-payment': return delPayment(id);
     case 'save-opening': return saveOpening();
+    case 'export-backup': return exportBackup();
     case 'toggle-donut':
       state.donutMetric = state.donutMetric === 'commission' ? 'amount' : 'commission';
       return renderDashboard(refs.dashboard, state.crmCtx);

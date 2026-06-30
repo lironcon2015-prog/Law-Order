@@ -1968,3 +1968,7 @@ body.view-analysis #analysis-view { display: block; }
 .fin-table-wrap--scroll { overflow-x: auto; }
 .fin-table--pivot th, .fin-table--pivot td { padding: 9px 12px; font-size: 0.8rem; white-space: nowrap; }
 .fin-table--pivot th.num, .fin-table--pivot td.num { text-align: start; }
+
+/* ---------- ייבוא/ייצוא (הגדרות) ---------- */
+.fin-io-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+.fin-io-row label.btn { cursor: pointer; }

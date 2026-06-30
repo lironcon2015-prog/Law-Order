@@ -45,13 +45,13 @@ async function init() {
     clients: refs.clientsView, invoices: refs.invoicesView,
     payments: refs.paymentsView, finSettings: refs.finSettingsView,
     analysis: refs.analysisView, dashboard: refs.todayView,
-  });
+  }, async () => { await loadData(); render(); }); // רענון CRM אחרי ייבוא
 
   // סנכרון Drive: התראת מוטציה → push מבוזבז; auto-pull בטעינה
   store.setMutationListener(sync.notifyMutation);
   billing.setMutationListener(sync.notifyMutation);
   sync.init({
-    onChange: async () => { await loadData(); render(); },
+    onChange: async () => { await loadData(); await billingApp.loadData(); render(); },
     toast: ui.toast,
   });
 }
