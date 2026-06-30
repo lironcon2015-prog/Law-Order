@@ -1894,8 +1894,8 @@ body.view-fin-settings #fin-settings-view { display: block; }
    ============================================================ */
 body.view-analysis #analysis-view { display: block; }
 
-/* hero — יתרה לתשלום */
-.dash-hero { position: relative; overflow: hidden; border-radius: var(--radius-xl); padding: 28px 30px;
+/* hero — הכנסה כוללת (יישור לימין) */
+.dash-hero { position: relative; overflow: hidden; border-radius: var(--radius-xl); padding: 28px 30px; text-align: right;
   background:
     radial-gradient(120% 140% at 88% -10%, rgba(242,202,80,0.14), transparent 60%),
     linear-gradient(135deg, var(--surface-2), var(--surface-1));
@@ -1903,9 +1903,8 @@ body.view-analysis #analysis-view { display: block; }
 .dash-hero__top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .dash-hero__brand { font-size: 0.7rem; font-weight: 800; letter-spacing: 0.22em; text-transform: uppercase; color: var(--gold-deep); }
 .dash-hero__label { font-size: 0.8rem; color: var(--text-muted); font-weight: 600; }
-.dash-hero__val { font-size: 3rem; font-weight: 800; line-height: 1; letter-spacing: -0.02em;
+.dash-hero__val { font-size: 3rem; font-weight: 800; line-height: 1; letter-spacing: -0.02em; text-align: right;
   background: linear-gradient(120deg, #fff 0%, #f3e6c4 55%, var(--gold) 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
-.dash-hero__sub { font-size: 0.84rem; margin-top: 10px; }
 
 .dash-kpis { margin-bottom: 16px; }
 

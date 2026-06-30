@@ -346,7 +346,6 @@ function drawDashboard(container) {
       el('span', { class: 'dash-hero__label', text: `הכנסה כוללת · ${state.year}` }),
     ]),
     el('div', { class: 'dash-hero__val num', text: formatCurrency(L.totalAmount) }),
-    el('div', { class: 'dash-hero__sub muted', text: `עמלות שנצברו ${formatCurrency(L.totalCommissions)} · ${state.invoices.length} חשבוניות` }),
   ]);
 
   // סדר לוגי לפי זרימת המאזן: פתיחה → עמלות → תשלומים → יתרה לתשלום
