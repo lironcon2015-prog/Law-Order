@@ -221,7 +221,13 @@ function dotColorForTier(tier) {
    "היום" — מנוע פעולה
    ============================================================ */
 export function renderToday(container, contacts, companies, state) {
-  container.replaceChildren();
+  container.replaceChildren(buildToday(contacts, companies));
+  void state;
+}
+
+/** בונה את תוכן תצוגת "היום" (סיכום + רשימות פעולה) ומחזיר אלמנט.
+ *  משמש גם בדשבורד המאוחד (Phase 3) תחת הכותרת "היום". */
+export function buildToday(contacts, companies) {
   const names = companyNameMap(companies);
   const { active, overdue, soon, noContact } = actionBuckets(contacts);
   const openValue = [...active, ...overdue, ...soon, ...noContact].reduce((s, c) => s + dealValue(c), 0);
@@ -243,7 +249,7 @@ export function renderToday(container, contacts, companies, state) {
     if (noContact.length) wrap.append(actionGroup('ללא תיעוד קשר', 'info', noContact, names, 'new'));
     if (soon.length) wrap.append(actionGroup('מתקרב לסף — השבוע', 'clock', soon, names, 'warn'));
   }
-  container.append(wrap);
+  return wrap;
 }
 
 function statCard(num, label, tone) {

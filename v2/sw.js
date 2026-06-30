@@ -2,7 +2,7 @@
 // אסטרטגיה: app-shell (HTML/JS/CSS/JSON) = network-first → פרסומים נכנסים לתוקף מיד.
 // פונטים/אייקונים = cache-first. offline עדיין עובד מלא (נפילה ל-cache).
 
-const CACHE = 'lexledger-unified-v4';
+const CACHE = 'lexledger-unified-v5';
 
 const ASSETS = [
   './',
@@ -19,6 +19,7 @@ const ASSETS = [
   './js/seed.js',
   './js/billing.js',
   './js/billing-app.js',
+  './js/charts.js',
   './fonts/assistant-hebrew.woff2',
   './fonts/assistant-latin.woff2',
   './fonts/inter-latin.woff2',

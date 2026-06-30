@@ -7,7 +7,7 @@ import * as sync from './sync.js';
 import * as billingApp from './billing-app.js';
 import * as billing from './billing.js';
 
-const BILLING_VIEWS = ['clients', 'invoices', 'payments', 'fin-settings'];
+const BILLING_VIEWS = ['clients', 'invoices', 'payments', 'fin-settings', 'analysis'];
 
 /* ---------- State יחיד (single source of truth) ---------- */
 const state = {
@@ -44,6 +44,7 @@ async function init() {
   billingApp.init({
     clients: refs.clientsView, invoices: refs.invoicesView,
     payments: refs.paymentsView, finSettings: refs.finSettingsView,
+    analysis: refs.analysisView, dashboard: refs.todayView,
   });
 
   // סנכרון Drive: התראת מוטציה → push מבוזבז; auto-pull בטעינה
@@ -77,10 +78,12 @@ function cacheRefs() {
   refs.viewClients = document.getElementById('view-clients');
   refs.viewInvoices = document.getElementById('view-invoices');
   refs.viewPayments = document.getElementById('view-payments');
+  refs.viewAnalysis = document.getElementById('view-analysis');
   refs.viewFinSettings = document.getElementById('view-fin-settings');
   refs.clientsView = document.getElementById('clients-view');
   refs.invoicesView = document.getElementById('invoices-view');
   refs.paymentsView = document.getElementById('payments-view');
+  refs.analysisView = document.getElementById('analysis-view');
   refs.finSettingsView = document.getElementById('fin-settings-view');
 }
 
@@ -107,7 +110,8 @@ function render() {
   // מצב תצוגה
   const map = {
     today: refs.viewToday, pipeline: refs.viewPipeline, network: refs.viewNetwork, list: refs.viewList,
-    clients: refs.viewClients, invoices: refs.viewInvoices, payments: refs.viewPayments, 'fin-settings': refs.viewFinSettings,
+    clients: refs.viewClients, invoices: refs.viewInvoices, payments: refs.viewPayments,
+    analysis: refs.viewAnalysis, 'fin-settings': refs.viewFinSettings,
   };
   Object.keys(map).forEach((v) => {
     map[v].setAttribute('aria-selected', state.mainView === v ? 'true' : 'false');
@@ -122,7 +126,7 @@ function render() {
 
   if (state.mainView !== 'list') {
     const items = search.filterContacts(state.contacts, state.companies, state.searchTerm);
-    if (state.mainView === 'today') ui.renderToday(refs.todayView, items, state.companies, state);
+    if (state.mainView === 'today') billingApp.renderDashboard(refs.todayView, { contacts: items, companies: state.companies });
     else if (state.mainView === 'network') ui.renderNetwork(refs.networkView, items, state.companies, state);
     else ui.renderPipeline(refs.board, items, state.companies, state);
     if (state.selectedContactId && !refs.drawer.hidden) renderDetail();
@@ -221,6 +225,7 @@ function wireEvents() {
   refs.viewClients.addEventListener('click', () => setMainView('clients'));
   refs.viewInvoices.addEventListener('click', () => setMainView('invoices'));
   refs.viewPayments.addEventListener('click', () => setMainView('payments'));
+  refs.viewAnalysis.addEventListener('click', () => setMainView('analysis'));
   refs.viewFinSettings.addEventListener('click', () => setMainView('fin-settings'));
 
   // mobile nav toggle (sidebar)

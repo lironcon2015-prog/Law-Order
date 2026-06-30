@@ -1888,3 +1888,58 @@ body.view-fin-settings #fin-settings-view { display: block; }
   background: var(--gold-softer); border: 1px solid var(--gold-line); border-radius: var(--radius-md); margin-bottom: 16px; }
 .fin-comm-out { font-size: 1.1rem; font-weight: 800; }
 .field__hint { display: block; font-size: 0.72rem; margin-top: 5px; }
+
+/* ============================================================
+   דשבורד מאוחד + גרפים + אנליזה (Phase 3)
+   ============================================================ */
+body.view-analysis #analysis-view { display: block; }
+
+/* hero — יתרה לתשלום */
+.dash-hero { position: relative; overflow: hidden; border-radius: var(--radius-xl); padding: 28px 30px;
+  background:
+    radial-gradient(120% 140% at 88% -10%, rgba(242,202,80,0.14), transparent 60%),
+    linear-gradient(135deg, var(--surface-2), var(--surface-1));
+  border: 1px solid var(--gold-line); box-shadow: var(--elev-2), inset 0 1px 0 rgba(255,255,255,0.05); margin-bottom: 16px; }
+.dash-hero__top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.dash-hero__brand { font-size: 0.7rem; font-weight: 800; letter-spacing: 0.22em; text-transform: uppercase; color: var(--gold-deep); }
+.dash-hero__label { font-size: 0.8rem; color: var(--text-muted); font-weight: 600; }
+.dash-hero__val { font-size: 3rem; font-weight: 800; line-height: 1; letter-spacing: -0.02em;
+  background: linear-gradient(120deg, #fff 0%, #f3e6c4 55%, var(--gold) 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.dash-hero__sub { font-size: 0.84rem; margin-top: 10px; }
+
+.dash-kpis { margin-bottom: 16px; }
+
+/* charts grid */
+.dash-charts { display: grid; grid-template-columns: 1.7fr 1fr; gap: 16px; margin-bottom: 22px; align-items: stretch; }
+.dash-charts .panel { margin: 0; display: flex; flex-direction: column; }
+.dash-today { margin-top: 8px; }
+.dash-section-h { margin-bottom: 12px; }
+.dash-today .screen.today { padding: 0; }
+
+/* chart primitives */
+.chart { display: flex; flex-direction: column; gap: 10px; }
+.chart-svg { width: 100%; height: auto; display: block; }
+.chart-axis { font-size: 9px; font-family: var(--font-num, monospace); fill: var(--text-faint); }
+.chart-axis--lab { fill: var(--text-muted); }
+.chart-legend { display: flex; gap: 16px; flex-wrap: wrap; }
+.chart-legend--col { flex-direction: column; gap: 9px; }
+.chart-legend__item { display: flex; align-items: center; gap: 7px; font-size: 0.78rem; color: var(--text-secondary); }
+.chart-dot { width: 10px; height: 10px; flex: 0 0 auto; }
+.chart-legend__txt { flex: 1; }
+.chart-legend__val { color: var(--text-muted); font-weight: 700; }
+
+/* donut */
+.donut { display: flex; align-items: center; gap: 18px; flex: 1; }
+.donut-svg { flex: 0 0 auto; }
+.donut-center-val { font-size: 20px; font-weight: 800; fill: var(--text-strong); }
+.donut-center-lab { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; fill: var(--text-muted); }
+
+/* analysis section header */
+.panel-h { font-size: 0.95rem; font-weight: 800; color: var(--text-strong); margin: 22px 2px 12px; }
+.panel-h:first-of-type { margin-top: 4px; }
+
+@media (max-width: 860px) {
+  .dash-charts { grid-template-columns: 1fr; }
+  .dash-hero__val { font-size: 2.4rem; }
+  .donut { justify-content: center; }
+}

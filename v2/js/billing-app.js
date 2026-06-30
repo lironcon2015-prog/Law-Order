@@ -3,7 +3,8 @@
 // מסכים: clients (לקוחות ותיקים) · invoices (חשבוניות) · payments (תשלומים) · fin-settings (הגדרות).
 
 import * as billing from './billing.js';
-import { ICONS, toast, formatCurrency } from './ui.js';
+import { ICONS, toast, formatCurrency, formatCompactCurrency, buildToday } from './ui.js';
+import { barChart, donut } from './charts.js';
 
 const MONTHS = ['', 'ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
 const TYPE_TONE = { 'שוטף': 'info', 'ליטיגציה': 'neg', 'עסקה': 'plum' };
@@ -18,6 +19,7 @@ const state = {
   payments: [],   // לשנה הנבחרת
   ledger: null,
   loaded: false,
+  crmCtx: { contacts: [], companies: [] }, // נשמר עבור הדשבורד המאוחד
 };
 
 let refs = {};
@@ -83,6 +85,15 @@ export async function renderView(view) {
   else if (view === 'invoices') renderInvoices(refs.invoices);
   else if (view === 'payments') renderPayments(refs.payments);
   else if (view === 'fin-settings') renderSettings(refs.finSettings);
+  else if (view === 'analysis') renderAnalysis(refs.analysis);
+  else if (view === 'dashboard') renderDashboard(refs.dashboard, state.crmCtx);
+}
+
+/** דשבורד מאוחד — נקרא מ-app.js עם הקשר ה-CRM (אנשי קשר/חברות) */
+export async function renderDashboard(container, crmCtx) {
+  if (crmCtx) state.crmCtx = crmCtx;
+  if (!state.loaded) await loadData();
+  drawDashboard(container || refs.dashboard);
 }
 
 const clientName = (id) => (state.clients.find((c) => c.id === id) || {}).name || '—';
@@ -274,6 +285,137 @@ function ledgerRow(label, val, tone) {
   ]);
 }
 
+/* ============================================================ דשבורד מאוחד ============================================================ */
+const TYPE_COLOR = { 'שוטף': '#7dd3fc', 'ליטיגציה': '#f87171', 'עסקה': '#c084fc' };
+
+function monthlySeries() {
+  const comm = Array(12).fill(0);
+  const pay = Array(12).fill(0);
+  state.invoices.forEach((inv) => { if (inv.month >= 1 && inv.month <= 12) comm[inv.month - 1] += inv.commission || 0; });
+  state.payments.forEach((p) => { if (p.month >= 1 && p.month <= 12) pay[p.month - 1] += p.amount || 0; });
+  return { comm, pay };
+}
+function commByType() {
+  const map = {};
+  state.invoices.forEach((inv) => {
+    const cs = state.cases.find((c) => c.id === inv.caseId);
+    const t = cs ? cs.caseType : 'שוטף';
+    map[t] = (map[t] || 0) + (inv.commission || 0);
+  });
+  return billing.CASE_TYPES.map((t) => ({ label: t, value: map[t] || 0, color: TYPE_COLOR[t] }));
+}
+
+function drawDashboard(container) {
+  const L = state.ledger || {};
+  const { comm, pay } = monthlySeries();
+  const monthLabels = ['ינ', 'פב', 'מר', 'אפ', 'מא', 'יו', 'יל', 'אג', 'ספ', 'אק', 'נו', 'דצ'];
+
+  const hero = el('div', { class: 'dash-hero' }, [
+    el('div', { class: 'dash-hero__top' }, [
+      el('span', { class: 'dash-hero__brand', text: 'LexLedger' }),
+      el('span', { class: 'dash-hero__label', text: `יתרה לתשלום · ${state.year}` }),
+    ]),
+    el('div', { class: 'dash-hero__val num', text: formatCurrency(L.closingBalance) }),
+    el('div', { class: 'dash-hero__sub muted', text: `עמלות ${formatCurrency(L.totalCommissions)} − תשלומים ${formatCurrency(L.totalPayments)} + פתיחה ${formatCurrency(L.openingBalance)}` }),
+  ]);
+
+  const kpis = el('div', { class: 'fin-kpis dash-kpis' }, [
+    kpiSmall('הכנסה כוללת', L.totalAmount),
+    kpiSmall('יתרת פתיחה', L.openingBalance),
+    kpiSmall('תשלומים שהתקבלו', L.totalPayments, 'pos'),
+    kpiSmall('עמלות שנצברו', L.totalCommissions, 'accent'),
+  ]);
+
+  const charts = el('div', { class: 'dash-charts' }, [
+    el('div', { class: 'panel' }, [
+      el('div', { class: 'panel__title' }, [icon('trending'), el('h3', { text: 'תזרים חודשי' })]),
+      barChart({ labels: monthLabels, series: [
+        { name: 'עמלות', color: '#f2ca50', values: comm },
+        { name: 'תשלומים', color: '#34d399', values: pay },
+      ] }),
+    ]),
+    el('div', { class: 'panel' }, [
+      el('div', { class: 'panel__title' }, [icon('coins'), el('h3', { text: 'עמלות לפי סוג תיק' })]),
+      donut({ segments: commByType(), centerLabel: 'עמלות', centerValue: formatCompactCurrency(L.totalCommissions) || '₪0' }),
+    ]),
+  ]);
+
+  const todaySection = el('div', { class: 'dash-today' }, [
+    el('div', { class: 'panel__title dash-section-h' }, [icon('zap'), el('h3', { text: 'היום — פעולות פתוחות' })]),
+    buildToday(state.crmCtx.contacts, state.crmCtx.companies),
+  ]);
+
+  const wrap = el('div', { class: 'fin-wrap dash-wrap' }, [
+    el('div', { class: 'view-h' }, [
+      el('div', {}, [el('h1', { text: 'לוח בקרה' }), el('p', { text: 'סקירה מאוחדת — כספים ופיתוח עסקי' })]),
+      yearSelect(),
+    ]),
+    hero, kpis, charts, todaySection,
+  ]);
+  container.replaceChildren(wrap);
+}
+
+/* ============================================================ אנליזה (טבלאות) ============================================================ */
+function renderAnalysis(container) {
+  const wrap = el('div', { class: 'fin-wrap' }, [
+    el('div', { class: 'view-h' }, [
+      el('div', {}, [el('h1', { text: 'אנליזה' }), el('p', { text: 'פירוט חשבונות ולקוחות' })]),
+      yearSelect(),
+    ]),
+  ]);
+
+  // — סיכום לפי לקוח —
+  const perClient = state.clients.map((cl) => {
+    const caseIds = state.cases.filter((c) => c.clientId === cl.id).map((c) => c.id);
+    const invs = state.invoices.filter((i) => caseIds.includes(i.caseId));
+    return {
+      name: cl.name, casesN: caseIds.length,
+      amount: invs.reduce((s, i) => s + (i.amount || 0), 0),
+      comm: invs.reduce((s, i) => s + (i.commission || 0), 0),
+    };
+  }).filter((r) => r.casesN || r.amount).sort((a, b) => b.comm - a.comm);
+
+  wrap.append(el('div', { class: 'panel-h', text: 'סיכום לפי לקוח' }));
+  if (perClient.length) {
+    const rows = perClient.map((r) => el('tr', {}, [
+      el('td', { text: r.name }),
+      el('td', { class: 'num', text: String(r.casesN) }),
+      el('td', { class: 'num', text: formatCurrency(r.amount) }),
+      el('td', { class: 'num accent', text: formatCurrency(r.comm) }),
+    ]));
+    const foot = el('tr', { class: 'fin-table__total' }, [
+      el('td', { text: 'סה״כ' }), el('td', {}),
+      el('td', { class: 'num', text: formatCurrency(perClient.reduce((s, r) => s + r.amount, 0)) }),
+      el('td', { class: 'num accent', text: formatCurrency(perClient.reduce((s, r) => s + r.comm, 0)) }),
+    ]);
+    wrap.append(finTable(['לקוח', 'תיקים', 'סה״כ חיובים', 'עמלות'], rows, foot));
+  } else {
+    wrap.append(el('div', { class: 'fin-empty' }, [icon('users', 'ic-lg'), el('p', { text: `אין נתונים לשנת ${state.year}` })]));
+  }
+
+  // — סיכום לפי סוג תיק —
+  const byType = commByType().map((seg) => {
+    const n = state.invoices.filter((inv) => {
+      const cs = state.cases.find((c) => c.id === inv.caseId);
+      return (cs ? cs.caseType : 'שוטף') === seg.label;
+    });
+    return { type: seg.label, color: seg.color, count: n.length, amount: n.reduce((s, i) => s + (i.amount || 0), 0), comm: seg.value };
+  }).filter((r) => r.count);
+
+  if (byType.length) {
+    wrap.append(el('div', { class: 'panel-h', text: 'סיכום לפי סוג תיק' }));
+    const rows = byType.map((r) => el('tr', {}, [
+      el('td', {}, [el('span', { class: `bil-type bil-type--${TYPE_TONE[r.type] || 'info'}`, text: r.type })]),
+      el('td', { class: 'num', text: String(r.count) }),
+      el('td', { class: 'num', text: formatCurrency(r.amount) }),
+      el('td', { class: 'num accent', text: formatCurrency(r.comm) }),
+    ]));
+    wrap.append(finTable(['סוג', 'חשבוניות', 'סה״כ חיובים', 'עמלות'], rows, null));
+  }
+
+  container.replaceChildren(wrap);
+}
+
 /* ---------- shared widgets ---------- */
 function kpiSmall(label, value, tone) {
   const isCurrency = tone !== 'plain';
@@ -291,10 +433,13 @@ function finTable(headCells, rows, footRow) {
 
 /* ============================================================ events ============================================================ */
 function currentView() {
-  if (document.body.classList.contains('view-clients')) return 'clients';
-  if (document.body.classList.contains('view-invoices')) return 'invoices';
-  if (document.body.classList.contains('view-payments')) return 'payments';
-  if (document.body.classList.contains('view-fin-settings')) return 'fin-settings';
+  const b = document.body.classList;
+  if (b.contains('view-clients')) return 'clients';
+  if (b.contains('view-invoices')) return 'invoices';
+  if (b.contains('view-payments')) return 'payments';
+  if (b.contains('view-fin-settings')) return 'fin-settings';
+  if (b.contains('view-analysis')) return 'analysis';
+  if (b.contains('view-today')) return 'dashboard';
   return null;
 }
 
