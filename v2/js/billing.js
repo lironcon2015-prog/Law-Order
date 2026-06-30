@@ -200,6 +200,19 @@ export async function getKnownYears() {
   return [...years].filter(Boolean).sort((a, b) => b - a);
 }
 
+/** מצרף הכנסה בפועל (סכום עסקה כולל) ללקוח חיוב, לשנה נתונה. Map<clientId, totalAmount> */
+export async function getActualRevenueByClientForYear(year) {
+  const [allCases, yearInvoices] = await Promise.all([cases.getAll(), invoices.getByYear(year)]);
+  const caseToClient = new Map(allCases.map((c) => [c.id, c.clientId]));
+  const map = new Map();
+  for (const inv of yearInvoices) {
+    const clientId = caseToClient.get(inv.caseId);
+    if (clientId == null) continue;
+    map.set(clientId, (map.get(clientId) || 0) + (inv.amount || 0));
+  }
+  return map;
+}
+
 /* ============================================================ גיבוי מאוחד (Phase 4) ============================================================ */
 export async function collectBackupData() {
   const [clientsArr, casesArr, invArr, payArr, balArr, setArr] = await Promise.all([

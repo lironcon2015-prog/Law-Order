@@ -20,6 +20,8 @@ const state = {
   detailTab: 'overview', // 'overview' | 'career' | 'referrals' | 'notes'
   mainView: 'today',    // 'today' | 'pipeline' | 'network' | 'list'
   networkTarget: '',    // חברת יעד נבחרת בתצוגת רשת
+  billingClients: [],          // Phase 5: לקוחות חיוב (לקישור/בחירה)
+  actualRevenueByClient: new Map(), // Phase 5: Map<clientId, totalAmount> לשנה הנוכחית
 };
 
 /* ---------- DOM refs ---------- */
@@ -93,9 +95,15 @@ function paintIcons() {
 }
 
 async function loadData() {
-  const [contacts, companies] = await Promise.all([store.getContacts(), store.getCompanies()]);
+  const year = new Date().getFullYear();
+  const [contacts, companies, billingClients, actualRevenueByClient] = await Promise.all([
+    store.getContacts(), store.getCompanies(),
+    billing.clients.getAll(), billing.getActualRevenueByClientForYear(year),
+  ]);
   state.contacts = contacts;
   state.companies = companies;
+  state.billingClients = billingClients;
+  state.actualRevenueByClient = actualRevenueByClient;
 }
 
 /* ---------- derived list ---------- */
@@ -154,7 +162,7 @@ function detailTarget() {
 function renderDetail() {
   const contact = state.contacts.find((c) => c.id === state.selectedContactId);
   if (contact) {
-    ui.renderDetail(detailTarget(), contact, state.companies, state.detailTab);
+    ui.renderDetail(detailTarget(), contact, state.companies, state.detailTab, state);
     if (state.mainView === 'list' && window.matchMedia('(max-width: 768px)').matches) {
       document.body.classList.add('show-detail');
     }
@@ -406,6 +414,9 @@ async function onClick(e) {
     case 'add-note':
       await handleAddNote(id, target);
       break;
+    case 'convert-to-client':
+      openConvertToClientForm(state.contacts.find((c) => c.id === id));
+      break;
   }
 }
 
@@ -431,6 +442,24 @@ function openContactForm(contact) {
     state.selectedContactId = saved.id;
     render();
     ui.toast(contact ? 'איש הקשר עודכן' : 'איש הקשר נוסף');
+    return true;
+  });
+}
+
+/* ---------- המרת ליד ללקוח חיוב (Phase 5) ---------- */
+function openConvertToClientForm(contact) {
+  if (!contact) return;
+  const form = ui.renderConvertToClientForm(contact, state.billingClients);
+  openModal('המרת ליד ללקוח חיוב', form, async () => {
+    const { billingClientId, newClientName } = ui.readConvertForm(form);
+    let clientId = billingClientId;
+    if (!clientId && newClientName) clientId = await billing.clients.add(newClientName);
+    if (!clientId) { ui.toast('יש לבחור או להוסיף לקוח חיוב', 'alert'); return false; }
+
+    await store.saveContact({ ...contact, billingClientId: clientId, status: 'client' });
+    await loadData();
+    render();
+    ui.toast('הליד הומר ללקוח');
     return true;
   });
 }

@@ -327,7 +327,7 @@ export function renderNetwork(container, contacts, companies, state) {
   if (!roi.length) {
     roiPanel.append(el('div', { class: 'tab-empty' }, [icon('handshake'), el('div', { text: 'אין עדיין הפניות עם שווי שנתי.' })]));
   } else {
-    roiPanel.append(el('div', { class: 'roi-list' }, roi.map((r, i) => roiRow(r, i, names))));
+    roiPanel.append(el('div', { class: 'roi-list' }, roi.map((r, i) => roiRow(r, i, names, state))));
   }
   wrap.append(roiPanel);
   container.append(wrap);
@@ -349,8 +349,9 @@ function introResults(conns, target) {
     statusPill(lnk.contact.status),
   ]));
 }
-function roiRow(r, i, names) {
+function roiRow(r, i, names, state) {
   const company = names.get(r.contact.currentCompanyId) || '';
+  const actual = state?.actualRevenueByClient?.get(r.contact.billingClientId) || 0;
   return el('button', { class: 'roi-row', type: 'button', dataset: { action: 'open-contact', id: r.contact.id } }, [
     el('span', { class: 'roi-row__rank num', text: String(i + 1) }),
     avatarEl(r.contact, 'avatar avatar--sm'),
@@ -359,8 +360,9 @@ function roiRow(r, i, names) {
       el('span', { class: 'roi-row__sub', text: [r.contact.role, company].filter(Boolean).join(' · ') || '—' }),
     ]),
     el('div', { class: 'roi-row__val' }, [
-      el('span', { class: 'roi-row__amount num', text: formatCompactCurrency(r.value) }),
-      el('span', { class: 'roi-row__count', text: `${r.count} הפניות` }),
+      actual ? el('span', { class: 'roi-row__amount num val-actual', text: formatCompactCurrency(actual) }) : null,
+      el('span', { class: actual ? 'roi-row__count num val-potential' : 'roi-row__amount num', text: (actual ? 'פוטנציאל ' : '') + formatCompactCurrency(r.value) }),
+      !actual ? el('span', { class: 'roi-row__count', text: `${r.count} הפניות` }) : null,
     ]),
   ]);
 }
@@ -406,6 +408,7 @@ function pipelineCard(c, names, state) {
   const company = names.get(c.currentCompanyId) || '';
   const u = urgency(c);
   const val = dealValue(c);
+  const actual = state?.actualRevenueByClient?.get(c.billingClientId) || 0;
   const ci = c.contactInfo || {};
   const channel = ci.linkedin ? 'linkedin' : ci.email ? 'mail' : ci.phone ? 'phone' : 'clock';
   const tags = (c.tags || []).slice(0, 2);
@@ -426,8 +429,9 @@ function pipelineCard(c, names, state) {
         el('span', { class: 'dot' }), u === 'overdue' ? 'פיגור' : 'למעקב',
       ]) : null,
     ]),
-    (val || tags.length) ? el('div', { class: 'pcard__metarow' }, [
-      val ? el('span', { class: 'pcard__value num' }, [icon('coins', 'pcard__coins'), formatCompactCurrency(val)]) : null,
+    (val || actual || tags.length) ? el('div', { class: 'pcard__metarow' }, [
+      actual ? el('span', { class: 'pcard__value num val-actual' }, [icon('coins', 'pcard__coins'), formatCompactCurrency(actual)]) : (val ? el('span', { class: 'pcard__value num' }, [icon('coins', 'pcard__coins'), formatCompactCurrency(val)]) : null),
+      (actual && val) ? el('span', { class: 'pcard__value-sub num val-potential', text: 'פוטנציאל ' + formatCompactCurrency(val) }) : null,
       ...tags.map((t) => el('span', { class: 'tag', text: t })),
     ]) : null,
     el('div', { class: 'pcard__foot' }, [
@@ -447,7 +451,7 @@ const DETAIL_TABS = [
   { key: 'notes',     label: 'הערות',   ic: 'notes' },
 ];
 
-export function renderDetail(container, contact, companies, activeTab = 'overview') {
+export function renderDetail(container, contact, companies, activeTab = 'overview', state = null) {
   container.replaceChildren();
   const [enriched] = withCompanyNames([contact], companies);
   const companyName = enriched.companyName;
@@ -502,6 +506,7 @@ export function renderDetail(container, contact, companies, activeTab = 'overvie
   // active tab panels
   const panels = el('div', { class: 'detail__panels', style: 'view-transition-name: detail' });
   if (activeTab === 'overview') {
+    panels.append(buildBillingPanel(contact, state?.billingClients || [], state?.actualRevenueByClient || new Map()));
     panels.append(buildFollowUpPanel(contact), buildInfoPanel(contact));
   } else if (activeTab === 'career') {
     panels.append(contact.careerTimeline?.length
@@ -586,6 +591,33 @@ function buildInfoPanel(contact) {
   }
   return el('div', { class: 'panel' }, children);
 }
+function buildBillingPanel(contact, billingClients, actualRevenueMap) {
+  const client = billingClients.find((c) => c.id === contact.billingClientId);
+  const children = [
+    el('div', { class: 'panel__title' }, [icon('coins'), el('h3', { text: 'חיוב' })]),
+  ];
+  if (client) {
+    const kv = el('dl', { class: 'kv' });
+    kv.append(
+      el('dt', { text: 'לקוח חיוב' }), el('dd', { text: client.name }),
+      el('dt', { text: 'הכנסה בפועל השנה' }), el('dd', { class: 'num val-actual', text: formatCurrency(actualRevenueMap.get(client.id) || 0) }),
+      el('dt', { text: 'פוטנציאל שנתי' }), el('dd', { class: 'num val-potential', text: formatCurrency(dealValue(contact)) }),
+    );
+    children.push(kv);
+    children.push(el('button', {
+      class: 'btn btn--ghost btn--sm', type: 'button', style: 'margin-top:10px',
+      dataset: { action: 'convert-to-client', id: contact.id },
+    }, [icon('handshake'), 'שינוי קישור']));
+  } else {
+    children.push(el('div', { class: 'muted', text: 'אינו מקושר ללקוח חיוב.' }));
+    children.push(el('button', {
+      class: 'btn btn--primary btn--sm', type: 'button', style: 'margin-top:10px',
+      dataset: { action: 'convert-to-client', id: contact.id },
+    }, [icon('handshake'), 'המר ללקוח חיוב']));
+  }
+  return el('div', { class: 'panel' }, children);
+}
+
 function linkedinHref(v) {
   if (!v) return null;
   if (/^https?:\/\//i.test(v)) return v;
@@ -768,6 +800,34 @@ export function renderContactForm(contact, companies) {
   if (isEdit) form.append(el('input', { type: 'hidden', name: 'id', value: c.id }));
 
   return form;
+}
+
+/** טופס המרת ליד ללקוח חיוב: בחירת לקוח חיוב קיים, או הוספת לקוח חדש inline. */
+export function renderConvertToClientForm(contact, billingClients) {
+  const form = el('form', { class: 'contact-form', id: 'convert-form', novalidate: 'true' });
+  form.append(field('לקוח חיוב קיים', clientSelect(billingClients, contact.billingClientId)));
+  form.append(field('או הוספת לקוח חדש', input({ name: 'newClientName', placeholder: 'שם לקוח חדש (ייווצר אוטומטית)' })));
+  return form;
+}
+
+export function readConvertForm(form) {
+  const get = (n) => form.elements[n]?.value.trim() ?? '';
+  const rawId = get('billingClientId');
+  return {
+    billingClientId: rawId ? parseInt(rawId, 10) : null,
+    newClientName: get('newClientName'),
+  };
+}
+
+function clientSelect(billingClients, value) {
+  const sel = el('select', { class: 'select', name: 'billingClientId' });
+  sel.append(el('option', { value: '', text: '— ללא / בחרו לקוח —' }));
+  (billingClients || []).forEach((c) => {
+    const o = el('option', { value: String(c.id), text: c.name });
+    if (c.id === value) o.selected = true;
+    sel.append(o);
+  });
+  return sel;
 }
 
 /** מנהל חברות: רשימת חברות קיימות (עם מחיקה) + טופס הוספה. מחזיר <form>. */

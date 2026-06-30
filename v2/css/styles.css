@@ -1576,6 +1576,13 @@ table.deals tbody tr.not-counted td { opacity: 0.5; }
 }
 .pcard__coins { display: inline-grid; place-items: center; color: var(--stage); }
 .pcard__coins svg { width: 13px; height: 13px; }
+.pcard__value-sub { font-size: 0.7rem; font-weight: 600; color: var(--text-faint); }
+
+/* ---------- Phase 5: גישור CRM↔חיוב — הכנסה בפועל מול פוטנציאל ---------- */
+.val-actual { color: var(--gold-bright); }
+.val-potential { color: var(--text-faint); font-weight: 600; }
+.pcard__value.val-actual { background: var(--gold-soft); border-color: var(--gold-line); color: var(--gold-bright); }
+.roi-row__amount.val-actual { color: var(--gold-bright); }
 .pcard__foot {
   display: flex; align-items: center; gap: 7px;
   padding-top: 9px;

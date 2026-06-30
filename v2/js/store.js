@@ -87,6 +87,7 @@ export function normalizeContact(raw = {}) {
     role: str(raw.role),
     contactType: str(raw.contactType), // '' = בעל תפקיד בחברה · אחרת: מתווך/בנקאי/משקיע…
     isActive: !!raw.isActive,          // במעקב פעיל (מו״מ/הבאה) — תמיד מופיע ב"היום"
+    billingClientId: raw.billingClientId || '', // קישור ללקוח חיוב (Phase 5)
     origin: str(raw.origin),
     photoUrl: str(raw.photoUrl),
     contactInfo: {
