@@ -690,7 +690,13 @@ a { color: inherit; }
   -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--line-soft);
 }
-.tabs { display: flex; gap: 26px; }
+.tabs {
+  display: flex;
+  gap: 30px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar { display: none; }
 .tab {
   position: relative;
   border: 0;
@@ -702,6 +708,8 @@ a { color: inherit; }
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  flex: 0 0 auto;
+  white-space: nowrap;
   transition: color var(--t-fast);
 }
 .tab .ic svg { width: 16px; height: 16px; }
@@ -1224,9 +1232,7 @@ textarea.input { resize: vertical; min-height: 80px; line-height: 1.5; }
   }
   .detail { padding: 18px 16px 110px; }
   .detail__tabs { margin: 0 -16px 20px; padding: 2px 16px 0; }
-  .tabs { gap: 18px; overflow-x: auto; scrollbar-width: none; }
-  .tabs::-webkit-scrollbar { display: none; }
-  .tab { white-space: nowrap; }
+  .tabs { gap: 18px; }
   .detail__name { font-size: 1.5rem; }
   .detail__avatar { width: 60px; height: 60px; font-size: 1.4rem; }
   .kv { grid-template-columns: 1fr; gap: 4px 0; }
