@@ -1832,3 +1832,149 @@ dialog.modal::before, .sync-menu::after {
   .avatar[data-tier="5"], .detail__avatar[data-tier="5"],
   .empty__icon { animation: none !important; }
 }
+
+/* ============================================================
+   v4 — Editorial Luxury: serif display · עומק · מיקרו-אנימציות
+   ============================================================ */
+
+/* ---------- טיפוגרפיה: serif עברי לכותרות (Frank Ruhl Libre) ---------- */
+:root { --font-display: 'Frank Ruhl Libre', 'Assistant', Georgia, serif; }
+.brand__title {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.18rem;
+  letter-spacing: 0.005em;
+}
+.detail__name {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 2.05rem;
+  letter-spacing: 0;
+}
+.modal__head h2, .empty h2 { font-family: var(--font-display); font-weight: 700; }
+.lane__name { font-family: var(--font-display); font-weight: 700; font-size: 0.98rem; }
+/* מספרי display — ספרות serif אלגנטיות (סגנון private-bank) */
+.stat-card__num, .followup__num { font-family: var(--font-display); font-weight: 650; }
+
+/* ---------- רקע: קרן אור זהב איטית (aurora beam) ---------- */
+.bg-glow::after {
+  content: "";
+  position: absolute;
+  inset: -22%;
+  background: conic-gradient(from 0deg at 68% 18%,
+    transparent 0 76%, rgba(242, 202, 80, 0.05) 86%, transparent 95%);
+  animation: beamSpin 70s linear infinite;
+}
+@keyframes beamSpin { to { transform: rotate(360deg); } }
+
+/* ---------- kv: שורות עם hairline (מסמך משפטי) ---------- */
+.kv { row-gap: 0; }
+.kv dt, .kv dd { padding-block: 9px; border-bottom: 1px solid var(--line-soft); }
+.kv dt:last-of-type, .kv dd:last-of-type { border-bottom: 0; }
+
+/* ---------- כפתורים: ghost נוטה לזהב ---------- */
+.btn--ghost:hover {
+  border-color: var(--gold-line);
+  color: var(--gold-bright);
+  background: var(--gold-softer);
+}
+.chan-btn:hover { background: var(--gold-softer); }
+.sync-menu__item:hover svg { color: var(--gold-bright); }
+
+/* ---------- meter: shimmer חי על המילוי ---------- */
+.meter__fill { position: relative; overflow: hidden; }
+.meter__fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.30), transparent);
+  transform: translateX(-110%);
+  animation: meterSheen 2.8s ease-in-out infinite;
+}
+@keyframes meterSheen { 55%, 100% { transform: translateX(110%); } }
+
+/* ---------- דחיפות: פעימה שקטה ---------- */
+.prio--overdue .dot, .badge-overdue svg { animation: pulseDot 1.7s ease-in-out infinite; }
+@keyframes pulseDot { 50% { opacity: 0.4; } }
+
+/* ---------- modal: כניסה עם blur + פוטר זכוכית ---------- */
+dialog.modal[open] { animation: modalInLux 0.42s var(--ease-out); }
+@keyframes modalInLux {
+  from { opacity: 0; transform: translateY(18px) scale(0.965); filter: blur(8px); }
+  to   { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+.modal__foot {
+  background: rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+/* ---------- detail: כניסת פאנלים מדורגת (list + drawer) ---------- */
+.detail__panels .panel, .drawer__body .panel { animation: riseIn 0.42s var(--ease-out) backwards; }
+:is(.detail__panels, .drawer__body .detail__panels) .panel:nth-of-type(1) { animation-delay: 0.04s; }
+:is(.detail__panels, .drawer__body .detail__panels) .panel:nth-of-type(2) { animation-delay: 0.09s; }
+:is(.detail__panels, .drawer__body .detail__panels) .panel:nth-of-type(3) { animation-delay: 0.14s; }
+:is(.detail__panels, .drawer__body .detail__panels) .panel:nth-of-type(n+4) { animation-delay: 0.18s; }
+
+/* ---------- deals: סכום מוזהב ב-hover ---------- */
+table.deals tbody tr:hover td.amount { color: var(--gold-bright); }
+.note { transition: border-color var(--t-fast); }
+.note:hover { border-color: var(--line); }
+
+/* ---------- FAB: טבעת פעימה + safe-area ---------- */
+.fab { inset-block-end: calc(22px + env(safe-area-inset-bottom, 0px)); }
+.fab::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  animation: fabPulse 3.4s var(--ease-out) infinite;
+}
+@keyframes fabPulse {
+  0%        { box-shadow: 0 0 0 0 rgba(242, 202, 80, 0.38); }
+  60%, 100% { box-shadow: 0 0 0 18px rgba(242, 202, 80, 0); }
+}
+
+/* ---------- search: מתרחב בפוקוס ---------- */
+.search { transition: max-width 0.45s var(--ease-out); }
+.search:focus-within { max-width: 640px; }
+
+/* ---------- view transitions: cross-fade בין מסכים ---------- */
+::view-transition-old(root), ::view-transition-new(root) {
+  animation-duration: 0.26s;
+  animation-timing-function: var(--ease-out);
+}
+
+/* ---------- responsive: kv במובייל בלי קו כפול ---------- */
+@media (max-width: 768px) {
+  .kv dt { border-bottom: 0; padding-bottom: 0; }
+  .detail__name { font-size: 1.65rem; }
+}
+
+/* ---------- תיקון grid blowout: הרשימה במובייל רחבה מה-viewport (באג קיים ב-main) ---------- */
+@media (max-width: 768px) {
+  .workspace { grid-template-columns: minmax(0, 1fr); }
+  .sidebar, .main { min-width: 0; }
+}
+
+/* ---------- header קומפקטי במסכים צרים (תיקון overflow אופקי) ---------- */
+@media (max-width: 520px) {
+  .app-header { gap: 6px; padding: 0 10px; }
+  .brand__mark { width: 34px; height: 34px; border-radius: 10px; }
+  .brand__mark svg { width: 18px; height: 18px; }
+  .viewtoggle { gap: 2px; padding: 2px; }
+  .viewtoggle__btn { padding: 7px; }
+  .viewtoggle__btn svg { width: 15px; height: 15px; }
+  .app-header .btn--sm { padding: 8px; }
+  .sync-status { width: 36px; height: 36px; }
+  .search { min-width: 0; }
+  .search__input { min-width: 0; height: 38px; padding-inline: 32px 10px; font-size: 0.85rem; }
+  .search__icon { inset-inline-start: 10px; width: 15px; height: 15px; }
+}
+
+/* ---------- reduced motion (v4) ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .bg-glow::after, .meter__fill::after,
+  .prio--overdue .dot, .badge-overdue svg,
+  .fab::after { animation: none !important; }
+}

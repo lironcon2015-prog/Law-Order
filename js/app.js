@@ -136,7 +136,9 @@ function setMainView(view) {
   if (state.mainView === view) return;
   state.mainView = view;
   if (view === 'list') hideDrawer();
-  render();
+  // cross-fade חלק בין מסכים (progressive: נופל ל-render רגיל)
+  if (document.startViewTransition) document.startViewTransition(() => render());
+  else render();
 }
 function openDrawer() {
   refs.drawer.hidden = false;

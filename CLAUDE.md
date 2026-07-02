@@ -26,7 +26,7 @@
 ## ⚠️ Service Worker — חובה בכל שינוי app-shell
 האפליקציה PWA. **בכל commit שמשנה `index.html`/`css/*`/`js/*`** — העלה את `CACHE` ב-`sw.js`
 (`'lexledger-vN'` → `'lexledger-v(N+1)'`). ה-shell מוגש **network-first** ויש auto-reload ב-`controllerchange`
-(`registerSW` ב-`app.js`), אבל העלאת הגרסה מבטיחה הפעלה נקייה ומחיקת cache ישן. גרסה נוכחית: **v6**.
+(`registerSW` ב-`app.js`), אבל העלאת הגרסה מבטיחה הפעלה נקייה ומחיקת cache ישן. גרסה נוכחית: **v7**.
 
 ## אבטחה / חיבורים
 - ה-OAuth **Client ID** לסנכרון Drive נמצא ב-`js/sync.js` (`CLIENT_ID`) — מזהה ציבורי, מותר ב-repo.
