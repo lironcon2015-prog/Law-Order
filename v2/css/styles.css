@@ -1985,3 +1985,298 @@ body.view-analysis #analysis-view { display: block; }
 /* ---------- ייבוא/ייצוא (הגדרות) ---------- */
 .fin-io-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
 .fin-io-row label.btn { cursor: pointer; }
+
+/* ============================================================
+   Luxury polish (v3+v4) — הועבר מאפליקציית הרוט, מותאם לשלד v2
+   (topbar/sb-logo/sb-brand-name במקום app-header/brand__mark/brand__title)
+   ============================================================ */
+
+/* ---------- rendering & brand micro-details ---------- */
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+::selection { background: rgba(242, 202, 80, 0.30); color: var(--text-strong); }
+.input, .select, textarea.input, .search__input { caret-color: var(--gold); }
+:focus-visible { outline: 2px solid var(--gold-line); outline-offset: 2px; }
+.kv dd a { text-underline-offset: 3px; }
+
+/* ---------- gradient hairline (top-lit edge) על משטחי זכוכית ---------- */
+.panel, .stat-card, .lane, dialog.modal, .sync-menu { position: relative; }
+.panel::before, .stat-card::before, .lane::after,
+dialog.modal::before, .sync-menu::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(168deg,
+    rgba(255, 255, 255, 0.13),
+    rgba(255, 255, 255, 0.02) 26%,
+    transparent 52%,
+    rgba(242, 202, 80, 0.09) 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* ---------- header: קו זהב עדין + shimmer בלוגו ---------- */
+.topbar { position: relative; }
+.topbar::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  bottom: -1px;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(90deg,
+    transparent 4%,
+    rgba(242, 202, 80, 0.20) 36%,
+    rgba(255, 255, 255, 0.16) 50%,
+    rgba(242, 202, 80, 0.20) 64%,
+    transparent 96%);
+}
+.sb-logo { position: relative; overflow: hidden; }
+.sb-logo::after {
+  content: "";
+  position: absolute;
+  inset: -40%;
+  background: linear-gradient(115deg, transparent 42%, rgba(255, 255, 255, 0.6) 50%, transparent 58%);
+  transform: translateX(-170%);
+  animation: markSheen 7s ease-in-out infinite;
+}
+@keyframes markSheen {
+  0%, 76% { transform: translateX(-170%); }
+  90%, 100% { transform: translateX(170%); }
+}
+
+/* ---------- primary button: sheen sweep ב-hover ---------- */
+.btn--primary { position: relative; overflow: hidden; }
+.btn--primary::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, 0.35) 50%, transparent 65%);
+  transform: translateX(-140%);
+  transition: transform 0.55s var(--ease-out);
+  pointer-events: none;
+}
+.btn--primary:hover::after { transform: translateX(140%); }
+
+/* ---------- כניסה מדורגת (stagger) ---------- */
+@keyframes riseIn { from { opacity: 0; transform: translateY(8px); } }
+@keyframes fadeSoft { from { opacity: 0; } }
+.list .card, .action-list .action-row, .today__summary .stat-card {
+  animation: riseIn 0.38s var(--ease-out) backwards;
+}
+.board__lanes .lane { animation: fadeSoft 0.4s var(--ease-out) backwards; }
+:is(.list, .action-list, .today__summary, .board__lanes) > :nth-child(1) { animation-delay: 0.03s; }
+:is(.list, .action-list, .today__summary, .board__lanes) > :nth-child(2) { animation-delay: 0.06s; }
+:is(.list, .action-list, .today__summary, .board__lanes) > :nth-child(3) { animation-delay: 0.09s; }
+:is(.list, .action-list, .today__summary, .board__lanes) > :nth-child(4) { animation-delay: 0.12s; }
+:is(.list, .action-list, .today__summary, .board__lanes) > :nth-child(5) { animation-delay: 0.15s; }
+:is(.list, .action-list, .today__summary, .board__lanes) > :nth-child(6) { animation-delay: 0.18s; }
+:is(.list, .action-list, .today__summary, .board__lanes) > :nth-child(7) { animation-delay: 0.21s; }
+:is(.list, .action-list, .today__summary, .board__lanes) > :nth-child(n+8) { animation-delay: 0.24s; }
+
+/* ---------- טאבים: כניסת קו זהב ---------- */
+.tab[aria-selected="true"]::after { animation: tabGrow 0.3s var(--ease-out); }
+@keyframes tabGrow { from { transform: scaleX(0.35); opacity: 0; } }
+
+/* ---------- stat cards: hover עדין ---------- */
+.stat-card {
+  transition: transform var(--t-med) var(--ease-out), border-color var(--t-fast), box-shadow var(--t-med);
+}
+.stat-card:hover { transform: translateY(-2px); border-color: var(--line-strong); box-shadow: var(--elev-3); }
+
+/* ---------- chips: lift קטן ---------- */
+.chip:hover { transform: translateY(-1px); }
+
+/* ---------- modal: hairline זהב מתחת לכותרת ---------- */
+.modal__head { position: relative; }
+.modal__head::after {
+  content: "";
+  position: absolute;
+  inset-inline: 24px;
+  bottom: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold-line), transparent);
+}
+
+/* ---------- שם בכרטיס פרטים: זהב-שמפניה עדין ---------- */
+.detail__name {
+  background: linear-gradient(160deg, #fff 30%, #ece5d0 90%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ---------- toast: פס זהב בצד ---------- */
+.toast::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 0;
+  top: 10px; bottom: 10px;
+  width: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--gold-grad);
+}
+
+/* ---------- empty state: ריחוף איטי ---------- */
+.empty__icon { animation: floatY 6s ease-in-out infinite; }
+@keyframes floatY { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+
+/* ---------- tier לקוח: טבעת זהב מסתובבת (conic) ---------- */
+@property --ring-angle { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+.avatar[data-tier="5"]:not(.has-photo), .detail__avatar[data-tier="5"]:not(.has-photo) {
+  background:
+    radial-gradient(circle at 32% 26%, #2b2b33, #131318) padding-box,
+    conic-gradient(from var(--ring-angle),
+      #c6982f, #ffe7a8 25%, #f2ca50 50%, #8a6a24 75%, #c6982f) border-box;
+  animation: ringSpin 5s linear infinite;
+}
+@keyframes ringSpin { to { --ring-angle: 360deg; } }
+
+/* ---------- pipeline: scroll-snap בגלילה אופקית ---------- */
+.board { scroll-snap-type: x proximity; scroll-padding-inline: 24px; }
+.lane { scroll-snap-align: start; }
+
+/* ---------- reduced motion: כיבוי לולאות אינסופיות ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .sb-logo::after,
+  .avatar[data-tier="5"], .detail__avatar[data-tier="5"],
+  .empty__icon { animation: none !important; }
+}
+
+/* ============================================================
+   v4 — Editorial Luxury: serif display · עומק · מיקרו-אנימציות
+   ============================================================ */
+
+/* ---------- טיפוגרפיה: serif עברי לכותרות (Frank Ruhl Libre) ---------- */
+:root { --font-display: 'Frank Ruhl Libre', 'Assistant', Georgia, serif; }
+.sb-brand-name {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.1rem;
+  letter-spacing: 0.005em;
+}
+.detail__name {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 2.05rem;
+  letter-spacing: 0;
+}
+.modal__head h2, .empty h2 { font-family: var(--font-display); font-weight: 700; }
+.lane__name { font-family: var(--font-display); font-weight: 700; font-size: 0.98rem; }
+/* מספרי display — ספרות serif אלגנטיות (סגנון private-bank) */
+.stat-card__num, .followup__num { font-family: var(--font-display); font-weight: 650; }
+
+/* ---------- רקע: קרן אור זהב איטית (aurora beam) ---------- */
+.bg-glow::after {
+  content: "";
+  position: absolute;
+  inset: -22%;
+  background: conic-gradient(from 0deg at 68% 18%,
+    transparent 0 76%, rgba(242, 202, 80, 0.05) 86%, transparent 95%);
+  animation: beamSpin 70s linear infinite;
+}
+@keyframes beamSpin { to { transform: rotate(360deg); } }
+
+/* ---------- kv: שורות עם hairline (מסמך משפטי) ---------- */
+.kv { row-gap: 0; }
+.kv dt, .kv dd { padding-block: 9px; border-bottom: 1px solid var(--line-soft); }
+.kv dt:last-of-type, .kv dd:last-of-type { border-bottom: 0; }
+
+/* ---------- כפתורים: ghost נוטה לזהב ---------- */
+.btn--ghost:hover {
+  border-color: var(--gold-line);
+  color: var(--gold-bright);
+  background: var(--gold-softer);
+}
+.chan-btn:hover { background: var(--gold-softer); }
+.sync-menu__item:hover svg { color: var(--gold-bright); }
+
+/* ---------- meter: shimmer חי על המילוי ---------- */
+.meter__fill { position: relative; overflow: hidden; }
+.meter__fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.30), transparent);
+  transform: translateX(-110%);
+  animation: meterSheen 2.8s ease-in-out infinite;
+}
+@keyframes meterSheen { 55%, 100% { transform: translateX(110%); } }
+
+/* ---------- דחיפות: פעימה שקטה ---------- */
+.prio--overdue .dot, .badge-overdue svg { animation: pulseDot 1.7s ease-in-out infinite; }
+@keyframes pulseDot { 50% { opacity: 0.4; } }
+
+/* ---------- modal: כניסה עם blur + פוטר זכוכית ---------- */
+dialog.modal[open] { animation: modalInLux 0.42s var(--ease-out); }
+@keyframes modalInLux {
+  from { opacity: 0; transform: translateY(18px) scale(0.965); filter: blur(8px); }
+  to   { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+.modal__foot {
+  background: rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+/* ---------- detail: כניסת פאנלים מדורגת (list + drawer) ---------- */
+.detail__panels .panel, .drawer__body .panel { animation: riseIn 0.42s var(--ease-out) backwards; }
+:is(.detail__panels, .drawer__body .detail__panels) .panel:nth-of-type(1) { animation-delay: 0.04s; }
+:is(.detail__panels, .drawer__body .detail__panels) .panel:nth-of-type(2) { animation-delay: 0.09s; }
+:is(.detail__panels, .drawer__body .detail__panels) .panel:nth-of-type(3) { animation-delay: 0.14s; }
+:is(.detail__panels, .drawer__body .detail__panels) .panel:nth-of-type(n+4) { animation-delay: 0.18s; }
+
+/* ---------- deals: סכום מוזהב ב-hover ---------- */
+table.deals tbody tr:hover td.amount { color: var(--gold-bright); }
+.note { transition: border-color var(--t-fast); }
+.note:hover { border-color: var(--line); }
+
+/* ---------- FAB: טבעת פעימה + safe-area ---------- */
+.fab { inset-block-end: calc(22px + env(safe-area-inset-bottom, 0px)); }
+.fab::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  animation: fabPulse 3.4s var(--ease-out) infinite;
+}
+@keyframes fabPulse {
+  0%        { box-shadow: 0 0 0 0 rgba(242, 202, 80, 0.38); }
+  60%, 100% { box-shadow: 0 0 0 18px rgba(242, 202, 80, 0); }
+}
+
+/* ---------- search: מתרחב בפוקוס ---------- */
+.search { transition: max-width 0.45s var(--ease-out); }
+.search:focus-within { max-width: 640px; }
+
+/* ---------- view transitions: cross-fade בין מסכים ---------- */
+::view-transition-old(root), ::view-transition-new(root) {
+  animation-duration: 0.26s;
+  animation-timing-function: var(--ease-out);
+}
+
+/* ---------- responsive: kv במובייל בלי קו כפול ---------- */
+@media (max-width: 768px) {
+  .kv dt { border-bottom: 0; padding-bottom: 0; }
+  .detail__name { font-size: 1.65rem; }
+}
+
+/* ---------- תיקון grid blowout: הרשימה במובייל רחבה מה-viewport (באג קיים ב-main) ---------- */
+@media (max-width: 768px) {
+  .workspace { grid-template-columns: minmax(0, 1fr); }
+  .sidebar, .main { min-width: 0; }
+}
+/* ---------- reduced motion (v4) ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .bg-glow::after, .meter__fill::after,
+  .prio--overdue .dot, .badge-overdue svg,
+  .fab::after { animation: none !important; }
+}

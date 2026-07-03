@@ -1,6 +1,6 @@
 # PROJECT_KNOWLEDGE — LexLedger
 
-מסמך ידע חי. עדכן בסוף שיחה משמעותית. גרסה נוכחית: **v3** (לפי `CACHE` ב-`sw.js`).
+מסמך ידע חי. עדכן בסוף שיחה משמעותית. גרסה נוכחית: **v7** (root) / **unified-v15** (v2) לפי `CACHE` ב-`sw.js`.
 
 ## 1. מצב נוכחי
 CRM אישי לעו"ד M&A, vanilla JS · PWA · offline-first · RTL. חי ב-`lironcon.com/crm` (דרך Cloudflare Worker מעל GitHub Pages/main).
@@ -28,6 +28,8 @@ CRM אישי לעו"ד M&A, vanilla JS · PWA · offline-first · RTL. חי ב-`
 
 ## 4. החלטות עיצוב/לוגיקה
 - כיוון עיצובי: **Obsidian Gold** (זהב מותג) + רוח **Stitch** ל-Pipeline (צבע לכל שלב; `client`=זהב — כלאיים, לא ניאון מלא).
+- **שכבת Luxury (v3+v4 ב-styles.css)**: serif עברי **Frank Ruhl Libre** (מקומי, `fonts/frank-ruhl-*.woff2`) לכותרות/שמות/מספרי display; hairlines בגרדיאנט על משטחי זכוכית (mask-composite); sheen ללוגו ולכפתור ראשי; stagger בכניסת כרטיסים; טבעת conic מסתובבת ל-tier לקוח; View Transitions בין מסכים. **קיים גם ב-`v2/`** (סלקטורים מותאמים: `topbar`/`sb-logo`/`sb-brand-name`). כל לולאה אינסופית מכובה ב-`prefers-reduced-motion`.
+- **`LexLedger-Offline.html` נבנה מ-`v2/` בלבד** (`node v2/build-offline.mjs`) — שינוי עיצוב/JS ב-v2 מחייב rebuild של הקובץ + commit שלו.
 - מסלול קריירה ממוין **כרונולוגי עולה** (מוקדם→מאוחר; חסרי-שנה לסוף).
 - אירוח על **נתיב** `/crm` חייב Cloudflare Worker — GitHub Pages לא מארח על path (רק host שלם).
 
@@ -43,3 +45,5 @@ CRM אישי לעו"ד M&A, vanilla JS · PWA · offline-first · RTL. חי ב-`
 - `origin_mismatch` ב-OAuth = ה-origin לא רשום (lironcon.com מול github.io) — להוסיף את שניהם.
 - בכרטיסים: שם/תפקיד היו inline ונדבקו → `card__id`/`pcard__id` הפכו `flex-direction:column`.
 - drawer: כפתור `×` התנגש עם מחיקה → `padding-top` ל-`.drawer__body .detail`.
+- **grid blowout במובייל** (רשימה 460px על viewport 390): טראק `1fr` לא מוגבל ל-min-content → `grid-template-columns: minmax(0, 1fr)` + `min-width: 0` ל-sidebar/main.
+- header גלש במסכים ≤520px → breakpoint קומפקטי (root בלבד; ל-v2 יש sidebar).

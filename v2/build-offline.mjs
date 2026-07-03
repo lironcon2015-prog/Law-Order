@@ -22,6 +22,8 @@ const FONTS = {
   'assistant-hebrew.woff2': b64('fonts/assistant-hebrew.woff2'),
   'assistant-latin.woff2': b64('fonts/assistant-latin.woff2'),
   'inter-latin.woff2': b64('fonts/inter-latin.woff2'),
+  'frank-ruhl-hebrew.woff2': b64('fonts/frank-ruhl-hebrew.woff2'),
+  'frank-ruhl-latin.woff2': b64('fonts/frank-ruhl-latin.woff2'),
   'ibmplexmono.woff2': b64('fonts/ibmplexmono.woff2'),
 };
 let fontsCss = rd('css/fonts.css');
