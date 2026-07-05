@@ -1794,15 +1794,20 @@ body.drawer-open .drawer__panel { transform: translateX(0); }
   :root { --nav-w: 0px; }
   .app { grid-template-columns: 1fr; }
   .sb {
-    position: fixed; inset-block: 0; inset-inline-end: 0;
+    /* RTL: inline-start = ימין. inset-inline-end (=שמאל) עיגן את המגירה
+       ב-left:0 ו-translateX(100%) דחף אותה לאמצע המסך במקום אל מחוץ לו */
+    position: fixed; inset-block: 0; inset-inline-start: 0;
     width: min(84vw, 300px);
     transform: translateX(100%);
     transition: transform var(--t-med) var(--ease-out);
-    border-inline-start: 1px solid var(--line);
+    border-inline-end: 1px solid var(--line);
+    z-index: 40; /* מעל FAB (30) */
   }
   body.nav-open .sb { transform: translateX(0); box-shadow: var(--elev-3); }
-  body.nav-open::after {
-    content: ""; position: fixed; inset: 0; z-index: 19;
+  /* ה-backdrop חייב לשבת באותו stacking context של המגירה — ‏.app הוא
+     context (z-index:1), ולכן ::after על body היה מכסה גם את המגירה */
+  body.nav-open .app::after {
+    content: ""; position: fixed; inset: 0; z-index: 39;
     background: rgba(0, 0, 0, 0.5);
   }
   .hide-wide { display: inline-flex !important; }

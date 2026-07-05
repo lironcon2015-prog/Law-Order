@@ -60,6 +60,7 @@ async function init() {
 }
 
 function cacheRefs() {
+  refs.app = document.querySelector('.app');
   refs.list = document.getElementById('list');
   refs.chips = document.getElementById('chips');
   refs.main = document.getElementById('main');
@@ -241,6 +242,12 @@ function wireEvents() {
 
   // mobile nav toggle (sidebar)
   document.getElementById('nav-toggle')?.addEventListener('click', () => document.body.classList.toggle('nav-open'));
+  // ה-backdrop הוא ::after של .app — קליק עליו ממוקד ב-.app עצמו וסוגר את המגירה
+  document.addEventListener('click', (e) => {
+    if (document.body.classList.contains('nav-open') && e.target === refs.app) {
+      document.body.classList.remove('nav-open');
+    }
+  });
 
   // בחירת חברת יעד בתצוגת רשת
   document.addEventListener('change', (e) => {
