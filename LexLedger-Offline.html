@@ -559,6 +559,9 @@ a { color: inherit; }
   position: relative;
   text-align: start;
   width: 100%;
+  /* overflow:hidden מאפס את ה-min-height האוטומטי של flex item —
+     בלי flex-shrink:0 הרשימה דוחסת את הכרטיסים במקום לגלול והתגיות נחתכות */
+  flex-shrink: 0;
   border: 1px solid var(--glass-border);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0) 40%),
@@ -1590,6 +1593,7 @@ table.deals tbody tr.not-counted td { opacity: 0.5; }
   position: relative;
   text-align: start;
   width: 100%;
+  flex-shrink: 0; /* כמו .card — מונע דחיסה וחיתוך בעמודת lane מלאה */
   cursor: grab;
   border: 1px solid var(--glass-border);
   background:
