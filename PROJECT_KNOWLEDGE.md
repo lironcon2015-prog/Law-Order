@@ -38,6 +38,7 @@ CRM אישי לעו"ד M&A, vanilla JS · PWA · offline-first · RTL. חי ב-`
 - אין merge חכם בסנכרון — last-writer-wins + שאלת המשתמש בלבד (מכוון).
 - בדיקת OAuth/Drive end-to-end רק אצל המשתמש (אין Google בסביבת הפיתוח).
 - seed (`seedDemo`) לא כולל `contactType`/`photoUrl` — נתוני דמו ישנים יציגו ברירות מחדל.
+- **v2 ≤900px: ה-nav drawer (`.sb`) תקוע באמצע המסך** — `inset-inline-end: 0` ב-RTL = left:0, ו-`translateX(100%)` מזיז אותו לאמצע במקום אל מחוץ למסך. צריך `inset-inline-start` + כיוון translate מותאם. טרם תוקן.
 
 ## 6. לקחים אחרונים
 - **SW cache-first שבר פרסומים** (HTML התעדכן, JS ישן הוגש) → מעבר ל-network-first + auto-reload. בכל שינוי app-shell: להעלות `CACHE`.
@@ -47,3 +48,4 @@ CRM אישי לעו"ד M&A, vanilla JS · PWA · offline-first · RTL. חי ב-`
 - drawer: כפתור `×` התנגש עם מחיקה → `padding-top` ל-`.drawer__body .detail`.
 - **grid blowout במובייל** (רשימה 460px על viewport 390): טראק `1fr` לא מוגבל ל-min-content → `grid-template-columns: minmax(0, 1fr)` + `min-width: 0` ל-sidebar/main.
 - header גלש במסכים ≤520px → breakpoint קומפקטי (root בלבד; ל-v2 יש sidebar).
+- **כרטיסים נדחסו ונחתכו ברשימה מלאה**: `.list`/`.lane__cards` הם flex-column גלילים, ו-`overflow:hidden` על `.card`/`.pcard` מאפס את ה-min-height האוטומטי של flex item → הכרטיסים כווצו במקום שהרשימה תגלול. תוקן ב-`flex-shrink: 0` (v1+v2). לקח: באג שתלוי בכמות נתונים — לשחזר עם רשימה שגולשת מגובה החלון, לא עם 4 רשומות דמו.
