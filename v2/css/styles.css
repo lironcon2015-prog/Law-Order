@@ -2289,3 +2289,21 @@ table.deals tbody tr:hover td.amount { color: var(--gold-bright); }
   .prio--overdue .dot, .badge-overdue svg,
   .fab::after { animation: none !important; }
 }
+
+/* ---------- ייבוא חשבוניות מקובץ (PDF/Excel) — מסך סיווג ---------- */
+dialog.modal.modal--wide { width: min(980px, 96vw); }
+.imp-summary { margin-bottom: 14px; font-size: 0.85rem; line-height: 1.5; }
+.imp-table th, .imp-table td { padding: 8px 10px; font-size: 0.82rem; white-space: nowrap; }
+.imp-table td { vertical-align: middle; }
+.imp-in { min-width: 150px; padding: 7px 10px; font-size: 0.82rem; }
+.imp-in--sm { min-width: 72px; width: 92px; }
+.imp-guess { font-size: 0.72rem; margin-top: 4px; }
+.imp-badge {
+  display: inline-block; padding: 3px 10px; border-radius: 999px;
+  font-size: 0.7rem; font-weight: 700; letter-spacing: 0.02em;
+  border: 1px solid var(--line-soft);
+}
+.imp-badge--high { color: var(--positive); border-color: rgba(52, 211, 153, 0.35); background: var(--positive-soft); }
+.imp-badge--medium { color: var(--gold); border-color: var(--gold-line); background: var(--gold-grad-soft); }
+.imp-badge--low { color: var(--text-muted); background: var(--surface-2); }
+.imp-badge--dup { color: var(--negative); border-color: rgba(248, 113, 113, 0.35); background: var(--negative-soft); }

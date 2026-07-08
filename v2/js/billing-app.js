@@ -6,6 +6,7 @@ import * as billing from './billing.js';
 import { ICONS, toast, formatCurrency, formatCompactCurrency, buildToday } from './ui.js';
 import { barChart, donut } from './charts.js';
 import * as importer from './importer.js';
+import * as invImport from './invoice-import.js';
 
 const MONTHS = ['', 'ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
 const TYPE_TONE = { 'שוטף': 'info', 'ליטיגציה': 'neg', 'עסקה': 'plum' };
@@ -176,8 +177,12 @@ function renderClients(container) {
 /* ============================================================ מסך: חשבוניות ============================================================ */
 function renderInvoices(container) {
   const addBtn = el('button', { class: 'btn btn--primary btn--sm', 'data-bil-action': 'new-invoice' }, [icon('plus'), el('span', { text: 'חשבונית חדשה' })]);
+  const importBtn = el('label', { class: 'btn btn--ghost btn--sm', title: 'ייבוא חשבוניות מקובץ PDF / Excel / CSV — המערכת מזהה ומסווגת אוטומטית' }, [
+    icon('cloudDown'), el('span', { text: 'ייבוא מקובץ' }),
+    el('input', { id: 'fin-inv-file', type: 'file', accept: '.pdf,.xlsx,.xls,.csv,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv', hidden: true }),
+  ]);
   const wrap = el('div', { class: 'fin-wrap' }, [
-    viewHeader('חשבוניות', null, el('div', { class: 'view-h__tools' }, [yearSelect(), addBtn])),
+    viewHeader('חשבוניות', null, el('div', { class: 'view-h__tools' }, [yearSelect(), importBtn, addBtn])),
   ]);
 
   const list = [...state.invoices].sort((a, b) => (b.month - a.month) || (b.createdAt - a.createdAt));
@@ -585,6 +590,7 @@ function currentView() {
 
 async function onChange(e) {
   if (e.target.id === 'fin-import') { handleImport(e.target); return; }
+  if (e.target.id === 'fin-inv-file') { handleInvoiceFile(e.target); return; }
   const t = e.target.closest('[data-bil-action="year"]');
   if (!t) return;
   state.year = parseInt(t.value, 10);
@@ -608,6 +614,96 @@ async function handleImport(inputEl) {
     renderView(currentView() || 'fin-settings');
     toast('הנתונים יובאו בהצלחה');
   } catch (err) { console.error(err); toast('הייבוא נכשל', 'alert'); }
+}
+
+/* ---------- ייבוא חשבוניות מקובץ (PDF / Excel / CSV) ---------- */
+async function handleInvoiceFile(inputEl) {
+  const file = inputEl.files && inputEl.files[0];
+  inputEl.value = '';
+  if (!file) return;
+  toast('מפענח את הקובץ…');
+  let result;
+  try {
+    result = await invImport.parseFile(file, { clients: state.clients, cases: state.cases, defaultYear: state.year });
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'פענוח הקובץ נכשל', 'alert');
+    return;
+  }
+  if (!result.candidates.length) {
+    toast('לא זוהו חשבוניות בקובץ — ודא שיש בו עמודת סכום או שורת סה״כ', 'alert');
+    return;
+  }
+  // סימון כפולות מול כל החשבוניות הקיימות (לא רק השנה הנבחרת)
+  const existing = await billing.invoices.getAll();
+  for (const c of result.candidates) {
+    c.duplicate = existing.some((inv) => inv.caseId === c.caseId && inv.month === c.month && inv.year === c.year && inv.amount === c.amount);
+    if (c.duplicate) c.include = false;
+  }
+  reviewImportModal(result, file.name);
+}
+
+/** מסך סיווג: טבלת מועמדים לעריכה/אישור לפני שמירה */
+function reviewImportModal(result, fileName) {
+  const caseOpts = [{ value: '', label: '— בחר תיק —' }, ...state.cases.map((c) => ({ value: c.id, label: `${c.caseNumber || '—'} · ${clientName(c.clientId)}` }))];
+  const kindLabel = result.kind === 'pdf' ? 'PDF' : 'Excel';
+  const needCase = result.candidates.filter((c) => !c.caseId).length;
+
+  const rows = result.candidates.map((c, i) => {
+    const caseSel = selectEl(`imp-case-${i}`, caseOpts, c.caseId ?? '', { class: 'select imp-in' });
+    const rateIn = input(`imp-rate-${i}`, { type: 'number', step: '0.5', min: '0', max: '100', value: c.rate, class: 'input imp-in imp-in--sm num' });
+    caseSel.addEventListener('change', () => {
+      const cs = state.cases.find((x) => x.id === parseInt(caseSel.value, 10));
+      if (cs) rateIn.value = cs.commissionRate;
+    });
+    const badge = c.duplicate
+      ? el('span', { class: 'imp-badge imp-badge--dup', text: 'כפולה?' })
+      : el('span', { class: `imp-badge imp-badge--${c.confidence}`, text: c.confidence === 'high' ? 'זוהה' : c.confidence === 'medium' ? 'חלקי' : 'לבדיקה' });
+    return el('tr', {}, [
+      el('td', {}, [el('input', { id: `imp-inc-${i}`, type: 'checkbox', checked: c.include || null })]),
+      el('td', {}, [caseSel, c.clientGuess && !c.caseId ? el('div', { class: 'muted imp-guess', text: `זוהה: ${c.clientGuess}` }) : null]),
+      el('td', {}, [selectEl(`imp-month-${i}`, monthOptions(), c.month || new Date().getMonth() + 1, { class: 'select imp-in imp-in--sm' })]),
+      el('td', {}, [input(`imp-year-${i}`, { type: 'number', value: c.year, class: 'input imp-in imp-in--sm num' })]),
+      el('td', {}, [input(`imp-amount-${i}`, { type: 'number', step: '0.01', min: '0', value: c.amount, class: 'input imp-in num' })]),
+      el('td', {}, [rateIn]),
+      el('td', {}, [input(`imp-notes-${i}`, { value: c.notes, class: 'input imp-in' })]),
+      el('td', {}, [badge]),
+    ]);
+  });
+
+  const body = el('div', { class: 'imp-review' }, [
+    el('p', { class: 'muted imp-summary', text: `זוהו ${result.candidates.length} חשבוניות בקובץ ${kindLabel} (${fileName}).` + (needCase ? ` ${needCase} שורות דורשות בחירת תיק — שורה בלי תיק לא תיובא.` : '') }),
+    el('div', { class: 'fin-table-wrap fin-table-wrap--scroll' }, [
+      el('table', { class: 'fin-table imp-table' }, [
+        el('thead', {}, [el('tr', {}, ['', 'תיק / לקוח', 'חודש', 'שנה', 'סכום', 'עמלה %', 'הערה', 'סטטוס'].map((h) => el('th', { text: h })))]),
+        el('tbody', {}, rows),
+      ]),
+    ]),
+  ]);
+
+  openModal('סיווג חשבוניות מהקובץ', body, async () => {
+    let added = 0, skipped = 0;
+    for (let i = 0; i < result.candidates.length; i++) {
+      if (!document.getElementById(`imp-inc-${i}`)?.checked) continue;
+      const caseId = parseInt(document.getElementById(`imp-case-${i}`).value, 10);
+      const amount = parseFloat(document.getElementById(`imp-amount-${i}`).value);
+      if (!caseId || !(amount > 0)) { skipped++; continue; }
+      await billing.invoices.add({
+        caseId,
+        month: document.getElementById(`imp-month-${i}`).value,
+        year: document.getElementById(`imp-year-${i}`).value,
+        amount,
+        commissionRate: document.getElementById(`imp-rate-${i}`).value,
+        notes: document.getElementById(`imp-notes-${i}`).value,
+        source: 'file-import',
+      });
+      added++;
+    }
+    if (!added) { toast(skipped ? 'לא יובא דבר — בחר תיק לשורות המסומנות' : 'לא סומנו שורות לייבוא', 'alert'); return false; }
+    toast(`נוספו ${added} חשבוניות` + (skipped ? ` (${skipped} דולגו — חסר תיק/סכום)` : ''));
+    reload('invoices');
+    return true;
+  }, { wide: true });
 }
 
 async function exportBackup() {
@@ -830,8 +926,9 @@ function paymentForm(pay) {
 }
 
 /* ---------- modal (מקומי, אותו DOM/CSS כמו app.js) ---------- */
-function openModal(title, bodyEl, onSubmit) {
+function openModal(title, bodyEl, onSubmit, opts = {}) {
   const modal = document.getElementById('modal');
+  modal.classList.toggle('modal--wide', !!opts.wide);
   modal.replaceChildren();
   const close = () => modal.close();
 

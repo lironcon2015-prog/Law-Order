@@ -2,7 +2,7 @@
 // אסטרטגיה: app-shell (HTML/JS/CSS/JSON) = network-first → פרסומים נכנסים לתוקף מיד.
 // פונטים/אייקונים = cache-first. offline עדיין עובד מלא (נפילה ל-cache).
 
-const CACHE = 'lexledger-unified-v17';
+const CACHE = 'lexledger-unified-v18';
 
 const ASSETS = [
   './',
@@ -20,7 +20,11 @@ const ASSETS = [
   './js/billing.js',
   './js/billing-app.js',
   './js/importer.js',
+  './js/invoice-import.js',
   './js/charts.js',
+  './vendor/xlsx.full.min.js',
+  './vendor/pdf.min.js',
+  './vendor/pdf.worker.min.js',
   './fonts/assistant-hebrew.woff2',
   './fonts/frank-ruhl-hebrew.woff2',
   './fonts/frank-ruhl-latin.woff2',
@@ -57,7 +61,8 @@ self.addEventListener('fetch', (event) => {
 
   // app-shell (HTML/JS/CSS/JSON): network-first → תמיד מקבל את הגרסה העדכנית כשיש רשת,
   // נופל ל-cache במצב offline.
-  const isShell = request.mode === 'navigate' || /\.(?:js|css|json)$/i.test(url.pathname);
+  // vendor (ספריות פענוח כבדות, שמות קבועים) — cache-first כמו פונטים
+  const isShell = (request.mode === 'navigate' || /\.(?:js|css|json)$/i.test(url.pathname)) && !url.pathname.includes('/vendor/');
   if (isShell) {
     event.respondWith(
       fetch(request)

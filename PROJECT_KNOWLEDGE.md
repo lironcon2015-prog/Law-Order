@@ -12,6 +12,7 @@ CRM אישי לעו"ד M&A, vanilla JS · PWA · offline-first · RTL. חי ב-`
 - **סוג איש קשר** (`contactType`): בעל תפקיד בחברה / מתווך / בנקאי השקעות / משקיע / עו"ד / אחר. חברה אופציונלית.
 - **מנהל חברות**: רשימה + מחיקה (עם אזהרת אנשי קשר מושפעים) + הוספה.
 - **סנכרון Google Drive** (`js/sync.js`): קובץ JSON יחיד, OAuth client-side, auto-pull בטעינה, push אוטומטי מבוזבז, דיאלוג קונפליקט. `CLIENT_ID` מוזן.
+- **v2 (מאוחד, `v2/`)**: ייבוא חשבוניות מקובץ **PDF/Excel/CSV** עם זיהוי וסיווג אוטומטי (`v2/js/invoice-import.js` + vendor מקומי SheetJS/pdf.js ב-precache → offline). כפתור במסך חשבוניות → מסך סיווג לאישור.
 
 ## 2. מודל נתונים (IndexedDB `maCrmDB`)
 - **contacts**: `id, fullName, status (LEAD_STATUSES), contactType, currentCompanyId, role, origin, photoUrl, contactInfo{phone,email,linkedin}, tags[], careerTimeline[{companyId,companyName,role,startYear,endYear}], referrals[{dealName,status,estimatedValue}], chronologicalNotes[{timestamp,noteText}], lastContactDate, contactFrequencyDays`.
