@@ -13,9 +13,18 @@ const rd = (p) => readFileSync(join(V2, p), 'utf8');
 const b64 = (p) => readFileSync(join(V2, p)).toString('base64');
 
 /* ---------- 1) מודולי JS בסדר תלויות ---------- */
-const ORDER = ['db.js', 'store.js', 'search.js', 'charts.js', 'ui.js', 'billing.js', 'importer.js', 'sync.js', 'seed.js', 'billing-app.js', 'app.js'];
+const ORDER = ['db.js', 'store.js', 'search.js', 'charts.js', 'ui.js', 'billing.js', 'importer.js', 'invoice-import.js', 'sync.js', 'seed.js', 'billing-app.js', 'app.js'];
 const SRC = {};
 for (const name of ORDER) SRC[name] = Buffer.from(rd('js/' + name), 'utf8').toString('base64');
+
+/* ---------- 1ב) ספריות vendor (SheetJS + pdf.js) לייבוא חשבוניות ----------
+   בקובץ האופליין אין נתיב ./vendor/ — מוטמעות כ-base64 ונחשפות כ-blob URLs
+   דרך window.__OFFLINE_VENDOR__ (ר' vendorUrl ב-invoice-import.js). */
+const VENDOR = {
+  'xlsx.full.min.js': b64('vendor/xlsx.full.min.js'),
+  'pdf.min.js': b64('vendor/pdf.min.js'),
+  'pdf.worker.min.js': b64('vendor/pdf.worker.min.js'),
+};
 
 /* ---------- 2) CSS + פונטים מוטבעים ---------- */
 const FONTS = {
@@ -37,7 +46,13 @@ const bootstrap = `<script type="module">
 /* Offline bundle — כל המודולים מוטבעים כ-base64, נטענים כ-blob URLs (עובד מ-file://). */
 const SRC = ${JSON.stringify(SRC)};
 const ORDER = ${JSON.stringify(ORDER)};
+const VENDOR = ${JSON.stringify(VENDOR)};
 const dec = new TextDecoder();
+const toBytes = (b) => Uint8Array.from(atob(b), c => c.charCodeAt(0));
+window.__OFFLINE_VENDOR__ = {};
+for (const [name, data] of Object.entries(VENDOR)) {
+  window.__OFFLINE_VENDOR__[name] = URL.createObjectURL(new Blob([toBytes(data)], { type: 'text/javascript' }));
+}
 const urls = {};
 for (const name of ORDER) {
   let src = dec.decode(Uint8Array.from(atob(SRC[name]), c => c.charCodeAt(0)));

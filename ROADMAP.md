@@ -71,7 +71,8 @@ IA יחיד (sidebar), מושג לקוח משותף, דשבורד מאוחד. ל
 - [x] `v2/js/invoice-import.js` — פענוח וסיווג: Excel/CSV (זיהוי שורת כותרת/ניחוש עמודות, תאריכים בכל פורמט כולל סריאלי, סכומים עם ₪/פסיקים) · PDF (קיבוץ שורות לפי Y, סה״כ-לתשלום, תאריך, מספר חשבונית חסין-RTL) · התאמת לקוח (נרמול בע״מ/גרשיים) ותיק (מספר תיק / לקוח עם תיק יחיד) · רמות ביטחון.
 - [x] ספריות vendor **מקומיות** (`v2/vendor/`): SheetJS + pdf.js — נטענות lazy בעת ייבוא, ב-precache של ה-SW (cache-first) → **עובד מלא offline**.
 - [x] UI: כפתור "ייבוא מקובץ" במסך חשבוניות → מסך סיווג (modal רחב): checkbox, בחירת תיק (עדכון % עמלה אוטומטי), חודש/שנה/סכום/הערה לעריכה, badge זוהה/חלקי/לבדוקה, **זיהוי כפולות** (תיק+חודש+שנה+סכום — מסומנות ולא נבחרות). שמירה → `billing.invoices.add` (`source:'file-import'`) → push מאוחד ל-Drive.
-- [x] אימות: node (21 בדיקות ל-classify/parse) + Chromium end-to-end (xlsx אמיתי + PDF עברי שנוצר ב-print-to-PDF): סיווג, ייבוא, ייבוא-חוזר מסמן כפולות, 0 שגיאות. SW `unified-v14`.
+- [x] **קובץ האופליין**: `build-offline.mjs` מטמיע גם את ה-vendor כ-base64 → blob URLs (`window.__OFFLINE_VENDOR__`, ‏`vendorUrl` ב-invoice-import.js) → הייבוא עובד גם ב-`LexLedger-Offline.html` מ-`file://`. הקובץ נבנה מחדש (~3.7MB).
+- [x] אימות: node (21 בדיקות ל-classify/parse) + Chromium end-to-end (xlsx אמיתי + PDF עברי שנוצר ב-print-to-PDF) גם ב-http וגם ב-file://: סיווג, ייבוא, ייבוא-חוזר מסמן כפולות, 0 שגיאות. SW `unified-v18`.
 
 ---
 

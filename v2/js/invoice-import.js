@@ -4,9 +4,12 @@
 // הפענוח מפיק "מועמדים" (candidates) שהמשתמש מאשר/מתקן במסך סיווג לפני שמירה.
 
 /* ============================================================ טעינת vendor (lazy, מקומי) ============================================================ */
-const VENDOR_XLSX = './vendor/xlsx.full.min.js';
-const VENDOR_PDF = './vendor/pdf.min.js';
-const VENDOR_PDF_WORKER = './vendor/pdf.worker.min.js';
+// בקובץ האופליין (LexLedger-Offline.html) אין תיקיית vendor — build-offline.mjs מטמיע את
+// הספריות כ-base64 וחושף blob URLs דרך window.__OFFLINE_VENDOR__. אחרת: נתיב יחסי רגיל.
+const vendorUrl = (file) => (window.__OFFLINE_VENDOR__ && window.__OFFLINE_VENDOR__[file]) || `./vendor/${file}`;
+const VENDOR_XLSX = () => vendorUrl('xlsx.full.min.js');
+const VENDOR_PDF = () => vendorUrl('pdf.min.js');
+const VENDOR_PDF_WORKER = () => vendorUrl('pdf.worker.min.js');
 
 function loadScript(src) {
   return new Promise((resolve, reject) => {
@@ -328,7 +331,7 @@ export function detectKind(file) {
 }
 
 async function parseExcel(file, ctx) {
-  await loadScript(VENDOR_XLSX);
+  await loadScript(VENDOR_XLSX());
   const XLSX = window.XLSX;
   const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true });
   const candidates = [];
@@ -340,9 +343,9 @@ async function parseExcel(file, ctx) {
 }
 
 async function parsePdf(file, ctx) {
-  await loadScript(VENDOR_PDF);
+  await loadScript(VENDOR_PDF());
   const pdfjsLib = window.pdfjsLib;
-  pdfjsLib.GlobalWorkerOptions.workerSrc = VENDOR_PDF_WORKER;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = VENDOR_PDF_WORKER();
   const doc = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
   const candidates = [];
   for (let p = 1; p <= doc.numPages; p++) {
