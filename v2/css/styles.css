@@ -2297,6 +2297,8 @@ dialog.modal.modal--wide { width: min(980px, 96vw); }
 .imp-table td { vertical-align: middle; }
 .imp-in { min-width: 150px; padding: 7px 10px; font-size: 0.82rem; }
 .imp-in--sm { min-width: 72px; width: 92px; }
+.imp-caseno { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.imp-caseno__lbl { font-size: 0.72rem; white-space: nowrap; }
 .imp-guess { font-size: 0.72rem; margin-top: 4px; }
 .imp-badge {
   display: inline-block; padding: 3px 10px; border-radius: 999px;

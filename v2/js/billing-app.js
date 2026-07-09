@@ -681,7 +681,8 @@ async function processInvoiceFile(file) {
   reviewImportModal(result, file.name);
 }
 
-const NEW_CLIENT = '__new__';
+const NEW_CLIENT = '__new__';   // צור לקוח חדש + תיק
+const NEW_CASE = '__newcase__'; // צור תיק חדש אצל לקוח קיים
 
 /** מסך סיווג: טבלת מועמדים לעריכה/אישור לפני שמירה */
 function reviewImportModal(result, fileName) {
@@ -690,28 +691,42 @@ function reviewImportModal(result, fileName) {
   const needCase = result.candidates.filter((c) => !c.caseId).length;
 
   const rows = result.candidates.map((c, i) => {
-    // לקוח חדש שזוהה מהמסמך ואינו במערכת → אפשרות "צור לקוח" שנבחרת אוטומטית (השלמה אוטומטית)
-    const canCreate = c.clientGuess && !c.clientExists && !c.caseId;
-    const caseOpts = [
-      canCreate ? { value: NEW_CLIENT, label: `➕ צור לקוח: ${c.clientGuess}` } : { value: '', label: '— בחר תיק —' },
-      ...(canCreate ? [{ value: '', label: '— בחר תיק קיים —' }] : []),
-      ...existingOpts,
-    ];
-    const defaultVal = c.caseId ?? (canCreate ? NEW_CLIENT : '');
+    const isNewClient = c.clientGuess && !c.clientExists;                  // לקוח שלא במערכת → הקמה
+    const isNewCase = c.clientExists && !c.caseId && c.clientId != null;   // לקוח קיים, תיק לא זוהה → תיק חדש
+    const caseOpts = [];
+    if (isNewClient) caseOpts.push({ value: NEW_CLIENT, label: `➕ צור לקוח: ${c.clientGuess}${c.caseNumber ? ` · תיק ${c.caseNumber}` : ''}` });
+    if (isNewCase) caseOpts.push({ value: NEW_CASE, label: `➕ צור תיק ${c.caseNumber || 'חדש'} · ${c.clientGuess}` });
+    caseOpts.push({ value: '', label: '— בחר תיק קיים —' }, ...existingOpts);
+    const defaultVal = c.caseId ?? (isNewClient ? NEW_CLIENT : (isNewCase ? NEW_CASE : ''));
     const caseSel = selectEl(`imp-case-${i}`, caseOpts, defaultVal, { class: 'select imp-in' });
+
+    // שדה מספר תיק — לעריכה/השלמה כשמקימים תיק חדש
+    const caseNoWrap = el('label', { class: 'imp-caseno' }, [
+      el('span', { class: 'imp-caseno__lbl muted', text: 'מס׳ תיק' }),
+      input(`imp-caseno-${i}`, { value: c.caseNumber || '', placeholder: '—', class: 'input imp-in imp-in--sm' }),
+    ]);
+    const creating = (v) => v === NEW_CLIENT || v === NEW_CASE;
+    caseNoWrap.style.display = creating(defaultVal) ? '' : 'none';
+
     const rateIn = input(`imp-rate-${i}`, { type: 'number', step: '0.5', min: '0', max: '100', value: c.rate, class: 'input imp-in imp-in--sm num' });
     caseSel.addEventListener('change', () => {
+      caseNoWrap.style.display = creating(caseSel.value) ? '' : 'none';
       const cs = state.cases.find((x) => x.id === parseInt(caseSel.value, 10));
       if (cs) rateIn.value = cs.commissionRate;
     });
     const badge = c.duplicate
       ? el('span', { class: 'imp-badge imp-badge--dup', text: 'כפולה?' })
       : el('span', { class: `imp-badge imp-badge--${c.confidence}`, text: c.confidence === 'high' ? 'זוהה' : c.confidence === 'medium' ? 'חלקי' : 'לבדיקה' });
-    // תת-שורת "זוהה": שם לקוח + מזהה חיצוני + סוג תיק
-    const detected = [c.clientGuess && `לקוח: ${c.clientGuess}`, c.externalClientId && `מזהה ${c.externalClientId}`, c.caseType && `סוג: ${c.caseType}`].filter(Boolean).join(' · ');
+    // תת-שורת "זוהה": לקוח · מספר תיק · שם תיק · מזהה חיצוני
+    const detected = [
+      c.clientGuess && `לקוח: ${c.clientGuess}`,
+      c.caseNumber && `תיק: ${c.caseNumber}`,
+      c.caseName && `שם: ${c.caseName}`,
+      c.externalClientId && `מזהה ${c.externalClientId}`,
+    ].filter(Boolean).join(' · ');
     return el('tr', {}, [
       el('td', {}, [el('input', { id: `imp-inc-${i}`, type: 'checkbox', checked: c.include || null })]),
-      el('td', {}, [caseSel, detected ? el('div', { class: 'muted imp-guess', text: `זוהה — ${detected}` }) : null]),
+      el('td', {}, [caseSel, caseNoWrap, detected ? el('div', { class: 'muted imp-guess', text: `זוהה — ${detected}` }) : null]),
       el('td', {}, [selectEl(`imp-month-${i}`, monthOptions(), c.month || new Date().getMonth() + 1, { class: 'select imp-in imp-in--sm' })]),
       el('td', {}, [input(`imp-year-${i}`, { type: 'number', value: c.year, class: 'input imp-in imp-in--sm num' })]),
       el('td', {}, [input(`imp-amount-${i}`, { type: 'number', step: '0.01', min: '0', value: c.amount, class: 'input imp-in num' })]),
@@ -722,7 +737,7 @@ function reviewImportModal(result, fileName) {
   });
 
   const body = el('div', { class: 'imp-review' }, [
-    el('p', { class: 'muted imp-summary', text: `זוהו ${result.candidates.length} חשבוניות בקובץ ${kindLabel} (${fileName}). כל שדה ניתן לעריכה. סכום ברירת המחדל = לפני מע״מ (בסיס העמלה).` + (needCase ? ` ${needCase} שורות של לקוח שאינו במערכת — "צור לקוח" יקים לקוח+תיק אוטומטית.` : '') }),
+    el('p', { class: 'muted imp-summary', text: `זוהו ${result.candidates.length} חשבוניות בקובץ ${kindLabel} (${fileName}). כל שדה ניתן לעריכה. סכום ברירת המחדל = לפני מע״מ (בסיס העמלה).` + (needCase ? ` שורות של לקוח/תיק שאינו במערכת יוקמו אוטומטית לפי מספר התיק שזוהה.` : '') }),
     el('div', { class: 'fin-table-wrap fin-table-wrap--scroll' }, [
       el('table', { class: 'fin-table imp-table' }, [
         el('thead', {}, [el('tr', {}, ['', 'תיק / לקוח', 'חודש', 'שנה', 'סכום', 'עמלה %', 'הערה', 'סטטוס'].map((h) => el('th', { text: h })))]),
@@ -733,7 +748,16 @@ function reviewImportModal(result, fileName) {
 
   openModal('סיווג חשבוניות מהקובץ', body, async () => {
     let added = 0, skipped = 0;
-    const createdClients = new Map(); // שם→caseId, למניעת כפילות בין שורות עם אותו לקוח חדש
+    const clientIdByName = new Map();  // שם לקוח חדש → clientId (הקמה חד-פעמית)
+    const caseIdByKey = new Map();     // clientId|מס׳תיק → caseId (הקמה חד-פעמית)
+    const getCaseNo = (i) => document.getElementById(`imp-caseno-${i}`).value.trim();
+    const makeCase = async (clientId, caseNo, c, rate) => {
+      const key = `${clientId}|${caseNo}`;
+      if (caseIdByKey.has(key)) return caseIdByKey.get(key);
+      const id = await billing.cases.add({ clientId, caseNumber: caseNo, description: c.caseName || '', caseType: c.caseType || 'שוטף', commissionRate: rate });
+      caseIdByKey.set(key, id);
+      return id;
+    };
     for (let i = 0; i < result.candidates.length; i++) {
       if (!document.getElementById(`imp-inc-${i}`)?.checked) continue;
       const c = result.candidates[i];
@@ -744,13 +768,12 @@ function reviewImportModal(result, fileName) {
 
       let caseId;
       if (selVal === NEW_CLIENT && c.clientGuess) {
-        const key = c.clientGuess.trim();
-        if (createdClients.has(key)) caseId = createdClients.get(key);
-        else {
-          const clientId = await billing.clients.add(key);
-          caseId = await billing.cases.add({ clientId, caseNumber: '', caseType: c.caseType || 'שוטף', commissionRate: rate });
-          createdClients.set(key, caseId);
-        }
+        const name = c.clientGuess.trim();
+        let clientId = clientIdByName.get(name);
+        if (clientId == null) { clientId = await billing.clients.add(name); clientIdByName.set(name, clientId); }
+        caseId = await makeCase(clientId, getCaseNo(i), c, rate);
+      } else if (selVal === NEW_CASE && c.clientId != null) {
+        caseId = await makeCase(c.clientId, getCaseNo(i), c, rate);
       } else {
         caseId = parseInt(selVal, 10);
       }

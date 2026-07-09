@@ -230,11 +230,16 @@ export function classifyTable(rows, ctx) {
     out.push({
       include: true,
       caseId: matchedCase ? matchedCase.id : null,
+      caseNumber: String(cell('caseNum') || '').trim(),
+      caseName: '',
       clientGuess: clientMatch ? clientMatch.client.name : (typeof clientText === 'string' ? clientText.trim() : ''),
+      clientExists: !!clientMatch,
+      clientId: clientMatch ? clientMatch.client.id : null,
       month: date ? date.month : null,
       year: date ? date.year : defaultYear,
       amount,
       rate: Number.isFinite(rate) ? rate : (matchedCase ? matchedCase.commissionRate : 0),
+      caseType: 'שוטף',
       notes: notesParts.join(' · '),
       confidence: matchedCase && date ? 'high' : (matchedCase || date ? 'medium' : 'low'),
     });
@@ -310,16 +315,30 @@ export function extractInvoiceFields(lines, ctx) {
   clientName = clientName.replace(DATE_RE, '').replace(/ח\.?פ\/?ע?\.?מ?\s*לקוח\s*:?/, '').replace(/\d{5,}/g, '').replace(/\s+/g, ' ').trim();
   const externalClientId = labeledText(lines, /מזהה\s*לקוח\s*:?/)?.match(/\d+/)?.[0] || null;
 
-  // סוג תיק — כתא עצמאי או ערך אחרי "סוג תיק". מדלגים על שורות עוגן ("חשבון עסקה" אינו סוג תיק)
-  let caseType = null;
+  // מספר תיק — "31570/0" (לקוח/תיק). ב-RTL של pdf.js מופיע כ-"31570\0" או "0\31570";
+  // מנרמלים לפי מזהה הלקוח (הוא הצד שקבוע). לקוח יכול להחזיק N תיקים → סיווג למספר התיק.
+  const caseNumber = extractCaseNumber(lines, externalClientId);
+
+  // שם התיק — הטקסט אחרי מספר התיק ("N - שוטף"), אחרת ערך עמודת "סוג תיק"/תא עצמאי
+  let caseName = null;
   for (const raw of lines) {
     const line = normQuotes(raw).trim();
     if (INVOICE_ANCHOR_RE.test(line)) continue;
-    for (const t of ['ליטיגציה', 'עסקה', 'שוטף']) {
-      if (line === t || new RegExp(`סוג\\s*תיק\\s*:?\\s*${t}`).test(line)) { caseType = t; break; }
-    }
-    if (caseType) break;
+    const nm = line.match(/\d{1,7}\s*[/\\]\s*\d{1,7}\s*[-–]\s*(\S.*)$/);
+    if (nm) { caseName = nm[1].trim(); break; }
   }
+  if (!caseName) {
+    for (const raw of lines) {
+      const line = normQuotes(raw).trim();
+      if (INVOICE_ANCHOR_RE.test(line)) continue;
+      for (const t of ['ליטיגציה', 'עסקה', 'שוטף']) {
+        if (line === t || new RegExp(`סוג\\s*תיק\\s*:?\\s*${t}`).test(line)) { caseName = t; break; }
+      }
+      if (caseName) break;
+    }
+  }
+  // סוג תיק (enum) — אם שם התיק הוא ערך מוכר; אחרת ברירת מחדל תיקבע ביצירה
+  const caseType = ['שוטף', 'ליטיגציה', 'עסקה'].includes(caseName) ? caseName : null;
 
   // סכומים — תווית-מונחה. ברירת המחדל לחיוב = לפני מע"מ (שכר הטרחה, בסיס העמלה)
   const amountBeforeVat = labeledAmount(lines, /סה"כ\s*חייב\s*במע"מ|סכום\s*לפני\s*מע"מ|לפני\s*מע"מ/);
@@ -340,18 +359,42 @@ export function extractInvoiceFields(lines, ctx) {
       if (m && normalizeName(line).includes(normalizeName(m.client.name))) { clientMatch = m; break; }
     }
   }
+  // שיוך תיק: קודם לפי מספר תיק מדויק, אחרת לקוח עם תיק יחיד
   let matchedCase = null;
-  if (invoiceNo) matchedCase = cases.find((c) => String(c.caseNumber || '').trim() === invoiceNo) || null;
+  if (caseNumber) matchedCase = cases.find((c) => normCaseNo(c.caseNumber) === normCaseNo(caseNumber)) || null;
   if (!matchedCase && clientMatch) {
     const cc = cases.filter((c) => c.clientId === clientMatch.client.id);
     if (cc.length === 1) matchedCase = cc[0];
   }
 
   return {
-    invoiceNo, date, clientName, externalClientId, caseType,
+    invoiceNo, date, clientName, externalClientId, caseNumber, caseName, caseType,
     amountBeforeVat, vat, amountTotal, amount, clientMatch, matchedCase,
     _defaultYear: defaultYear,
   };
+}
+
+/** נרמול מספר תיק להשוואה: אחיד סלאש, בלי רווחים */
+const normCaseNo = (s) => String(s || '').replace(/\\/g, '/').replace(/\s/g, '').trim();
+
+/** מספר תיק "31570/0" מתוך שורות ה-PDF. clientId (אם ידוע) קובע איזה צד הוא הלקוח */
+export function extractCaseNumber(lines, clientId) {
+  const re = /(\d{1,7})\s*[/\\]\s*(\d{1,7})/;
+  for (const raw of lines) {
+    const line = normQuotes(raw);
+    if (DATE_RE.test(line)) continue;             // שורות תאריך אינן מספר תיק
+    if (INVOICE_ANCHOR_RE.test(line)) continue;   // "חשבון עסקה N" אינו מספר תיק
+    const m = line.match(re);
+    if (!m) continue;
+    const a = m[1], b = m[2];
+    if (clientId) {
+      if (a === String(clientId)) return `${a}/${b}`;
+      if (b === String(clientId)) return `${b}/${a}`;
+      continue;                                    // יש מזהה לקוח שלא תואם — כנראה לא מספר התיק
+    }
+    return Number(a) >= Number(b) ? `${a}/${b}` : `${b}/${a}`;  // בלי מזהה: הגדול = לקוח
+  }
+  return null;
 }
 
 /** שדות מחולצים → מועמד לסיווג (schema אחיד עם classifyTable) */
@@ -363,8 +406,11 @@ function fieldsToCandidate(f) {
   return {
     include: f.amount != null,
     caseId: f.matchedCase ? f.matchedCase.id : null,
+    caseNumber: f.caseNumber || '',
+    caseName: f.caseName || '',
     clientGuess: f.clientMatch ? f.clientMatch.client.name : (f.clientName || ''),
     clientExists: !!f.clientMatch,
+    clientId: f.clientMatch ? f.clientMatch.client.id : null,
     month: f.date ? f.date.month : null,
     year: f.date ? f.date.year : f._defaultYear,
     amount: f.amount,
