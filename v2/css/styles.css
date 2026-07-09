@@ -2307,3 +2307,25 @@ dialog.modal.modal--wide { width: min(980px, 96vw); }
 .imp-badge--medium { color: var(--gold); border-color: var(--gold-line); background: var(--gold-grad-soft); }
 .imp-badge--low { color: var(--text-muted); background: var(--surface-2); }
 .imp-badge--dup { color: var(--negative); border-color: rgba(248, 113, 113, 0.35); background: var(--negative-soft); }
+
+/* ---------- Drag & Drop overlay (זריקת מסמך חשבונית) ---------- */
+.drop-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  display: grid; place-items: center;
+  background: rgba(5, 5, 7, 0.72);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  animation: dropIn 0.18s var(--ease-out);
+}
+@keyframes dropIn { from { opacity: 0; } to { opacity: 1; } }
+.drop-overlay__card {
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  padding: 48px 64px; text-align: center;
+  border: 2px dashed var(--gold-line); border-radius: var(--radius-xl);
+  background: var(--glass-strong);
+  box-shadow: var(--elev-3), 0 0 40px -12px var(--gold-glow);
+  color: var(--text-primary);
+}
+.drop-overlay__card .ic-lg { color: var(--gold); }
+.drop-overlay__card .ic-lg svg { width: 44px; height: 44px; }
+.drop-overlay__title { font-size: 1.2rem; font-weight: 800; color: var(--text-strong); }
+.drop-overlay__sub { font-size: 0.85rem; }

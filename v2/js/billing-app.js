@@ -61,6 +61,37 @@ export function init(containers, appRefresh) {
   onMutate = appRefresh; // רענון CRM מלא (loadData+render) — מופעל אחרי ייבוא
   document.addEventListener('click', onClick);
   document.addEventListener('change', onChange);
+  setupDropZone();
+}
+
+/* ---------- Drag & Drop: זריקת מסמך חשבונית לכל מקום באפליקציה ---------- */
+function setupDropZone() {
+  const hasFiles = (e) => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
+  let overlay = null;
+  let depth = 0; // מונה dragenter/leave כדי לא להבהב בין אלמנטים מקוננים
+  const show = () => {
+    if (overlay) return;
+    overlay = el('div', { class: 'drop-overlay' }, [
+      el('div', { class: 'drop-overlay__card' }, [
+        icon('cloudDown', 'ic-lg'),
+        el('div', { class: 'drop-overlay__title', text: 'שחרר כאן לייבוא חשבונית' }),
+        el('div', { class: 'drop-overlay__sub muted', text: 'PDF · Excel · CSV — המערכת תזהה ותסווג אוטומטית' }),
+      ]),
+    ]);
+    document.body.append(overlay);
+  };
+  const hide = () => { depth = 0; overlay?.remove(); overlay = null; };
+
+  window.addEventListener('dragenter', (e) => { if (!hasFiles(e)) return; e.preventDefault(); depth++; show(); });
+  window.addEventListener('dragover', (e) => { if (hasFiles(e)) e.preventDefault(); });
+  window.addEventListener('dragleave', (e) => { if (!hasFiles(e)) return; depth--; if (depth <= 0) hide(); });
+  window.addEventListener('drop', (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    hide();
+    const file = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (file) processInvoiceFile(file);
+  });
 }
 
 export async function loadData() {
@@ -620,7 +651,14 @@ async function handleImport(inputEl) {
 async function handleInvoiceFile(inputEl) {
   const file = inputEl.files && inputEl.files[0];
   inputEl.value = '';
-  if (!file) return;
+  if (file) processInvoiceFile(file);
+}
+
+/** פענוח קובץ (מ-input או מ-drag&drop) → מסך סיווג. משותף לשני מסלולי הקלט. */
+async function processInvoiceFile(file) {
+  if (!state.loaded) await loadData();
+  const kind = invImport.detectKind(file);
+  if (!kind) { toast('סוג קובץ לא נתמך — PDF, Excel או CSV בלבד', 'alert'); return; }
   toast('מפענח את הקובץ…');
   let result;
   try {
@@ -631,7 +669,7 @@ async function handleInvoiceFile(inputEl) {
     return;
   }
   if (!result.candidates.length) {
-    toast('לא זוהו חשבוניות בקובץ — ודא שיש בו עמודת סכום או שורת סה״כ', 'alert');
+    toast('לא זוהו חשבוניות בקובץ — ודא שיש בו סכום או שורת סה״כ', 'alert');
     return;
   }
   // סימון כפולות מול כל החשבוניות הקיימות (לא רק השנה הנבחרת)
@@ -643,14 +681,24 @@ async function handleInvoiceFile(inputEl) {
   reviewImportModal(result, file.name);
 }
 
+const NEW_CLIENT = '__new__';
+
 /** מסך סיווג: טבלת מועמדים לעריכה/אישור לפני שמירה */
 function reviewImportModal(result, fileName) {
-  const caseOpts = [{ value: '', label: '— בחר תיק —' }, ...state.cases.map((c) => ({ value: c.id, label: `${c.caseNumber || '—'} · ${clientName(c.clientId)}` }))];
+  const existingOpts = state.cases.map((c) => ({ value: c.id, label: `${c.caseNumber || '—'} · ${clientName(c.clientId)}` }));
   const kindLabel = result.kind === 'pdf' ? 'PDF' : 'Excel';
   const needCase = result.candidates.filter((c) => !c.caseId).length;
 
   const rows = result.candidates.map((c, i) => {
-    const caseSel = selectEl(`imp-case-${i}`, caseOpts, c.caseId ?? '', { class: 'select imp-in' });
+    // לקוח חדש שזוהה מהמסמך ואינו במערכת → אפשרות "צור לקוח" שנבחרת אוטומטית (השלמה אוטומטית)
+    const canCreate = c.clientGuess && !c.clientExists && !c.caseId;
+    const caseOpts = [
+      canCreate ? { value: NEW_CLIENT, label: `➕ צור לקוח: ${c.clientGuess}` } : { value: '', label: '— בחר תיק —' },
+      ...(canCreate ? [{ value: '', label: '— בחר תיק קיים —' }] : []),
+      ...existingOpts,
+    ];
+    const defaultVal = c.caseId ?? (canCreate ? NEW_CLIENT : '');
+    const caseSel = selectEl(`imp-case-${i}`, caseOpts, defaultVal, { class: 'select imp-in' });
     const rateIn = input(`imp-rate-${i}`, { type: 'number', step: '0.5', min: '0', max: '100', value: c.rate, class: 'input imp-in imp-in--sm num' });
     caseSel.addEventListener('change', () => {
       const cs = state.cases.find((x) => x.id === parseInt(caseSel.value, 10));
@@ -659,9 +707,11 @@ function reviewImportModal(result, fileName) {
     const badge = c.duplicate
       ? el('span', { class: 'imp-badge imp-badge--dup', text: 'כפולה?' })
       : el('span', { class: `imp-badge imp-badge--${c.confidence}`, text: c.confidence === 'high' ? 'זוהה' : c.confidence === 'medium' ? 'חלקי' : 'לבדיקה' });
+    // תת-שורת "זוהה": שם לקוח + מזהה חיצוני + סוג תיק
+    const detected = [c.clientGuess && `לקוח: ${c.clientGuess}`, c.externalClientId && `מזהה ${c.externalClientId}`, c.caseType && `סוג: ${c.caseType}`].filter(Boolean).join(' · ');
     return el('tr', {}, [
       el('td', {}, [el('input', { id: `imp-inc-${i}`, type: 'checkbox', checked: c.include || null })]),
-      el('td', {}, [caseSel, c.clientGuess && !c.caseId ? el('div', { class: 'muted imp-guess', text: `זוהה: ${c.clientGuess}` }) : null]),
+      el('td', {}, [caseSel, detected ? el('div', { class: 'muted imp-guess', text: `זוהה — ${detected}` }) : null]),
       el('td', {}, [selectEl(`imp-month-${i}`, monthOptions(), c.month || new Date().getMonth() + 1, { class: 'select imp-in imp-in--sm' })]),
       el('td', {}, [input(`imp-year-${i}`, { type: 'number', value: c.year, class: 'input imp-in imp-in--sm num' })]),
       el('td', {}, [input(`imp-amount-${i}`, { type: 'number', step: '0.01', min: '0', value: c.amount, class: 'input imp-in num' })]),
@@ -672,7 +722,7 @@ function reviewImportModal(result, fileName) {
   });
 
   const body = el('div', { class: 'imp-review' }, [
-    el('p', { class: 'muted imp-summary', text: `זוהו ${result.candidates.length} חשבוניות בקובץ ${kindLabel} (${fileName}).` + (needCase ? ` ${needCase} שורות דורשות בחירת תיק — שורה בלי תיק לא תיובא.` : '') }),
+    el('p', { class: 'muted imp-summary', text: `זוהו ${result.candidates.length} חשבוניות בקובץ ${kindLabel} (${fileName}). כל שדה ניתן לעריכה. סכום ברירת המחדל = לפני מע״מ (בסיס העמלה).` + (needCase ? ` ${needCase} שורות של לקוח שאינו במערכת — "צור לקוח" יקים לקוח+תיק אוטומטית.` : '') }),
     el('div', { class: 'fin-table-wrap fin-table-wrap--scroll' }, [
       el('table', { class: 'fin-table imp-table' }, [
         el('thead', {}, [el('tr', {}, ['', 'תיק / לקוח', 'חודש', 'שנה', 'סכום', 'עמלה %', 'הערה', 'סטטוס'].map((h) => el('th', { text: h })))]),
@@ -683,25 +733,46 @@ function reviewImportModal(result, fileName) {
 
   openModal('סיווג חשבוניות מהקובץ', body, async () => {
     let added = 0, skipped = 0;
+    const createdClients = new Map(); // שם→caseId, למניעת כפילות בין שורות עם אותו לקוח חדש
     for (let i = 0; i < result.candidates.length; i++) {
       if (!document.getElementById(`imp-inc-${i}`)?.checked) continue;
-      const caseId = parseInt(document.getElementById(`imp-case-${i}`).value, 10);
+      const c = result.candidates[i];
+      const selVal = document.getElementById(`imp-case-${i}`).value;
       const amount = parseFloat(document.getElementById(`imp-amount-${i}`).value);
-      if (!caseId || !(amount > 0)) { skipped++; continue; }
+      const rate = document.getElementById(`imp-rate-${i}`).value;
+      if (!(amount > 0)) { skipped++; continue; }
+
+      let caseId;
+      if (selVal === NEW_CLIENT && c.clientGuess) {
+        const key = c.clientGuess.trim();
+        if (createdClients.has(key)) caseId = createdClients.get(key);
+        else {
+          const clientId = await billing.clients.add(key);
+          caseId = await billing.cases.add({ clientId, caseNumber: '', caseType: c.caseType || 'שוטף', commissionRate: rate });
+          createdClients.set(key, caseId);
+        }
+      } else {
+        caseId = parseInt(selVal, 10);
+      }
+      if (!caseId) { skipped++; continue; }
+
       await billing.invoices.add({
         caseId,
         month: document.getElementById(`imp-month-${i}`).value,
         year: document.getElementById(`imp-year-${i}`).value,
         amount,
-        commissionRate: document.getElementById(`imp-rate-${i}`).value,
+        commissionRate: rate,
         notes: document.getElementById(`imp-notes-${i}`).value,
         source: 'file-import',
       });
       added++;
     }
-    if (!added) { toast(skipped ? 'לא יובא דבר — בחר תיק לשורות המסומנות' : 'לא סומנו שורות לייבוא', 'alert'); return false; }
+    if (!added) { toast(skipped ? 'לא יובא דבר — בחר תיק/לקוח לשורות המסומנות' : 'לא סומנו שורות לייבוא', 'alert'); return false; }
     toast(`נוספו ${added} חשבוניות` + (skipped ? ` (${skipped} דולגו — חסר תיק/סכום)` : ''));
-    reload('invoices');
+    // ניווט למסך חשבוניות (חשוב כשהקובץ נזרק ממסך CRM אחר); נופל ל-reload אם אין ניווט
+    const navBtn = document.getElementById('view-invoices');
+    if (navBtn && !document.body.classList.contains('view-invoices')) { await loadData(); navBtn.click(); }
+    else reload('invoices');
     return true;
   }, { wide: true });
 }

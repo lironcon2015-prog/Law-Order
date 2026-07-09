@@ -242,84 +242,170 @@ export function classifyTable(rows, ctx) {
   return out;
 }
 
-/* ============================================================ פענוח טקסט PDF (היוריסטי) ============================================================ */
+/* ============================================================ פענוח PDF — חילוץ שדות לפי תוויות ============================================================ */
 const AMOUNT_RE = /(?:₪\s*)?-?\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|(?:₪\s*)-?\d+(?:\.\d{1,2})?|-?\d+\.\d{2}\b/g;
-const TOTAL_RE = /סה["״׳']?כ\s*לתשלום|לתשלום|סה["״׳']?כ\s*כולל|סה["״׳']?כ|total\s*(due)?/i;
 const DATE_RE = /\b([0-3]?\d)[./\-]([01]?\d)[./\-](\d{2,4})\b/;
+// עוגן חשבונית: "חשבון עסקה 10041947" · "חשבונית מס' 30112" · "invoice #123" · "נספח לחשבון עסקה מספר N"
+const INVOICE_ANCHOR_RE = /(?:חשבון\s*עסקה|חשבונית(?:\s*מס['׳.]?)?|invoice)\s*(?:מספר\s*)?[:#]?\s*(\d{3,})/i;
 
-/** מספר חשבונית: מספר באותה שורה עם המילה "חשבונית"/invoice (חסין לסדר RTL של pdf.js) */
-function findInvoiceNo(lines) {
-  for (const line of lines) {
-    if (!/חשבונית|invoice/i.test(line) || DATE_RE.test(line)) continue;
-    const stripped = line.replace(AMOUNT_RE, ' '); // בלי סכומים, שלא ייתפסו כמספר
-    const m = stripped.match(/\d{3,}/);
-    if (m) return m[0];
-  }
-  return null;
-}
+// pdf.js מפיק לעיתים גרשיים "מסולסלים" (”“) — מנרמלים לגרש ישר כדי שתוויות עבריות יזוהו
+function normQuotes(s) { return String(s).replace(/[”“״]/g, '"').replace(/[’‘׳]/g, "'"); }
 
 function amountsInLine(line) {
   const out = [];
-  for (const m of line.matchAll(AMOUNT_RE)) {
+  for (const m of normQuotes(line).matchAll(AMOUNT_RE)) {
     const n = parseAmount(m[0].replace('₪', '').trim());
     if (n != null && n > 0 && n < 100000000) out.push(n);
   }
   return out;
 }
 
-/** מסווג טקסט של עמוד PDF אחד למועמד חשבונית (או null אם לא זוהה סכום) */
-export function classifyPdfPage(lines, ctx) {
-  const { clients = [], cases = [], defaultYear = new Date().getFullYear() } = ctx || {};
-  let amount = null;
-  // עדיפות לשורת "סה\"כ לתשלום"; אחרת הסכום הגדול בעמוד
+/** הסכום (הגדול) בשורה הראשונה שמכילה את התווית */
+function labeledAmount(lines, labelRe) {
   for (const line of lines) {
-    if (TOTAL_RE.test(line)) {
+    if (labelRe.test(normQuotes(line))) {
       const nums = amountsInLine(line);
-      if (nums.length) amount = Math.max(...nums);
+      if (nums.length) return Math.max(...nums);
     }
   }
-  if (amount == null) {
-    let max = 0;
-    for (const line of lines) for (const n of amountsInLine(line)) if (n > max) max = n;
-    if (max > 0) amount = max;
-  }
-  if (amount == null) return null;
+  return null;
+}
 
-  const text = lines.join('\n');
-  const dm = text.match(DATE_RE);
+/** הערך בשורת תווית, עם התווית מוסרת (לשדות טקסט: "שם לקוח:", "תאריך:") */
+function labeledText(lines, labelRe) {
+  for (const line of lines) {
+    const n = normQuotes(line);
+    if (labelRe.test(n)) return n.replace(labelRe, ' ').replace(/\s+/g, ' ').trim();
+  }
+  return null;
+}
+
+/**
+ * חילוץ כל שדות החשבונית מקבוצת שורות (חשבונית אחת, יכולה להשתרע על כמה עמודים).
+ * ctx = { clients, cases, defaultYear }. מחזיר אובייקט שדות מובנה.
+ */
+export function extractInvoiceFields(lines, ctx) {
+  const { clients = [], cases = [], defaultYear = new Date().getFullYear() } = ctx || {};
+
+  // מספר חשבונית
+  let invoiceNo = null;
+  for (const line of lines) {
+    const m = normQuotes(line).match(INVOICE_ANCHOR_RE);
+    if (m) { invoiceNo = m[1]; break; }
+  }
+
+  // תאריך — עדיפות לשורת "תאריך:", נפילה לתאריך הראשון במסמך
+  const dateLine = labeledText(lines, /תאריך\s*:?/);
+  const dm = (dateLine || normQuotes(lines.join('\n'))).match(DATE_RE);
   let date = null;
   if (dm) {
     const month = parseInt(dm[2], 10);
     let year = parseInt(dm[3], 10);
     if (year < 100) year += 2000;
-    if (month >= 1 && month <= 12) date = { month, year };
+    if (month >= 1 && month <= 12) date = { month, year, raw: dm[0] };
   }
 
-  // לקוח: השורה הראשונה שמכילה שם לקוח מוכר
-  let clientMatch = null;
-  for (const line of lines) {
-    const m = matchClient(line, clients);
-    // בשורת טקסט חופשי דורשים הכלה של שם הלקוח (score 2 של includes מספיק רק אם השם בתוך השורה)
-    if (m && normalizeName(line).includes(normalizeName(m.client.name))) { clientMatch = m; break; }
+  // לקוח: "שם לקוח:" → נפילה ל"לכבוד:". ניקוי שדות שנגררו לאותה שורה (RTL)
+  let clientName = labeledText(lines, /שם\s*לקוח\s*:?/) || labeledText(lines, /לכבוד\s*:?/) || '';
+  clientName = clientName.replace(DATE_RE, '').replace(/ח\.?פ\/?ע?\.?מ?\s*לקוח\s*:?/, '').replace(/\d{5,}/g, '').replace(/\s+/g, ' ').trim();
+  const externalClientId = labeledText(lines, /מזהה\s*לקוח\s*:?/)?.match(/\d+/)?.[0] || null;
+
+  // סוג תיק — כתא עצמאי או ערך אחרי "סוג תיק". מדלגים על שורות עוגן ("חשבון עסקה" אינו סוג תיק)
+  let caseType = null;
+  for (const raw of lines) {
+    const line = normQuotes(raw).trim();
+    if (INVOICE_ANCHOR_RE.test(line)) continue;
+    for (const t of ['ליטיגציה', 'עסקה', 'שוטף']) {
+      if (line === t || new RegExp(`סוג\\s*תיק\\s*:?\\s*${t}`).test(line)) { caseType = t; break; }
+    }
+    if (caseType) break;
+  }
+
+  // סכומים — תווית-מונחה. ברירת המחדל לחיוב = לפני מע"מ (שכר הטרחה, בסיס העמלה)
+  const amountBeforeVat = labeledAmount(lines, /סה"כ\s*חייב\s*במע"מ|סכום\s*לפני\s*מע"מ|לפני\s*מע"מ/);
+  const vat = labeledAmount(lines, /סה"כ\s*מע"מ|מע"מ\s*\)?\s*1[78]\s*%/);
+  const amountTotal = labeledAmount(lines, /סה"כ\s*לתשלום|סה"כ\s*החשבון/);
+  let amount = amountBeforeVat != null ? amountBeforeVat : amountTotal;
+  if (amount == null) {
+    let max = 0;
+    for (const line of lines) for (const n of amountsInLine(line)) if (n > max) max = n;
+    amount = max > 0 ? max : null;
+  }
+
+  // התאמת לקוח/תיק קיימים
+  let clientMatch = clientName ? matchClient(clientName, clients) : null;
+  if (!clientMatch) {
+    for (const line of lines) {
+      const m = matchClient(line, clients);
+      if (m && normalizeName(line).includes(normalizeName(m.client.name))) { clientMatch = m; break; }
+    }
   }
   let matchedCase = null;
-  if (clientMatch) {
+  if (invoiceNo) matchedCase = cases.find((c) => String(c.caseNumber || '').trim() === invoiceNo) || null;
+  if (!matchedCase && clientMatch) {
     const cc = cases.filter((c) => c.clientId === clientMatch.client.id);
     if (cc.length === 1) matchedCase = cc[0];
   }
-  const invNo = findInvoiceNo(lines);
 
   return {
-    include: true,
-    caseId: matchedCase ? matchedCase.id : null,
-    clientGuess: clientMatch ? clientMatch.client.name : '',
-    month: date ? date.month : null,
-    year: date ? date.year : defaultYear,
-    amount,
-    rate: matchedCase ? matchedCase.commissionRate : 0,
-    notes: invNo ? `חשבונית ${invNo}` : '',
-    confidence: matchedCase && date ? 'high' : (matchedCase || date ? 'medium' : 'low'),
+    invoiceNo, date, clientName, externalClientId, caseType,
+    amountBeforeVat, vat, amountTotal, amount, clientMatch, matchedCase,
+    _defaultYear: defaultYear,
   };
+}
+
+/** שדות מחולצים → מועמד לסיווג (schema אחיד עם classifyTable) */
+function fieldsToCandidate(f) {
+  const notes = [];
+  if (f.invoiceNo) notes.push(`חשבון ${f.invoiceNo}`);
+  if (f.amountTotal != null && f.amountTotal !== f.amount) notes.push(`כולל מע"מ ₪${Math.round(f.amountTotal).toLocaleString('he-IL')}`);
+  const hasClient = !!(f.clientMatch || (f.clientName && f.clientName.length > 1));
+  return {
+    include: f.amount != null,
+    caseId: f.matchedCase ? f.matchedCase.id : null,
+    clientGuess: f.clientMatch ? f.clientMatch.client.name : (f.clientName || ''),
+    clientExists: !!f.clientMatch,
+    month: f.date ? f.date.month : null,
+    year: f.date ? f.date.year : f._defaultYear,
+    amount: f.amount,
+    rate: f.matchedCase ? f.matchedCase.commissionRate : 0,
+    caseType: f.caseType || 'שוטף',
+    notes: notes.join(' · '),
+    invoiceNo: f.invoiceNo, externalClientId: f.externalClientId,
+    amountBeforeVat: f.amountBeforeVat, vat: f.vat, amountTotal: f.amountTotal,
+    confidence: f.matchedCase && f.date ? 'high' : (hasClient && f.date && f.amount != null ? 'medium' : 'low'),
+  };
+}
+
+/**
+ * מסמך PDF (מערך עמודים, כל עמוד = שורות) → מועמדי חשבונית.
+ * מקבץ לפי מספר חשבונית → חשבונית שמשתרעת על כמה עמודים (חשבון+נספח) = מועמד אחד.
+ */
+export function classifyPdfDocument(pages, ctx) {
+  const allLines = pages.flat();
+  const groups = new Map();  // invoiceNo → lines[]
+  const order = [];
+  let current = null, sawAnchor = false;
+  for (const line of allLines) {
+    const m = normQuotes(line).match(INVOICE_ANCHOR_RE);
+    if (m) { sawAnchor = true; current = m[1]; if (!groups.has(current)) { groups.set(current, []); order.push(current); } }
+    if (current == null) { current = '__pre__'; if (!groups.has(current)) { groups.set(current, []); order.push(current); } }
+    groups.get(current).push(line);
+  }
+  let segments;
+  if (!sawAnchor) {
+    segments = [allLines];  // מסמך יחיד בלי מספר מזוהה
+  } else {
+    const realKeys = order.filter((k) => k !== '__pre__');
+    if (groups.has('__pre__') && realKeys.length) groups.get(realKeys[0]).unshift(...groups.get('__pre__'));  // כותרות → לחשבונית הראשונה
+    segments = realKeys.map((k) => groups.get(k));
+  }
+  const candidates = [];
+  for (const seg of segments) {
+    const f = extractInvoiceFields(seg, ctx);
+    if (f.amount != null) candidates.push(fieldsToCandidate(f));
+  }
+  return candidates;
 }
 
 /* ============================================================ קריאת קבצים (דפדפן) ============================================================ */
@@ -347,11 +433,11 @@ async function parsePdf(file, ctx) {
   const pdfjsLib = window.pdfjsLib;
   pdfjsLib.GlobalWorkerOptions.workerSrc = VENDOR_PDF_WORKER();
   const doc = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
-  const candidates = [];
+  const pages = [];
   for (let p = 1; p <= doc.numPages; p++) {
     const page = await doc.getPage(p);
     const content = await page.getTextContent();
-    // קיבוץ פריטי טקסט לשורות לפי קואורדינטת Y
+    // קיבוץ פריטי טקסט לשורות לפי קואורדינטת Y, מיון פנימי לפי X
     const byY = new Map();
     for (const item of content.items) {
       if (!item.str || !item.str.trim()) continue;
@@ -362,10 +448,9 @@ async function parsePdf(file, ctx) {
     const lines = [...byY.entries()]
       .sort((a, b) => b[0] - a[0])
       .map(([, items]) => items.sort((a, b) => a.x - b.x).map((i) => i.str).join(' ').trim());
-    const cand = classifyPdfPage(lines, ctx);
-    if (cand) candidates.push(cand);
+    pages.push(lines);
   }
-  return candidates;
+  return classifyPdfDocument(pages, ctx);
 }
 
 /**
