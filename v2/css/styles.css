@@ -1989,7 +1989,9 @@ body.view-analysis #analysis-view { display: block; }
 /* pivot table (פירוט חודשי לפי לקוח) */
 .fin-table-wrap--scroll { overflow-x: auto; }
 .fin-table--pivot th, .fin-table--pivot td { padding: 9px 12px; font-size: 0.8rem; white-space: nowrap; }
-.fin-table--pivot th.num, .fin-table--pivot td.num { text-align: start; }
+/* תאי .num כופים direction:ltr, ולכן text-align:start מתפרש כשמאל בעוד כותרות ה-th מיושרות לימין (RTL)
+   → הכותרת והמספר לא מיושרים. יישור ימני מפורש לתאי מספר ולכותרותיהם מצמיד ביניהם בכל הטבלאות. */
+.fin-table td.num, .fin-table th.num { text-align: right; }
 
 /* ---------- ייבוא/ייצוא (הגדרות) ---------- */
 .fin-io-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
@@ -2329,5 +2331,17 @@ dialog.modal.modal--wide { width: min(980px, 96vw); }
 }
 .drop-overlay__card .ic-lg { color: var(--gold); }
 .drop-overlay__card .ic-lg svg { width: 44px; height: 44px; }
+
+/* אזור גרירה גלוי במסך חשבוניות */
+.fin-dropzone {
+  display: flex; align-items: center; justify-content: center; gap: 12px;
+  width: 100%; margin: 2px 0 18px; padding: 15px 20px;
+  border: 1.5px dashed var(--line-strong); border-radius: var(--radius-lg);
+  background: var(--surface-1); color: var(--text-secondary);
+  font-size: 0.86rem; cursor: pointer; transition: all var(--t-fast);
+}
+.fin-dropzone:hover { border-color: var(--gold-line); background: var(--gold-grad-soft); color: var(--text-primary); }
+.fin-dropzone .ic { color: var(--gold); display: inline-flex; }
+.fin-dropzone strong { color: var(--text-strong); font-weight: 700; }
 .drop-overlay__title { font-size: 1.2rem; font-weight: 800; color: var(--text-strong); }
 .drop-overlay__sub { font-size: 0.85rem; }

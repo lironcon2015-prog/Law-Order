@@ -206,6 +206,16 @@ function renderClients(container) {
 }
 
 /* ============================================================ מסך: חשבוניות ============================================================ */
+/** אזור גרירה גלוי (discoverability ל-drag&drop) — קליק פותח את בורר הקבצים */
+function invDropzone() {
+  const dz = el('button', { class: 'fin-dropzone', type: 'button', 'aria-label': 'גרירת חשבונית לייבוא' }, [
+    icon('cloudDown'),
+    el('span', { class: 'fin-dropzone__txt', html: '<strong>גרור לכאן חשבונית</strong> — PDF · Excel · CSV, או לחץ לבחירת קובץ' }),
+  ]);
+  dz.addEventListener('click', () => document.getElementById('fin-inv-file')?.click());
+  return dz;
+}
+
 function renderInvoices(container) {
   const addBtn = el('button', { class: 'btn btn--primary btn--sm', 'data-bil-action': 'new-invoice' }, [icon('plus'), el('span', { text: 'חשבונית חדשה' })]);
   const importBtn = el('label', { class: 'btn btn--ghost btn--sm', title: 'ייבוא חשבוניות מקובץ PDF / Excel / CSV — המערכת מזהה ומסווגת אוטומטית' }, [
@@ -225,6 +235,8 @@ function renderInvoices(container) {
     kpiSmall('עמלות שנצברו', totalComm, 'accent'),
     kpiSmall('חשבוניות', list.length, 'plain'),
   ]));
+
+  wrap.append(invDropzone());
 
   if (!list.length) {
     wrap.append(el('div', { class: 'fin-empty' }, [icon('receipt', 'ic-lg'), el('p', { text: `אין חשבוניות לשנת ${state.year}` })]));
@@ -586,8 +598,14 @@ function clientMonthlyTable() {
   const totalCells = []; for (let m = 1; m <= maxM; m++) { const v = monthTotals[m] || 0; totalCells.push(el('td', { class: 'num', text: v ? fmtNum(v) : '—' })); }
   const foot = el('tr', { class: 'fin-table__total' }, [el('td', { text: 'סה״כ חודשי' }), ...totalCells, el('td', { class: `num ${metric === 'c' ? 'accent' : ''}`, text: fmtNum(grand) })]);
 
-  const headLabels = ['לקוח / תיק', ...Array.from({ length: maxM }, (_, i) => MONTHS_SHORT[i + 1]), 'סה״כ'];
-  const thead = el('thead', {}, [el('tr', {}, headLabels.map((h) => el('th', { class: 'num', text: h })))]);
+  // כותרת עמודת התווית ללא class num (נשארת RTL כמו תאיה); עמודות החודשים והסה״כ מיושרות לימין כמספרים
+  const monthHeads = Array.from({ length: maxM }, (_, i) => MONTHS_SHORT[i + 1]);
+  const headRow = el('tr', {}, [
+    el('th', { text: 'לקוח / תיק' }),
+    ...monthHeads.map((h) => el('th', { class: 'num', text: h })),
+    el('th', { class: 'num', text: 'סה״כ' }),
+  ]);
+  const thead = el('thead', {}, [headRow]);
   return el('div', { class: 'fin-table-wrap fin-table-wrap--scroll' }, [el('table', { class: 'fin-table fin-table--pivot' }, [thead, el('tbody', {}, rows), el('tfoot', {}, [foot])])]);
 }
 
