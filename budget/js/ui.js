@@ -125,6 +125,11 @@ export function renderDealTabs(container, { deals, snapshots, activeId }) {
       el('span', { class: `dtab__dot dtab__dot--${st}` }),
       el('span', { class: 'dtab__name', text: deal.name }),
       snap ? el('span', { class: 'dtab__util num', text: fmtPct(snap.util) }) : null,
+      el('span', {
+        class: 'dtab__close', role: 'button', tabindex: '-1', title: `מחיקת ${deal.name}`,
+        'aria-label': `מחיקת ${deal.name}`,
+        dataset: { action: 'delete-deal', id: deal.id }, html: ICONS.close,
+      }),
     ]));
   }
 
@@ -171,7 +176,14 @@ export function renderOverview(root, { snapshots }) {
           el('h3', { class: 'dcard__name', text: s.deal.name }),
           el('span', { class: 'dcard__client', text: s.deal.client || '—' }),
         ]),
-        statusPill(s.status),
+        el('div', { class: 'dcard__head-tools' }, [
+          statusPill(s.status),
+          el('button', {
+            class: 'iconbtn iconbtn--danger dcard__del', type: 'button', title: 'מחיקת העסקה',
+            'aria-label': `מחיקת ${s.deal.name}`,
+            dataset: { action: 'delete-deal', id: s.deal.id }, html: ICONS.trash,
+          }),
+        ]),
       ]),
       el('div', { class: 'dcard__bar', html: miniBar(s.util, s.status) }),
       el('div', { class: 'dcard__nums' }, [
@@ -351,8 +363,17 @@ function renderTeamCard(team, { snap, rateCard }) {
   for (const line of team.lines) {
     tbody.append(el('tr', { class: `bline bline--${line.status}`, dataset: { lineId: line.id, teamId: team.id } }, [
       el('td', { class: 'td-role' }, [
-        el('select', { class: 'cellinput cellinput--role', dataset: { field: 'roleId', teamId: team.id, lineId: line.id } },
-          rateCard.roles.map((r) => el('option', { value: r.id, selected: r.id === line.roleId ? 'selected' : null, text: r.name }))),
+        el('select', {
+          class: `cellinput cellinput--role${line.orphanRole ? ' cellinput--orphan' : ''}`,
+          title: line.orphanRole ? 'הדרגה אינה קיימת בתעריפון הנוכחי — התעריף מוקפא בשורה. בחר דרגה מהתעריפון כדי לחבר מחדש.' : null,
+          dataset: { field: 'roleId', teamId: team.id, lineId: line.id },
+        }, [
+          // דרגה שנעלמה מהתעריפון (הוחלף/נמחק) — מוצגת כדי שהשורה לא תיראה כדרגה אחרת
+          line.orphanRole
+            ? el('option', { value: line.roleId, selected: 'selected', text: `${line.roleName && line.roleName !== '—' ? line.roleName : 'דרגה שהוסרה'} · לא בתעריפון` })
+            : null,
+          ...rateCard.roles.map((r) => el('option', { value: r.id, selected: r.id === line.roleId ? 'selected' : null, text: r.name })),
+        ]),
       ]),
       el('td', {}, [el('input', {
         class: 'cellinput num', type: 'number', step: '0.5', min: '0', value: String(line.estHours),

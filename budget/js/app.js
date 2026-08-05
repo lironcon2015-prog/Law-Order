@@ -70,6 +70,10 @@ async function init() {
   registerSW();
   render();
 
+  if (store.cache.healedDeals) {
+    ui.toast(`${store.cache.healedDeals} עסקאות חוברו מחדש לדרגות התעריפון`);
+  }
+
   window.lexBudget = { store, state, render, seedDemo };
 }
 
@@ -308,7 +312,7 @@ async function onClick(e) {
     case 'add-line': {
       const team = store.getTeam(target.dataset.teamId);
       const roles = store.rateCardFor(store.getDeal(team.dealId)).roles;
-      team.lines.push({ id: uid('ln'), roleId: roles[0]?.id || '', estHours: 0, hoursOverride: null, rateOverride: null, note: '' });
+      team.lines.push({ id: uid('ln'), roleId: roles[0]?.id || '', roleName: roles[0]?.name || '', estHours: 0, hoursOverride: null, rateOverride: null, note: '' });
       await store.saveTeam(team);
       return render();
     }
@@ -374,11 +378,16 @@ async function onClick(e) {
     }
 
     case 'delete-deal': {
-      const deal = store.getDeal(state.dealId);
+      const dealId = target.dataset.id || state.dealId;
+      const deal = store.getDeal(dealId);
+      if (!deal) return;
       return confirmModal('מחיקת עסקה', `למחוק את "${deal.name}" על כל הצוותים והרישומים שלה? הפעולה בלתי הפיכה.`, async () => {
-        await store.deleteDeal(state.dealId);
-        state.view = 'overview'; state.dealId = null;
-        localStorage.removeItem(LS.deal);
+        await store.deleteDeal(dealId);
+        if (state.dealId === dealId) {
+          state.view = 'overview'; state.dealId = null;
+          localStorage.removeItem(LS.deal);
+          localStorage.setItem(LS.view, 'overview');
+        }
         ui.toast('העסקה נמחקה');
         render();
       }, 'מחק לצמיתות');
@@ -470,7 +479,12 @@ function applyTeamField(node) {
 
   if (line) {
     if (field === 'estHours') line.estHours = num(node.value);
-    else if (field === 'roleId') line.roleId = node.value;
+    else if (field === 'roleId') {
+      line.roleId = node.value;
+      // שומרים גם את השם — כך השורה תדע להתחבר לדרגה מקבילה בתעריפון אחר
+      const role = store.rateCardFor(store.getDeal(team.dealId)).roles.find((r) => r.id === node.value);
+      if (role) line.roleName = role.name;
+    }
     else if (field === 'hoursOverride') {
       line.hoursOverride = node.value === '' ? null : num(node.value);
       node.dataset.auto = line.hoursOverride === null ? '1' : '0';

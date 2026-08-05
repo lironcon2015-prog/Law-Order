@@ -5,6 +5,7 @@ import * as db from './db.js';
 import {
   normalizeDeal, normalizeTeam, normalizeEntry, normalizeRateCard,
   DEFAULT_ROLES, DEFAULT_TEAM_NAMES, buildTeamFromTemplate, uid, computeDeal,
+  roleMap, roleNameMap, normRoleName, resolveLineRole, num,
 } from './model.js';
 
 /* ---------- מטמון בזיכרון ---------- */
@@ -14,6 +15,7 @@ export const cache = {
   entries: [],
   rateCards: [],
   settings: {},
+  healedDeals: 0,   // עסקאות ששורות התקציב שלהן חוברו מחדש לתעריפון בטעינה
   loaded: false,
 };
 
@@ -47,8 +49,58 @@ export async function loadAll() {
     await db.put('rateCards', card);
     cache.rateCards = [card];
   }
+  await backfillLineRoleNames();
+  cache.healedDeals = await healOrphanLines();
   cache.loaded = true;
   return cache;
+}
+
+/**
+ * ריפוי נתונים שנשברו כשתעריפון נמחק/הוחלף לפני שהייתה התאמה לפי שם:
+ * שורות שאינן מזוהות כלל מחוברות מחדש לדרגות התעריפון הנוכחי (לפי סדר),
+ * אחרת התקציב שלהן מוצג כאפס.
+ * @returns {number} מספר העסקאות שתוקנו
+ */
+async function healOrphanLines() {
+  let healed = 0;
+  suppress = true;
+  try {
+    for (const deal of cache.deals) {
+      const card = rateCardFor(deal);
+      if (!card) continue;
+      const byId = roleMap(card);
+      const byName = roleNameMap(card);
+      const broken = teamsOf(deal.id).some((t) => t.lines.length
+        && t.lines.every((l) => !resolveLineRole(l, byId, byName)));
+      if (!broken) continue;
+      const res = await remapDealToRateCard(deal.id, card, card);
+      if (res.matched) healed += 1;
+    }
+  } finally {
+    suppress = false;
+  }
+  return healed;
+}
+
+/**
+ * נתונים שנוצרו לפני שהשורה שמרה גם את שם הדרגה: משלימים את השם מהתעריפון
+ * של העסקה, כדי שהחלפת תעריפון בעתיד תדע להתאים לפי שם.
+ */
+async function backfillLineRoleNames() {
+  const dirty = [];
+  for (const team of cache.teams) {
+    const card = rateCardFor(cache.deals.find((d) => d.id === team.dealId));
+    if (!card) continue;
+    const byId = roleMap(card);
+    let changed = false;
+    for (const line of team.lines) {
+      if (line.roleName) continue;
+      const role = byId.get(line.roleId);
+      if (role) { line.roleName = role.name; changed = true; }
+    }
+    if (changed) dirty.push(team);
+  }
+  if (dirty.length) await db.putMany('teams', dirty);
 }
 
 /* ============================================================
@@ -92,13 +144,89 @@ export async function saveRateCard(patch) {
 
 export async function deleteRateCard(id) {
   if (cache.rateCards.length <= 1) throw new Error('חייב להישאר תעריפון אחד לפחות');
+  const removed = cache.rateCards.find((c) => c.id === id);
   cache.rateCards = cache.rateCards.filter((c) => c.id !== id);
   if (!cache.rateCards.some((c) => c.isDefault)) {
     cache.rateCards[0].isDefault = true;
     await db.put('rateCards', cache.rateCards[0]);
   }
   await db.remove('rateCards', id);
+
+  // עסקאות ששויכו לתעריפון שנמחק עוברות לברירת המחדל — עם התאמת הדרגות לפי שם,
+  // אחרת שורות התקציב מאבדות את התעריף וכל הסכומים מתאפסים.
+  const target = defaultRateCard();
+  for (const deal of cache.deals.filter((d) => d.rateCardId === id)) {
+    deal.rateCardId = target.id;
+    deal.updatedAt = new Date().toISOString();
+    await db.put('deals', deal);
+    await remapDealToRateCard(deal.id, removed, target);
+  }
   notify('rateCard');
+}
+
+/**
+ * מתאים את שורות התקציב (ורישומי הביצוע) של עסקה לתעריפון חדש.
+ * ההתאמה לפי **שם הדרגה** — כי id של דרגה ייחודי לכל תעריפון.
+ * דרגה שאין לה מקבילה בשם: השורה נשמרת והתעריף שלה "מוקפא" כדריסה ידנית,
+ * כדי שסכום התקציב לא ייעלם בלי שהמשתמש ידע.
+ * @returns {{matched:number, frozen:number}}
+ */
+export async function remapDealToRateCard(dealId, fromCard, toCard) {
+  if (!toCard) return { matched: 0, frozen: 0 };
+  const fromById = roleMap(fromCard);
+  const fromByName = roleNameMap(fromCard);
+  const toByName = roleNameMap(toCard);
+  const idMap = new Map();     // roleId ישן → דרגה חדשה
+  let matched = 0, frozen = 0;
+
+  const teams = teamsOf(dealId);
+  const touchedTeams = [];
+  for (const team of teams) {
+    let changed = false;
+    // נתונים ישנים (לפני שנשמר שם הדרגה בשורה): אם אף שורה לא ניתנת לזיהוי
+    // ומספר השורות זהה למספר הדרגות — ההתאמה לפי סדר היא השחזור הנכון,
+    // כי השורות נוצרו מלכתחילה בסדר הדרגות שבתעריפון.
+    const identifiable = team.lines.filter((l) => l.roleName || resolveLineRole(l, fromById, fromByName));
+    const positional = identifiable.length === 0 && team.lines.length === toCard.roles.length;
+
+    team.lines.forEach((line, idx) => {
+      const oldRole = resolveLineRole(line, fromById, fromByName);
+      const name = line.roleName || oldRole?.name || '';
+      const next = (name ? toByName.get(normRoleName(name)) : undefined) || (positional ? toCard.roles[idx] : undefined);
+      if (next) {
+        if (line.roleId !== next.id) { idMap.set(line.roleId, next); changed = true; }
+        line.roleId = next.id;
+        line.roleName = next.name;
+        matched += 1;
+      } else {
+        // אין דרגה בשם הזה בתעריפון החדש — משמרים את התעריף שהיה
+        if (line.rateOverride === null || line.rateOverride === undefined) {
+          const rate = num(oldRole?.rate);
+          if (rate > 0) { line.rateOverride = rate; changed = true; frozen += 1; }
+        }
+        if (!line.roleName && oldRole?.name) { line.roleName = oldRole.name; changed = true; }
+      }
+    });
+    if (changed) touchedTeams.push(normalizeTeam(team));
+  }
+  if (touchedTeams.length) {
+    for (const t of touchedTeams) {
+      const i = cache.teams.findIndex((x) => x.id === t.id);
+      if (i >= 0) cache.teams[i] = t;
+    }
+    await db.putMany('teams', touchedTeams);
+  }
+
+  // רישומי ביצוע מצביעים גם הם על roleId — מעבירים לדרגה המקבילה
+  const touchedEntries = [];
+  for (const e of entriesOf(dealId)) {
+    const next = e.roleId ? idMap.get(e.roleId) : null;
+    if (next && next.id !== e.roleId) { e.roleId = next.id; touchedEntries.push(e); }
+  }
+  if (touchedEntries.length) await db.putMany('entries', touchedEntries);
+
+  if (touchedTeams.length || touchedEntries.length) notify('team');
+  return { matched, frozen };
 }
 
 /* ============================================================
@@ -132,6 +260,12 @@ export async function saveDeal(patch) {
   const i = cache.deals.findIndex((d) => d.id === deal.id);
   if (i >= 0) cache.deals[i] = deal; else cache.deals.push(deal);
   await db.put('deals', deal);
+
+  // החלפת תעריפון לעסקה קיימת — מתאימים את שורות התקציב לדרגות של התעריפון החדש
+  if (existing && existing.rateCardId !== deal.rateCardId) {
+    const fromCard = cache.rateCards.find((c) => c.id === existing.rateCardId) || null;
+    await remapDealToRateCard(deal.id, fromCard, rateCardFor(deal));
+  }
   notify('deal');
   return deal;
 }
@@ -263,12 +397,14 @@ export async function reorderTeams(dealId, orderedIds) {
 /** מסנכרן שורות צוות מול דרגות התעריפון — מוסיף שורות חסרות לדרגות חדשות */
 export async function syncTeamRoles(dealId) {
   const card = rateCardFor(getDeal(dealId));
+  // קודם התאמה מחדש לפי שם (שורות שה-id שלהן התיישן), ורק אחר כך הוספת דרגות חסרות
+  await remapDealToRateCard(dealId, card, card);
   const updated = [];
   for (const t of teamsOf(dealId)) {
     const have = new Set(t.lines.map((l) => l.roleId));
     let changed = false;
     for (const r of card.roles) {
-      if (!have.has(r.id)) { t.lines.push({ id: uid('ln'), roleId: r.id, estHours: 0, hoursOverride: null, rateOverride: null, note: '' }); changed = true; }
+      if (!have.has(r.id)) { t.lines.push({ id: uid('ln'), roleId: r.id, roleName: r.name, estHours: 0, hoursOverride: null, rateOverride: null, note: '' }); changed = true; }
     }
     if (changed) updated.push(normalizeTeam(t));
   }

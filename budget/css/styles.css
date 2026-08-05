@@ -243,6 +243,25 @@ table { border-collapse: collapse; }
 .dtab .ic { display: inline-grid; place-items: center; }
 .dtab svg { width: 15px; height: 15px; }
 
+/* מחיקת עסקה מתוך הטאב — נחשף בריחוף/מיקוד, כדי שלא יילחץ בטעות */
+.dtab__close {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 18px; height: 18px;
+  margin-inline-start: 2px;
+  border-radius: 50%;
+  color: var(--text-faint);
+  opacity: 0;
+  transform: scale(.8);
+  transition: opacity var(--t-fast) var(--ease-out), transform var(--t-fast) var(--ease-out), color var(--t-fast), background var(--t-fast);
+  cursor: pointer;
+}
+.dtab__close svg { width: 12px; height: 12px; }
+.dtab:hover .dtab__close,
+.dtab[aria-selected="true"] .dtab__close { opacity: 1; transform: scale(1); }
+.dtab__close:hover { color: var(--negative); background: var(--negative-soft); }
+
 /* ============================================================
    פריטים כלליים
    ============================================================ */
@@ -325,6 +344,9 @@ table { border-collapse: collapse; }
   outline: none;
 }
 .dcard__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 11px; }
+.dcard__head-tools { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.dcard__del { opacity: 0; transition: opacity var(--t-fast) var(--ease-out); }
+.dcard:hover .dcard__del, .dcard:focus-within .dcard__del { opacity: 1; }
 .dcard__id { display: flex; flex-direction: column; min-width: 0; }
 .dcard__name { font-size: 1rem; font-weight: 700; color: var(--text-strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dcard__client { font-size: .78rem; color: var(--text-muted); }
@@ -555,6 +577,8 @@ table { border-collapse: collapse; }
 }
 .cellinput--calc { color: var(--gold-bright); background: var(--gold-softer); border-color: rgba(242,202,80,.16); }
 .cellinput--role { min-width: 96px; }
+/* דרגה שאינה קיימת בתעריפון הנוכחי — התעריף מוקפא בשורה */
+.cellinput--orphan { color: var(--warn); border-color: rgba(251,191,36,.45); }
 .cellinput--sm { width: 80px; min-width: 0; padding: 5px 8px; }
 .cellinput::-webkit-outer-spin-button, .cellinput::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .cellinput[type=number] { -moz-appearance: textfield; }

@@ -125,6 +125,8 @@ export function normalizeLine(l) {
   return {
     id: l?.id || uid('ln'),
     roleId: l?.roleId || '',
+    // שם הדרגה כפי שהיה בעת ההזנה — מאפשר התאמה מחדש לתעריפון אחר (שבו ל-id אחר)
+    roleName: String(l?.roleName ?? ''),
     estHours: num(l?.estHours),
     // דריסה ידנית של שעות התקציב (אם המשתמש רוצה מספר "עגול" משלו)
     hoursOverride: l?.hoursOverride === null || l?.hoursOverride === undefined || l?.hoursOverride === ''
@@ -221,6 +223,33 @@ export function roleMap(rateCard) {
   return m;
 }
 
+/** נרמול שם דרגה להשוואה בין תעריפונים (רווחים כפולים, סוגי גרשיים) */
+export function normRoleName(name) {
+  return String(name || '')
+    .replace(/["'״׳`]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+/** מפת דרגות לפי שם מנורמל */
+export function roleNameMap(rateCard) {
+  const m = new Map();
+  for (const r of rateCard?.roles || []) {
+    const k = normRoleName(r.name);
+    if (k && !m.has(k)) m.set(k, r);
+  }
+  return m;
+}
+
+/**
+ * מאתר את הדרגה של שורה בתעריפון הנוכחי: לפי id, ואם ה-id כבר לא קיים
+ * (התעריפון הוחלף או נמחק) — לפי שם הדרגה שנשמר בשורה.
+ */
+export function resolveLineRole(line, byId, byName) {
+  return byId.get(line.roleId) || (line.roleName ? byName.get(normRoleName(line.roleName)) : undefined);
+}
+
 /** שעות התקציב לשורה — ROUNDUP(מוערך × (1+מקדם)), אלא אם יש דריסה ידנית */
 export function lineBudgetHours(line, factor) {
   if (line.hoursOverride !== null && line.hoursOverride !== undefined) return num(line.hoursOverride);
@@ -238,6 +267,7 @@ export function lineRate(line, role) {
  */
 export function computeDeal({ deal, teams, entries, rateCard }) {
   const roles = roleMap(rateCard);
+  const rolesByName = roleNameMap(rateCard);
   const dealEntries = (entries || []).filter((e) => e.dealId === deal.id);
   const vat = deal.vatRate;
 
@@ -246,6 +276,17 @@ export function computeDeal({ deal, teams, entries, rateCard }) {
   const byTeam = new Map();
   const byRole = new Map();
   let actualCost = 0, actualHours = 0, unassignedCost = 0, unassignedHours = 0;
+
+  /** מאחד ביצוע של אותה שורה תחת כמה מזהי דרגה (ישן/חדש אחרי החלפת תעריפון) */
+  const mergeActuals = (map, teamId, roleIds) => {
+    const out = { hours: 0, cost: 0, count: 0 };
+    for (const rid of [...new Set(roleIds)]) {
+      const cur = map.get(`${teamId}|${rid}`);
+      if (!cur) continue;
+      out.hours += cur.hours; out.cost += cur.cost; out.count += cur.count;
+    }
+    return out;
+  };
 
   const bump = (map, key, hours, cost) => {
     const cur = map.get(key) || { hours: 0, cost: 0, count: 0 };
@@ -273,15 +314,21 @@ export function computeDeal({ deal, teams, entries, rateCard }) {
       const factor = team.overrunFactor === null || team.overrunFactor === undefined
         ? deal.overrunFactor : team.overrunFactor;
       const lines = team.lines.map((line) => {
-        const role = roles.get(line.roleId);
+        const role = resolveLineRole(line, roles, rolesByName);
+        // ה-id האפקטיבי: של הדרגה שנמצאה בתעריפון הנוכחי (גם אם ההתאמה הייתה לפי שם)
+        const effRoleId = role?.id || line.roleId;
         const bh = lineBudgetHours(line, factor);
         const rate = lineRate(line, role);
         const cost = round2(bh * rate);
-        const act = byTeamRole.get(`${team.id}|${line.roleId}`) || { hours: 0, cost: 0, count: 0 };
+        // ביצוע: מאוחד מהמפתח הישן והחדש, כדי שרישומים קיימים לא "ייעלמו" אחרי החלפת תעריפון
+        const act = mergeActuals(byTeamRole, team.id, [line.roleId, effRoleId]);
         const util = cost > 0 ? act.cost / cost : (act.cost > 0 ? Infinity : 0);
         return {
           ...line,
-          roleName: role?.name || '—',
+          roleId: effRoleId,
+          roleName: role?.name || line.roleName || '—',
+          // הדרגה כבר לא קיימת בתעריפון (גם לא לפי שם) — מוצג למשתמש כדי שלא ייעלם בשקט
+          orphanRole: !role,
           junior: !!role?.junior,
           factor,
           budgetHours: bh,
@@ -449,7 +496,7 @@ export function buildTeamFromTemplate({ dealId, name, roles, index = 0, estHours
     name,
     order: index,
     color: TEAM_COLORS[index % TEAM_COLORS.length],
-    lines: (roles || []).map((r) => ({ roleId: r.id, estHours: num(estHours[r.id]) })),
+    lines: (roles || []).map((r) => ({ roleId: r.id, roleName: r.name, estHours: num(estHours[r.id]) })),
   }, index);
 }
 
