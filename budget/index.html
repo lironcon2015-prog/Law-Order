@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>LexBudget · ניהול תקציב עסקה</title>
+  <meta name="description" content="LexBudget — ניהול תקציב עסקאות M&amp;A: תקציב לפי צוותים ודרגות, העלאת חשבונות, ובקרת תקציב מול ביצוע בזמן אמת. offline-first." />
+
+  <meta name="theme-color" content="#0a0a0d" />
+  <meta name="color-scheme" content="dark" />
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+
+  <link rel="preload" href="./fonts/assistant-hebrew.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="./css/fonts.css" />
+  <link rel="stylesheet" href="./css/styles.css" />
+</head>
+<body>
+  <!-- שכבות עומק/טקסטורה — אובסידיאן -->
+  <div class="bg-glow" aria-hidden="true"></div>
+  <div class="bg-grain" aria-hidden="true"></div>
+  <div class="bg-vignette" aria-hidden="true"></div>
+
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand__logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/>
+            <path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/>
+          </svg>
+        </span>
+        <span class="brand__text">
+          <span class="brand__name">LexBudget</span>
+          <span class="brand__sub">תקציב עסקה</span>
+        </span>
+      </div>
+
+      <div class="tabs-host" id="deal-tabs"></div>
+
+      <div class="topbar__actions">
+        <span class="save-state" id="save-state" aria-live="polite">נשמר</span>
+        <button class="btn btn--ghost btn--sm" type="button" data-action="go-rates" title="ניהול תעריפונים">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="m16.71 13.88.7.71-2.82 2.82"/></svg>
+          <span class="hide-sm">תעריפונים</span>
+        </button>
+        <button class="btn btn--ghost btn--sm" type="button" data-action="backup" title="גיבוי ונתונים">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19a4.5 4.5 0 0 0 0-9h-1.8A7 7 0 1 0 4 16.3"/><path d="M12 12v9"/><path d="m8 17 4 4 4-4"/></svg>
+          <span class="hide-sm">גיבוי</span>
+        </button>
+      </div>
+    </header>
+
+    <main class="main" id="main"></main>
+  </div>
+
+  <dialog class="modal" id="modal">
+    <div class="modal__head">
+      <h2 id="modal-title"></h2>
+      <button class="modal__close" type="button" data-action="modal-close" aria-label="סגור">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+    </div>
+    <div class="modal__body" id="modal-body"></div>
+    <div class="modal__foot" id="modal-foot"></div>
+  </dialog>
+
+  <input type="file" id="hidden-file" hidden />
+
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>
