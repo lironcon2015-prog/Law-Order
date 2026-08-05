@@ -89,6 +89,7 @@ export const invoices = {
       commission,
       notes: String(data.notes || '').trim(),
       source: data.source || 'manual',
+      fileId: data.fileId ?? null,   // מסמך המקור ב-invoiceFiles (null = הוזן ידנית)
       createdAt: Date.now(),
     };
     const id = await db.addAuto('invoices', record);

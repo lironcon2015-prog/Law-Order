@@ -9,6 +9,7 @@ import { barChart, donut } from './charts.js';
 import * as importer from './importer.js';
 import * as invImport from './invoice-import.js';
 import { parseClientEmail } from './email-parse.js';
+import * as fileStore from './file-store.js';
 
 const MONTHS = ['', 'ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
 const TYPE_TONE = { 'שוטף': 'info', 'ליטיגציה': 'neg', 'עסקה': 'plum' };
@@ -24,6 +25,8 @@ const state = {
   ledger: null,
   loaded: false,
   crmCtx: { contacts: [], companies: [] }, // נשמר עבור הדשבורד המאוחד
+  openMonths: new Set(),  // חודשים פתוחים במסך החשבוניות (קיפול לפי חודש)
+  fileArchive: { supported: false, name: '', ready: false }, // תיקיית מסמכי החשבוניות
   donutMetric: 'amount',  // 'amount' (הכנסות) | 'commission' (עמלות) — דונאט בדשבורד
   cmMetric: 'amount',     // 'amount' | 'commission' — טבלת פירוט חודשי לפי לקוח
 };
@@ -32,6 +35,7 @@ const MONTHS_SHORT = ['', 'ינ', 'פבר', 'מרץ', 'אפר', 'מאי', 'יו�
 const DONUT_PALETTE = ['#f2ca50', '#86dfff', '#c084fc', '#34d399', '#f87171', '#fbbf24'];
 const fmtNum = (v) => Math.round(v || 0).toLocaleString('he-IL');
 const casesLabel = (n) => (n === 1 ? 'תיק אחד' : `${n} תיקים`);
+const invLabel = (n) => (n === 1 ? 'חשבונית אחת' : `${n} חשבוניות`);
 const maxMonthFor = (year) => (year === new Date().getFullYear() ? new Date().getMonth() + 1 : 12);
 
 let refs = {};
@@ -112,6 +116,11 @@ export async function loadData() {
   state.invoices = invoices;
   state.payments = payments;
   state.ledger = ledger;
+  state.fileArchive = {
+    supported: fileStore.supportsFolder(),
+    name: await fileStore.folderName(),
+    ready: await fileStore.folderReady(),
+  };
   state.loaded = true;
 }
 
@@ -270,31 +279,68 @@ function renderInvoices(container) {
     return;
   }
 
-  const head = ['חודש', 'תיק / לקוח', 'סכום', 'עמלה %', 'עמלה', ''];
-  const rows = list.map((inv) => {
-    const cs = state.cases.find((x) => x.id === inv.caseId);
-    return el('tr', {}, [
-      el('td', { text: MONTHS[inv.month] || '—' }),
-      el('td', {}, [el('div', { class: 'fin-cell-2' }, [
-        el('span', { text: cs ? (cs.caseNumber || '—') : '—' }),
-        el('span', { class: 'muted', text: cs ? clientName(cs.clientId) : '' }),
-      ])]),
-      el('td', { class: 'num', text: formatCurrency(inv.amount) }),
-      el('td', { class: 'num muted', text: `${inv.commissionRate}%` }),
-      el('td', { class: 'num accent', text: formatCurrency(inv.commission) }),
-      el('td', { class: 'fin-td-tools' }, [
-        el('button', { class: 'icon-btn', title: 'עריכה', 'data-bil-action': 'edit-invoice', 'data-id': inv.id }, [icon('edit')]),
-        el('button', { class: 'icon-btn icon-btn--danger', title: 'מחיקה', 'data-bil-action': 'del-invoice', 'data-id': inv.id }, [icon('trash')]),
-      ]),
-    ]);
+  // קיפול לפי חודש: שורת חודש מסכמת (לחיצה פותחת/סוגרת) + שורות החשבוניות שמתחתיה
+  const byMonth = new Map();
+  list.forEach((inv) => {
+    const m = (inv.month >= 1 && inv.month <= 12) ? inv.month : 0;
+    if (!byMonth.has(m)) byMonth.set(m, []);
+    byMonth.get(m).push(inv);
   });
+  const months = [...byMonth.keys()].sort((a, b) => b - a);
+
+  const head = ['חודש · תיק', 'לקוח', 'סכום', 'עמלה %', 'עמלה', 'מקור', ''];
+  const rows = [];
+  for (const m of months) {
+    const items = byMonth.get(m);
+    const mAmount = items.reduce((s, i) => s + (i.amount || 0), 0);
+    const mComm = items.reduce((s, i) => s + (i.commission || 0), 0);
+    const open = state.openMonths.has(m);
+
+    rows.push(el('tr', { class: `imonth-row${open ? ' expanded' : ''}`, 'data-bil-action': 'toggle-month', dataset: { month: String(m) } }, [
+      el('td', { colspan: '2' }, [
+        el('span', { class: 'exp-name' }, [
+          el('span', { class: `chevron${open ? ' open' : ''}`, html: ICONS.back }),
+          el('strong', { text: m ? MONTHS[m] : 'ללא חודש' }),
+          el('span', { class: 'muted imonth-count', text: `${items.length}` }),
+        ]),
+      ]),
+      el('td', { class: 'num', text: formatCurrency(mAmount) }),
+      el('td', {}),
+      el('td', { class: 'num accent', text: formatCurrency(mComm) }),
+      el('td', {}), el('td', {}),
+    ]));
+
+    for (const inv of items) {
+      const cs = state.cases.find((x) => x.id === inv.caseId);
+      rows.push(el('tr', { class: 'inv-row', hidden: !open, dataset: { parent: `m-${m}` } }, [
+        el('td', { class: 'inv-row__case', text: cs ? (cs.caseNumber || cs.description || '—') : '—' }),
+        el('td', { class: 'muted', text: cs ? clientName(cs.clientId) : '' }),
+        el('td', { class: 'num', text: formatCurrency(inv.amount) }),
+        el('td', { class: 'num muted', text: `${inv.commissionRate}%` }),
+        el('td', { class: 'num accent', text: formatCurrency(inv.commission) }),
+        el('td', { class: 'ta-c' }, [sourceCell(inv)]),
+        el('td', { class: 'fin-td-tools' }, [
+          el('button', { class: 'icon-btn', title: 'עריכה', 'data-bil-action': 'edit-invoice', 'data-id': inv.id }, [icon('edit')]),
+          el('button', { class: 'icon-btn icon-btn--danger', title: 'מחיקה', 'data-bil-action': 'del-invoice', 'data-id': inv.id }, [icon('trash')]),
+        ]),
+      ]));
+    }
+  }
+
   const foot = el('tr', { class: 'fin-table__total' }, [
-    el('td', { text: 'סה״כ' }), el('td', {}),
+    el('td', { colspan: '2', text: 'סה״כ' }),
     el('td', { class: 'num', text: formatCurrency(totalAmount) }), el('td', {}),
-    el('td', { class: 'num accent', text: formatCurrency(totalComm) }), el('td', {}),
+    el('td', { class: 'num accent', text: formatCurrency(totalComm) }), el('td', {}), el('td', {}),
   ]);
   wrap.append(finTable(head, rows, foot));
   container.replaceChildren(wrap);
+}
+
+/** תא "מקור": כפתור לפתיחת מסמך המקור, או ציון שהחשבונית הוזנה ידנית */
+function sourceCell(inv) {
+  if (inv.fileId == null) return el('span', { class: 'src-manual', text: 'הוזן ידנית' });
+  return el('button', { class: 'btn btn--ghost btn--xs src-btn', 'data-bil-action': 'open-source', 'data-id': String(inv.id), title: 'פתיחת מסמך המקור' },
+    [icon('receipt', 'ic-xs'), el('span', { text: 'מסמך' })]);
 }
 
 /* ============================================================ מסך: תשלומים ============================================================ */
@@ -356,6 +402,7 @@ function renderSettings(container) {
       ledgerRow('תשלומים שהתקבלו', L.totalPayments, 'pos'),
       ledgerRow('יתרה לתשלום', L.closingBalance, 'total'),
     ]),
+    archivePanel(),
     el('div', { class: 'panel' }, [
       el('div', { class: 'panel__title' }, [icon('cloud'), el('h3', { text: 'ייבוא וייצוא נתונים' })]),
       el('p', { class: 'muted fin-hint', text: 'ייבא גיבוי קיים — CRM (אנשי קשר/חברות) או חיוב (לקוחות/חשבוניות). האפליקציה מזהה את הפורמט אוטומטית ומחליפה את אותו דומיין בלבד, כך שאפשר לייבא את שני הגיבויים. ייצוא יוצר קובץ גיבוי מאוחד יחיד.' }),
@@ -367,6 +414,31 @@ function renderSettings(container) {
   ]);
   container.replaceChildren(wrap);
 }
+/** פאנל תיקיית מסמכי החשבוניות (הכל מקומי — הקבצים לא נשלחים לשום מקום) */
+function archivePanel() {
+  const { supported, name, ready } = state.fileArchive;
+  const status = !supported
+    ? el('p', { class: 'muted fin-hint', text: 'הדפדפן הזה אינו תומך בבחירת תיקייה. מסמכי החשבוניות נשמרים בתוך המערכת (במכשיר) וניתן לפתוח אותם מהמסכים.' })
+    : name
+      ? el('div', { class: 'arch-status' }, [
+          el('span', { class: 'arch-dot' + (ready ? ' arch-dot--on' : '') }),
+          el('span', {}, [el('strong', { text: name }), el('span', { class: 'muted', text: ready ? ' · מחוברת' : ' · תידרש הרשאה בפתיחה הבאה' })]),
+        ])
+      : el('p', { class: 'muted fin-hint', text: 'לא נבחרה תיקייה — מסמכי החשבוניות נשמרים בינתיים בתוך המערכת (במכשיר).' });
+
+  const buttons = el('div', { class: 'fin-io-row' }, [
+    supported ? el('button', { class: 'btn btn--ghost btn--sm', 'data-bil-action': 'pick-folder' }, [icon('folder'), el('span', { text: name ? 'החלפת תיקייה' : 'בחירת תיקייה' })]) : null,
+    name ? el('button', { class: 'btn btn--ghost btn--sm', 'data-bil-action': 'forget-folder' }, [icon('close'), el('span', { text: 'ניתוק' })]) : null,
+  ]);
+
+  return el('div', { class: 'panel' }, [
+    el('div', { class: 'panel__title' }, [icon('folder'), el('h3', { text: 'תיקיית מסמכי חשבוניות' })]),
+    el('p', { class: 'muted fin-hint', text: 'כל קובץ חשבונית שמיובא נשמר כעותק בתיקייה שתבחר במחשב, והמערכת זוכרת מאיזה מסמך הגיעה כל שורה. הקבצים נשארים אצלך — הם לא נכללים בגיבוי ל-Drive ולא עוברים בין מכשירים.' }),
+    status,
+    buttons,
+  ]);
+}
+
 function ledgerRow(label, val, tone) {
   return el('div', { class: `fin-ledger__row${tone === 'total' ? ' fin-ledger__row--total' : ''}` }, [
     el('span', { text: label }),
@@ -555,7 +627,8 @@ function clientBreakdownTable() {
         el('td', {}),
         el('td', {}, [el('span', { class: 'case-num', text: c.caseNumber || '—' }), c.description && c.description !== c.caseNumber ? el('span', { class: 'muted', text: ' ' + c.description }) : null]),
         el('td', { class: 'num muted', text: `${c.commissionRate}%` }),
-        el('td', { class: 'num', text: fmtNum(r.a) }),
+        // הסכום לחיץ → מאיפה הוא הגיע (מסמך מקור לכל חשבונית, או "הוזן ידנית")
+        el('td', { class: 'num' }, [el('button', { class: 'amount-src', 'data-bil-action': 'case-sources', 'data-id': String(c.id), title: 'מקור הנתונים' }, [fmtNum(r.a)])]),
         el('td', { class: 'num accent', text: fmtNum(r.c) }),
         el('td', { class: 'ta-c' }, [el('span', { class: `bil-type bil-type--${TYPE_TONE[c.caseType] || 'info'}`, text: c.caseType })]),
       ]));
@@ -568,6 +641,42 @@ function clientBreakdownTable() {
     el('td', {}),
   ]);
   return finTable(['לקוח / תיק', 'תיקים', 'אחוז', 'הכנסות', 'עמלות', 'סטטוס'], rows, foot);
+}
+
+/* —— מקור הנתונים של תיק: חשבונית → מסמך מקור / הוזן ידנית —— */
+async function caseSourcesModal(caseId) {
+  const cs = state.cases.find((c) => c.id === caseId);
+  if (!cs) return;
+  const list = state.invoices.filter((i) => i.caseId === caseId).sort((a, b) => (a.month || 0) - (b.month || 0));
+  const metas = new Map();
+  for (const inv of list) {
+    if (inv.fileId == null || metas.has(inv.fileId)) continue;
+    try { metas.set(inv.fileId, await fileStore.getFileMeta(inv.fileId)); } catch { metas.set(inv.fileId, null); }
+  }
+
+  const rows = list.map((inv) => {
+    const meta = inv.fileId != null ? metas.get(inv.fileId) : null;
+    let source;
+    if (inv.fileId == null) source = el('span', { class: 'src-manual', text: 'הוזן ידנית' });
+    else if (!meta) source = el('span', { class: 'src-manual', text: 'הקובץ אינו זמין' });
+    else source = el('div', { class: 'src-file' }, [
+      el('button', { class: 'btn btn--ghost btn--xs src-btn', 'data-bil-action': 'open-source', 'data-id': String(inv.id) }, [icon('receipt', 'ic-xs'), el('span', { text: meta.name })]),
+      el('span', { class: 'muted src-where', text: meta.storage === 'folder' ? `תיקייה: ${meta.dir || '—'}` : 'שמור במערכת' }),
+    ]);
+    return el('tr', {}, [
+      el('td', { text: inv.month ? MONTHS[inv.month] : '—' }),
+      el('td', { class: 'num', text: formatCurrency(inv.amount) }),
+      el('td', { class: 'num accent', text: formatCurrency(inv.commission) }),
+      el('td', {}, [source]),
+    ]);
+  });
+
+  const title = `מקור הנתונים · ${[cs.caseNumber, cs.description].filter(Boolean).join(' — ') || 'תיק'}`;
+  const body = el('div', {}, [
+    el('p', { class: 'muted fin-hint', text: `${invLabel(list.length)} בשנת ${state.year}. חשבונית שיובאה מקובץ — לחיצה על שם המסמך פותחת את הקובץ המקורי.` }),
+    finTable(['חודש', 'סכום', 'עמלה', 'מקור'], rows),
+  ]);
+  openModal(title, body, async () => true, { saveLabel: 'סגירה', noCancel: true });
 }
 
 /* —— טבלה 3: פירוט חודשי לפי לקוח (pivot, נפתח, מתג מטריקה) —— */
@@ -722,26 +831,70 @@ async function processInvoiceFile(file) {
     c.duplicate = existing.some((inv) => inv.caseId === c.caseId && inv.month === c.month && inv.year === c.year && inv.amount === c.amount);
     if (c.duplicate) c.include = false;
   }
-  reviewImportModal(result, file.name);
+  reviewImportModal(result, file);
+}
+
+/**
+ * השלמה אוטומטית של **שדות ריקים בלבד** בתיק/בלקוח קיימים, מתוך מה שזוהה בחשבונית.
+ * לא דורס ערך קיים אף פעם. מחזיר את שמות השדות שהושלמו (לדיווח למשתמש).
+ */
+async function backfillFromInvoice(caseId, cand, caseNoFromForm, rateFromForm) {
+  const filled = [];
+  const cs = state.cases.find((c) => c.id === caseId);
+  if (!cs) return filled;
+
+  const patch = {};
+  const num = String(caseNoFromForm || cand.caseNumber || '').trim();
+  if (!String(cs.caseNumber || '').trim() && num) patch.caseNumber = num;
+  if (!String(cs.description || '').trim() && cand.caseName) patch.description = cand.caseName;
+  if (!String(cs.caseType || '').trim() && cand.caseType) patch.caseType = cand.caseType;
+  const rate = parseFloat(rateFromForm);
+  if (!(parseFloat(cs.commissionRate) > 0) && rate > 0) patch.commissionRate = rate;
+  if (Object.keys(patch).length) {
+    await billing.cases.update({ ...cs, ...patch });
+    Object.assign(cs, patch);   // שמירה על עקביות ה-state בתוך אותה לולאה
+    if (patch.caseNumber) filled.push('מספר תיק');
+    if (patch.description) filled.push('תיאור תיק');
+    if (patch.caseType) filled.push('סוג תיק');
+    if (patch.commissionRate) filled.push('אחוז עמלה');
+  }
+
+  const cl = state.clients.find((c) => c.id === cs.clientId);
+  if (cl && !String(cl.clientNumber || '').trim() && cand.externalClientId) {
+    await billing.clients.update({ ...cl, clientNumber: String(cand.externalClientId) });
+    cl.clientNumber = String(cand.externalClientId);
+    filled.push('מספר לקוח');
+  }
+  return filled;
 }
 
 const NEW_CLIENT = '__new__';   // צור לקוח חדש + תיק
 const NEW_CASE = '__newcase__'; // צור תיק חדש אצל לקוח קיים
 
 /** מסך סיווג: טבלת מועמדים לעריכה/אישור לפני שמירה */
-function reviewImportModal(result, fileName) {
-  const existingOpts = state.cases.map((c) => ({ value: c.id, label: `${c.caseNumber || '—'} · ${clientName(c.clientId)}` }));
-  const kindLabel = result.kind === 'pdf' ? 'PDF' : 'Excel';
+function reviewImportModal(result, srcFile) {
+  const fileName = srcFile.name;
+  // תווית תיק כוללת תיאור — תיקים שנפתחו ממייל עדיין בלי מספר, ובלי התיאור אי אפשר להבדיל ביניהם
+  const existingOpts = state.cases.map((c) => ({
+    value: c.id,
+    label: `${[c.caseNumber, c.description].filter(Boolean).join(' — ') || '—'} · ${clientName(c.clientId)}`,
+  }));
+  const kindLabel = result.kind === 'pdf' ? 'PDF' : result.kind === 'csv' ? 'CSV' : 'Excel';
   const needCase = result.candidates.filter((c) => !c.caseId).length;
 
   const rows = result.candidates.map((c, i) => {
     const isNewClient = c.clientGuess && !c.clientExists;                  // לקוח שלא במערכת → הקמה
     const isNewCase = c.clientExists && !c.caseId && c.clientId != null;   // לקוח קיים, תיק לא זוהה → תיק חדש
+    // ללקוח שנפתח ממייל יש תיקים בלי מספר — אלה יעדי ההשלמה. לא נציע "תיק חדש"
+    // כברירת מחדל במצב הזה, כדי לא לייצר כפילות; המשתמש יבחר את התיק והמספר יושלם אליו.
+    const numberlessCases = c.clientId != null
+      ? state.cases.filter((x) => x.clientId === c.clientId && !String(x.caseNumber || '').trim())
+      : [];
     const caseOpts = [];
     if (isNewClient) caseOpts.push({ value: NEW_CLIENT, label: `➕ צור לקוח: ${c.clientGuess}${c.caseNumber ? ` · תיק ${c.caseNumber}` : ''}` });
     if (isNewCase) caseOpts.push({ value: NEW_CASE, label: `➕ צור תיק ${c.caseNumber || 'חדש'} · ${c.clientGuess}` });
-    caseOpts.push({ value: '', label: '— בחר תיק קיים —' }, ...existingOpts);
-    const defaultVal = c.caseId ?? (isNewClient ? NEW_CLIENT : (isNewCase ? NEW_CASE : ''));
+    caseOpts.push({ value: '', label: numberlessCases.length ? '— בחר תיק קיים (יושלם מספר התיק) —' : '— בחר תיק קיים —' }, ...existingOpts);
+    const defaultVal = c.caseId ?? (isNewClient ? NEW_CLIENT : (isNewCase && !numberlessCases.length ? NEW_CASE : ''));
     const caseSel = selectEl(`imp-case-${i}`, caseOpts, defaultVal, { class: 'select imp-in' });
 
     // שדה מספר תיק — לעריכה/השלמה כשמקימים תיק חדש
@@ -756,7 +909,8 @@ function reviewImportModal(result, fileName) {
     caseSel.addEventListener('change', () => {
       caseNoWrap.style.display = creating(caseSel.value) ? '' : 'none';
       const cs = state.cases.find((x) => x.id === parseInt(caseSel.value, 10));
-      if (cs) rateIn.value = cs.commissionRate;
+      // אחוז התיק גובר — אבל רק אם הוגדר. תיק בלי אחוז לא ימחק אחוז שזוהה בחשבונית.
+      if (cs && cs.commissionRate) rateIn.value = cs.commissionRate;
     });
     const badge = c.duplicate
       ? el('span', { class: 'imp-badge imp-badge--dup', text: 'כפולה?' })
@@ -768,9 +922,25 @@ function reviewImportModal(result, fileName) {
       c.caseName && `שם: ${c.caseName}`,
       c.externalClientId && `מזהה ${c.externalClientId}`,
     ].filter(Boolean).join(' · ');
+    // תצוגה מקדימה של השלמות: מה בתיק/בלקוח הקיימים ריק והחשבונית תמלא
+    const willFill = () => {
+      const cs = state.cases.find((x) => x.id === parseInt(caseSel.value, 10));
+      if (!cs) return '';
+      const cl = state.clients.find((x) => x.id === cs.clientId);
+      const bits = [];
+      if (!String(cs.caseNumber || '').trim() && (c.caseNumber || '')) bits.push(`מספר תיק ${c.caseNumber}`);
+      if (!String(cs.description || '').trim() && c.caseName) bits.push(`תיאור "${c.caseName}"`);
+      if (cl && !String(cl.clientNumber || '').trim() && c.externalClientId) bits.push(`מספר לקוח ${c.externalClientId}`);
+      if (!(parseFloat(cs.commissionRate) > 0) && parseFloat(rateIn.value) > 0) bits.push(`עמלה ${rateIn.value}%`);
+      return bits.length ? `ישלים: ${bits.join(' · ')}` : '';
+    };
+    const fillHint = el('div', { class: 'imp-fill', text: willFill() });
+    caseSel.addEventListener('change', () => { fillHint.textContent = willFill(); });
+    rateIn.addEventListener('input', () => { fillHint.textContent = willFill(); });
+
     return el('tr', {}, [
       el('td', {}, [el('input', { id: `imp-inc-${i}`, type: 'checkbox', checked: c.include || null })]),
-      el('td', {}, [caseSel, caseNoWrap, detected ? el('div', { class: 'muted imp-guess', text: `זוהה — ${detected}` }) : null]),
+      el('td', {}, [caseSel, caseNoWrap, detected ? el('div', { class: 'muted imp-guess', text: `זוהה — ${detected}` }) : null, fillHint]),
       el('td', {}, [selectEl(`imp-month-${i}`, monthOptions(), c.month || new Date().getMonth() + 1, { class: 'select imp-in imp-in--sm' })]),
       el('td', {}, [input(`imp-year-${i}`, { type: 'number', value: c.year, class: 'input imp-in imp-in--sm num' })]),
       el('td', {}, [input(`imp-amount-${i}`, { type: 'number', step: '0.01', min: '0', value: c.amount, class: 'input imp-in num' })]),
@@ -792,6 +962,7 @@ function reviewImportModal(result, fileName) {
 
   openModal('סיווג חשבוניות מהקובץ', body, async () => {
     let added = 0, skipped = 0;
+    const filledFields = new Set();    // שדות ריקים שהחשבונית השלימה (לדיווח)
     const clientIdByName = new Map();  // שם לקוח חדש → clientId (הקמה חד-פעמית)
     const caseIdByKey = new Map();     // clientId|מס׳תיק → caseId (הקמה חד-פעמית)
     const getCaseNo = (i) => document.getElementById(`imp-caseno-${i}`).value.trim();
@@ -802,6 +973,16 @@ function reviewImportModal(result, fileName) {
       caseIdByKey.set(key, id);
       return id;
     };
+    // קובץ המקור נשמר פעם אחת, ורק אם באמת מייבאים ממנו משהו
+    let savedFile = null;
+    const ensureFile = async () => {
+      if (savedFile === null && srcFile) {
+        try { savedFile = await fileStore.saveInvoiceFile(srcFile); }
+        catch (err) { console.warn('שמירת קובץ המקור נכשלה', err); savedFile = undefined; }
+      }
+      return savedFile ? savedFile.id : null;
+    };
+
     for (let i = 0; i < result.candidates.length; i++) {
       if (!document.getElementById(`imp-inc-${i}`)?.checked) continue;
       const c = result.candidates[i];
@@ -814,12 +995,17 @@ function reviewImportModal(result, fileName) {
       if (selVal === NEW_CLIENT && c.clientGuess) {
         const name = c.clientGuess.trim();
         let clientId = clientIdByName.get(name);
-        if (clientId == null) { clientId = await billing.clients.add(name); clientIdByName.set(name, clientId); }
+        if (clientId == null) {
+          clientId = await billing.clients.add({ name, clientNumber: c.externalClientId || '' });
+          clientIdByName.set(name, clientId);
+        }
         caseId = await makeCase(clientId, getCaseNo(i), c, rate);
       } else if (selVal === NEW_CASE && c.clientId != null) {
         caseId = await makeCase(c.clientId, getCaseNo(i), c, rate);
       } else {
         caseId = parseInt(selVal, 10);
+        // השלמה אוטומטית של שדות ריקים בתיק/לקוח קיימים מתוך החשבונית
+        for (const f of await backfillFromInvoice(caseId, c, getCaseNo(i), rate)) filledFields.add(f);
       }
       if (!caseId) { skipped++; continue; }
 
@@ -831,11 +1017,14 @@ function reviewImportModal(result, fileName) {
         commissionRate: rate,
         notes: document.getElementById(`imp-notes-${i}`).value,
         source: 'file-import',
+        fileId: await ensureFile(),
       });
       added++;
     }
     if (!added) { toast(skipped ? 'לא יובא דבר — בחר תיק/לקוח לשורות המסומנות' : 'לא סומנו שורות לייבוא', 'alert'); return false; }
-    toast(`נוספו ${added} חשבוניות` + (skipped ? ` (${skipped} דולגו — חסר תיק/סכום)` : ''));
+    toast(`נוספו ${added} חשבוניות`
+      + (skipped ? ` (${skipped} דולגו — חסר תיק/סכום)` : '')
+      + (filledFields.size ? ` · הושלמו: ${[...filledFields].join(', ')}` : ''));
     // ניווט למסך חשבוניות (חשוב כשהקובץ נזרק ממסך CRM אחר); נופל ל-reload אם אין ניווט
     const navBtn = document.getElementById('view-invoices');
     if (navBtn && !document.body.classList.contains('view-invoices')) { await loadData(); navBtn.click(); }
@@ -896,8 +1085,51 @@ async function onClick(e) {
       state.cmMetric = state.cmMetric === 'commission' ? 'amount' : 'commission';
       return renderAnalysis(refs.analysis);
     case 'exp-client': return toggleExpand(t);
+    case 'toggle-month': return toggleMonth(t);
+    case 'case-sources': return caseSourcesModal(id);
+    case 'open-source': return openInvoiceSource(id);
+    case 'pick-folder': return pickArchiveFolder();
+    case 'forget-folder': return forgetArchiveFolder();
     default: void view;
   }
+}
+
+/** קיפול/פתיחה של חודש במסך החשבוניות (הבחירה נשמרת ל-render הבא) */
+function toggleMonth(rowEl) {
+  const tr = rowEl.closest('tr');
+  const m = parseInt(tr.dataset.month, 10);
+  const open = tr.classList.toggle('expanded');
+  tr.querySelector('.chevron')?.classList.toggle('open', open);
+  if (open) state.openMonths.add(m); else state.openMonths.delete(m);
+  tr.closest('table').querySelectorAll(`tr.inv-row[data-parent="m-${m}"]`).forEach((r) => { r.hidden = !open; });
+}
+
+/* ---------- מסמכי מקור ---------- */
+async function openInvoiceSource(invoiceId) {
+  const inv = state.invoices.find((i) => i.id === invoiceId) || await billing.invoices.get(invoiceId);
+  if (!inv || inv.fileId == null) { toast('לחשבונית זו אין מסמך מקור — הוזנה ידנית', 'alert'); return; }
+  try { await fileStore.openInvoiceFile(inv.fileId); }
+  catch (err) { toast(err.message || 'פתיחת הקובץ נכשלה', 'alert'); }
+}
+
+async function pickArchiveFolder() {
+  try {
+    const name = await fileStore.pickFolder();
+    await loadData();
+    renderView('fin-settings');
+    toast(`התיקייה "${name}" חוברה`);
+  } catch (err) {
+    if (err && err.name === 'AbortError') return; // המשתמש ביטל
+    toast(err.message || 'בחירת התיקייה נכשלה', 'alert');
+  }
+}
+
+async function forgetArchiveFolder() {
+  if (!confirm('לנתק את התיקייה? הקבצים שכבר נשמרו בה יישארו בדיסק, אבל המערכת לא תוכל לפתוח אותם עד שתחבר אותה שוב.')) return;
+  await fileStore.forgetFolder();
+  await loadData();
+  renderView('fin-settings');
+  toast('התיקייה נותקה');
 }
 
 /** הרחבת/כיווץ שורת לקוח → תיקים (טבלאות אנליזה) */
@@ -1255,7 +1487,8 @@ function openModal(title, bodyEl, onSubmit, opts = {}) {
   ]);
   const body = el('div', { class: 'modal__body' }, [bodyEl]);
   const save = el('button', { class: 'btn btn--primary', type: 'button' }, [icon('check'), el('span', { text: saveLabel })]);
-  const foot = el('div', { class: 'modal__foot' }, [save, el('button', { class: 'btn btn--ghost', type: 'button', text: 'ביטול', onClick: close })]);
+  const foot = el('div', { class: 'modal__foot' }, [save,
+    opts.noCancel ? null : el('button', { class: 'btn btn--ghost', type: 'button', text: 'ביטול', onClick: close })]);
 
   save.addEventListener('click', async () => {
     save.disabled = true;

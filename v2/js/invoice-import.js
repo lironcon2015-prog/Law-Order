@@ -91,6 +91,48 @@ export function parseDateCell(v, defaultYear) {
   return null;
 }
 
+/**
+ * פרסר CSV משלנו (RFC4180 + זיהוי מפריד). למה לא SheetJS? הוא "מנחש" תאריכים
+ * בטקסט: "12/03/2026" הופך ל-12 בדצמבר (m/d/y אמריקאי) ו-"4471/1" (מספר תיק!)
+ * הופך ל-1 בינואר 4471. כאן כל תא נשאר מחרוזת, ו-parseDateCell מפרש dd/mm כמקובל בארץ.
+ */
+export function parseCsv(text) {
+  const src = String(text || '').replace(/^\ufeff/, '').replace(/\r\n?/g, '\n');
+  const firstLine = src.slice(0, src.indexOf('\n') === -1 ? src.length : src.indexOf('\n'));
+  const counts = { ',': 0, ';': 0, '\t': 0 };
+  for (const ch of firstLine) if (ch in counts) counts[ch]++;
+  const delim = Object.keys(counts).reduce((a, b) => (counts[b] > counts[a] ? b : a), ',');
+
+  const rows = [];
+  let row = [], field = '', quoted = false;
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (quoted) {
+      if (ch === '"') {
+        if (src[i + 1] === '"') { field += '"'; i++; }
+        else quoted = false;
+      } else field += ch;
+      continue;
+    }
+    if (ch === '"') { quoted = true; continue; }
+    if (ch === delim) { row.push(field.trim()); field = ''; continue; }
+    if (ch === '\n') { row.push(field.trim()); rows.push(row); row = []; field = ''; continue; }
+    field += ch;
+  }
+  if (field || row.length) { row.push(field.trim()); rows.push(row); }
+  return rows.filter((r) => r.some((c) => c !== ''));
+}
+
+/** ערך תא כטקסט — Date שהגיע מ-Excel מוצג dd/mm/yyyy ולא כ-toString של JS */
+function cellStr(v) {
+  if (v == null) return '';
+  if (v instanceof Date && !isNaN(v)) {
+    const p = (n) => String(n).padStart(2, '0');
+    return `${p(v.getDate())}/${p(v.getMonth() + 1)}/${v.getFullYear()}`;
+  }
+  return String(v).trim();
+}
+
 /** נרמול שם לצורך התאמה: מסיר בע"מ/גרשיים/פיסוק/רווחים כפולים */
 export function normalizeName(s) {
   return String(s || '')
@@ -121,6 +163,8 @@ export function matchClient(text, clients) {
 /* ---------- זיהוי תפקידי עמודות לפי כותרות ---------- */
 const HEADER_ROLES = [
   ['caseNum', /מס(פר)?\.?['׳]?\s*תיק|תיק|case/i],
+  // חייב לקדום ל-'client', אחרת "מספר לקוח" ייתפס כעמודת שם הלקוח
+  ['clientNum', /מס(פר)?\.?['׳]?\s*לקוח|קוד\s*לקוח|מזהה\s*לקוח|client\s*(no\.?|id)/i],
   ['invoiceNo', /מס(פר)?\.?['׳]?\s*חשבונית|חשבונית|invoice|אסמכתא/i],
   ['commission', /עמלה(?!\s*%)/i],
   ['rate', /%|אחוז|rate/i],
@@ -194,9 +238,9 @@ export function classifyTable(rows, ctx) {
   for (const row of dataRows) {
     if (!row || !row.length) continue;
     const cell = (role) => (roles[role] != null ? row[roles[role]] : null);
-    const clientText = cell('client');
+    const clientText = cellStr(cell('client'));
     // דילוג על שורות סיכום
-    if (typeof clientText === 'string' && /סה["״׳']?כ|total/i.test(clientText)) continue;
+    if (/סה["״׳']?כ|total/i.test(clientText)) continue;
 
     const amount = parseAmount(cell('amount'));
     if (amount == null || amount <= 0) continue;
@@ -213,26 +257,29 @@ export function classifyTable(rows, ctx) {
     // שיוך תיק: מספר תיק → ישיר; אחרת לקוח עם תיק יחיד
     let matchedCase = null;
     let clientMatch = null;
-    const caseNumText = String(cell('caseNum') || '').trim().toLowerCase();
+    const caseNumText = cellStr(cell('caseNum')).toLowerCase();
     if (caseNumText && caseByNum.has(caseNumText)) matchedCase = caseByNum.get(caseNumText);
     if (!matchedCase && clientText) {
       clientMatch = matchClient(clientText, clients);
       if (clientMatch) {
         const cc = casesByClient.get(clientMatch.client.id) || [];
         if (cc.length === 1) matchedCase = cc[0];
+        else if (cc.length > 1) matchedCase = matchCaseByName(cc, cellStr(cell('notes')), null);
       }
     }
 
     const rate = parseFloat(cell('rate'));
-    const invoiceNo = String(cell('invoiceNo') || '').trim();
-    const notesParts = [String(cell('notes') || '').trim(), invoiceNo && `חשבונית ${invoiceNo}`].filter(Boolean);
+    const invoiceNo = cellStr(cell('invoiceNo'));
+    const notesText = cellStr(cell('notes'));
+    const notesParts = [notesText, invoiceNo && `חשבונית ${invoiceNo}`].filter(Boolean);
 
     out.push({
       include: true,
       caseId: matchedCase ? matchedCase.id : null,
-      caseNumber: String(cell('caseNum') || '').trim(),
-      caseName: '',
-      clientGuess: clientMatch ? clientMatch.client.name : (typeof clientText === 'string' ? clientText.trim() : ''),
+      caseNumber: cellStr(cell('caseNum')),
+      externalClientId: cellStr(cell('clientNum')) || null,
+      caseName: notesText,
+      clientGuess: clientMatch ? clientMatch.client.name : clientText,
       clientExists: !!clientMatch,
       clientId: clientMatch ? clientMatch.client.id : null,
       month: date ? date.month : null,
@@ -359,12 +406,14 @@ export function extractInvoiceFields(lines, ctx) {
       if (m && normalizeName(line).includes(normalizeName(m.client.name))) { clientMatch = m; break; }
     }
   }
-  // שיוך תיק: קודם לפי מספר תיק מדויק, אחרת לקוח עם תיק יחיד
+  // שיוך תיק: (1) מספר תיק מדויק  (2) תיק יחיד ללקוח  (3) התאמת שם התיק —
+  // חשוב ללקוח שנפתח ממייל: יש לו כמה תיקים בלי מספרים, והחשבונית היא שמביאה אותם.
   let matchedCase = null;
   if (caseNumber) matchedCase = cases.find((c) => normCaseNo(c.caseNumber) === normCaseNo(caseNumber)) || null;
   if (!matchedCase && clientMatch) {
     const cc = cases.filter((c) => c.clientId === clientMatch.client.id);
     if (cc.length === 1) matchedCase = cc[0];
+    else if (cc.length > 1) matchedCase = matchCaseByName(cc, caseName, caseType);
   }
 
   return {
@@ -372,6 +421,25 @@ export function extractInvoiceFields(lines, ctx) {
     amountBeforeVat, vat, amountTotal, amount, clientMatch, matchedCase,
     _defaultYear: defaultYear,
   };
+}
+
+/** התאמת תיק לפי שם/סוג כשאין מספר. מחזיר תיק רק אם ההתאמה חד-משמעית. */
+export function matchCaseByName(candidates, caseName, caseType) {
+  const numberless = candidates.filter((c) => !String(c.caseNumber || '').trim());
+  const pool = numberless.length ? numberless : candidates;
+  const n = normalizeName(caseName);
+  if (n && n.length >= 2) {
+    const hits = pool.filter((c) => {
+      const d = normalizeName(c.description);
+      return d && (d === n || d.includes(n) || n.includes(d));
+    });
+    if (hits.length === 1) return hits[0];
+  }
+  if (caseType) {
+    const hits = pool.filter((c) => c.caseType === caseType);
+    if (hits.length === 1) return hits[0];
+  }
+  return null;
 }
 
 /** נרמול מספר תיק להשוואה: אחיד סלאש, בלי רווחים */
@@ -458,14 +526,20 @@ export function classifyPdfDocument(pages, ctx) {
 export function detectKind(file) {
   const name = (file.name || '').toLowerCase();
   if (name.endsWith('.pdf') || file.type === 'application/pdf') return 'pdf';
-  if (/\.(xlsx|xls|csv|ods)$/.test(name) || /spreadsheet|ms-excel|csv/.test(file.type)) return 'excel';
+  if (/\.(csv|txt)$/.test(name) || /csv/.test(file.type)) return 'csv';
+  if (/\.(xlsx|xls|ods)$/.test(name) || /spreadsheet|ms-excel/.test(file.type)) return 'excel';
   return null;
+}
+
+async function parseCsvFile(file, ctx) {
+  return classifyTable(parseCsv(await file.text()), ctx);
 }
 
 async function parseExcel(file, ctx) {
   await loadScript(VENDOR_XLSX());
   const XLSX = window.XLSX;
-  const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true });
+  // dateNF — פורמט התאריך המקובל בארץ, כדי ש-12/03 יהיה 12 במרץ ולא 3 בדצמבר
+  const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true, dateNF: 'dd/mm/yyyy' });
   const candidates = [];
   for (const sheetName of wb.SheetNames) {
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, raw: true, defval: null });
@@ -506,6 +580,8 @@ async function parsePdf(file, ctx) {
 export async function parseFile(file, ctx) {
   const kind = detectKind(file);
   if (!kind) throw new Error('סוג הקובץ לא נתמך — יש להעלות PDF, Excel או CSV');
-  const candidates = kind === 'pdf' ? await parsePdf(file, ctx) : await parseExcel(file, ctx);
+  const candidates = kind === 'pdf' ? await parsePdf(file, ctx)
+    : kind === 'csv' ? await parseCsvFile(file, ctx)
+    : await parseExcel(file, ctx);
   return { kind, candidates };
 }

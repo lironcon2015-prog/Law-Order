@@ -1,9 +1,11 @@
 // db.js — שכבת IndexedDB גנרית מבוססת Promises
 // DB יחיד מאוחד: CRM (companies, contacts) + חיוב (clients, cases, invoices,
 // payments, balances, billingSettings). v2 הוסיף את ה-stores של החיוב.
+// v3 הוסיף: invoiceFiles (מסמכי מקור של חשבוניות) ו-localPrefs (העדפות מקומיות,
+// למשל handle לתיקיית המסמכים). שני אלה **מקומיים למכשיר** ולא נכללים בגיבוי/סנכרון.
 
 const DB_NAME = 'maCrmDB';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 let dbPromise = null;
 
@@ -77,6 +79,14 @@ export function openDB() {
       }
       if (!db.objectStoreNames.contains('billingSettings')) {
         db.createObjectStore('billingSettings', { keyPath: 'key' });
+      }
+
+      /* ---------- מקומי למכשיר (v3) — לא מסונכרן ---------- */
+      if (!db.objectStoreNames.contains('invoiceFiles')) {
+        db.createObjectStore('invoiceFiles', { keyPath: 'id', autoIncrement: true });
+      }
+      if (!db.objectStoreNames.contains('localPrefs')) {
+        db.createObjectStore('localPrefs', { keyPath: 'key' });
       }
       void event;
     };
