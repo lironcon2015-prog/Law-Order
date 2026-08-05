@@ -950,6 +950,8 @@ async function importBackup(file) {
    ============================================================ */
 
 function registerSW() {
+  // בגרסת הקובץ היחיד (file://) אין SW — הקובץ עצמו הוא ה"מטמון"
+  if (location.protocol === 'file:') return;
   if (!('serviceWorker' in navigator)) return;
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
