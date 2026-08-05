@@ -598,6 +598,44 @@ table { border-collapse: collapse; }
 }
 .cellinput--calc { color: var(--gold-bright); background: var(--gold-softer); border-color: rgba(242,202,80,.16); }
 .cellinput--role { min-width: 96px; }
+.td-person .cellinput { min-width: 110px; }
+
+/* קיבוץ עמודות: תכנון · מעקב ידני · חשבונות */
+.btable__groups th {
+  font-size: .68rem; letter-spacing: .06em; text-transform: none;
+  color: var(--text-faint); border-bottom: 1px solid var(--line-soft); padding-bottom: 4px;
+}
+.btable__groups .grp--manual { color: var(--gold); }
+.btable__groups .grp--billed { color: var(--text-muted); }
+.btable td.grp--manual, .btable th.grp--manual { background: rgba(242,202,80,.045); }
+.btable td.grp--billed, .btable th.grp--billed { background: rgba(255,255,255,.012); }
+.cellinput--manual { border-color: rgba(242,202,80,.35); }
+.cellinput--manual:focus { border-color: var(--gold); }
+.team__stat--manual .num { color: var(--gold-bright); }
+.team__bars { display: flex; flex-direction: column; gap: 2px; }
+.team__bar--billed { opacity: .55; }
+
+/* גרף השוואה (HTML — טקסט עברי מלא, בלי חיתוך) */
+.cbars { display: flex; flex-direction: column; gap: 14px; }
+.cbar { display: flex; flex-direction: column; gap: 4px; }
+.cbar__head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.cbar__label {
+  font-weight: 700; color: var(--text-strong); font-size: .9rem;
+  border-inline-start: 3px solid var(--bar-color, var(--gold)); padding-inline-start: 8px;
+}
+.cbar__budget { font-size: .74rem; color: var(--text-faint); }
+.cbar__row { display: grid; grid-template-columns: 68px 1fr 104px; align-items: center; gap: 8px; }
+.cbar__name { font-size: .74rem; color: var(--text-muted); }
+.cbar__track { height: 10px; border-radius: 5px; background: rgba(255,255,255,.06); overflow: hidden; }
+.cbar__fill { display: block; height: 100%; border-radius: 5px; }
+.cbar__fill--budget { background: transparent; border: 1px solid rgba(242,202,80,.5); }
+.cbar__val { font-size: .78rem; color: var(--text-secondary); text-align: start; }
+.cbar__row--budget .cbar__name, .cbar__row--budget .cbar__val { color: var(--text-faint); }
+
+/* פאנל תקרת שכ"ט */
+.panel--cap-on { border-color: rgba(251,146,60,.35); }
+.btable--rates .row--total td { border-top: 1px solid var(--line-soft); font-weight: 700; }
+.panel--manual { border-color: var(--gold-line); }
 /* דרגה שאינה קיימת בתעריפון הנוכחי — התעריף מוקפא בשורה */
 .cellinput--orphan { color: var(--warn); border-color: rgba(251,191,36,.45); }
 .cellinput--sm { width: 80px; min-width: 0; padding: 5px 8px; }

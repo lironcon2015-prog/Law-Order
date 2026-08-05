@@ -10,32 +10,40 @@ const TONE = { ok: '#34d399', watch: '#f2ca50', risk: '#fb923c', over: '#f87171'
  * גרף עמודות אופקי: תקציב מול ביצוע לכל שורה.
  * rows = [{ label, budget, actual, status, color }]
  */
-export function barCompare(rows, { width = 720, rowH = 46, labelW = 150 } = {}) {
+/**
+ * גרף השוואה אופקי — HTML ולא SVG, כדי ששמות בעברית לא ייחתכו (טקסט SVG ב-RTL
+ * גלש מחוץ ל-viewBox והוצגה ממנו אות אחת בלבד) ושיוצגו כמה סדרות זו לצד זו.
+ * rows = [{ label, budget, color, series: [{ name, value, status }] }]
+ */
+export function barCompare(rows) {
   if (!rows.length) return '';
-  const max = Math.max(1, ...rows.map((r) => Math.max(r.budget, r.actual)));
-  const h = rows.length * rowH + 16;
-  const trackW = width - labelW - 92;
-  const parts = [];
-
-  rows.forEach((r, i) => {
-    const y = i * rowH + 12;
-    // RTL: הסרגל מתחיל מימין (x = width - labelW) וגדל שמאלה
-    const x0 = width - labelW;
-    const bw = (r.budget / max) * trackW;
-    const aw = (r.actual / max) * trackW;
-    const tone = TONE[r.status] || TONE.ok;
-    parts.push(`
-      <text x="${width - 6}" y="${y + 15}" text-anchor="end" class="ch-label">${esc(r.label)}</text>
-      <rect x="${x0 - bw}" y="${y + 4}" width="${bw}" height="10" rx="5" fill="rgba(255,255,255,.10)"/>
-      <rect x="${x0 - bw}" y="${y + 4}" width="${bw}" height="10" rx="5" fill="none" stroke="${r.color || 'rgba(242,202,80,.45)'}" stroke-width="1"/>
-      <rect x="${x0 - aw}" y="${y + 18}" width="${aw}" height="10" rx="5" fill="${tone}" opacity=".9"/>
-      <text x="${x0 - Math.max(bw, aw) - 8}" y="${y + 19}" text-anchor="end" class="ch-num">${esc(fmtMoney(r.actual))} / ${esc(fmtMoney(r.budget))}</text>
-    `);
-  });
-
-  return `<svg class="chart" viewBox="0 0 ${width} ${h}" role="img" aria-label="תקציב מול ביצוע">
-    ${parts.join('')}
-  </svg>`;
+  const max = Math.max(1, ...rows.map((r) => Math.max(r.budget, ...r.series.map((s) => s.value))));
+  const body = rows.map((r) => {
+    const bars = r.series.map((s) => {
+      const pct = Math.max(0, Math.min(100, (s.value / max) * 100));
+      const tone = TONE[s.status] || TONE.ok;
+      const util = r.budget > 0 ? s.value / r.budget : 0;
+      return `<div class="cbar__row" title="${esc(s.name)} · ${esc(fmtMoney(s.value))} (${esc(fmtPct(util))} מהתקציב)">
+        <span class="cbar__name">${esc(s.name)}</span>
+        <span class="cbar__track"><span class="cbar__fill" style="width:${round2(pct)}%;background:${tone}"></span></span>
+        <span class="cbar__val num">${esc(fmtMoney(s.value))}</span>
+      </div>`;
+    }).join('');
+    const bpct = Math.max(0, Math.min(100, (r.budget / max) * 100));
+    return `<div class="cbar">
+      <div class="cbar__head">
+        <span class="cbar__label" style="--bar-color:${r.color || 'var(--gold)'}">${esc(r.label)}</span>
+        <span class="cbar__budget num">תקציב ${esc(fmtMoney(r.budget))}</span>
+      </div>
+      <div class="cbar__row cbar__row--budget" title="תקציב ${esc(fmtMoney(r.budget))}">
+        <span class="cbar__name">תקציב</span>
+        <span class="cbar__track"><span class="cbar__fill cbar__fill--budget" style="width:${round2(bpct)}%;border-color:${r.color || 'rgba(242,202,80,.5)'}"></span></span>
+        <span class="cbar__val num">${esc(fmtMoney(r.budget))}</span>
+      </div>
+      ${bars}
+    </div>`;
+  }).join('');
+  return `<div class="cbars">${body}</div>`;
 }
 
 /** דונאט של הרכב התקציב. parts = [{ label, value, color }] */

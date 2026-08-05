@@ -514,7 +514,10 @@ function applyTeamField(node) {
     } else if (field === 'rateOverride') {
       line.rateOverride = node.value === '' ? null : num(node.value);
       node.dataset.auto = line.rateOverride === null ? '1' : '0';
-    }
+    } else if (field === 'manualHours') {
+      line.manualHours = node.value === '' ? null : num(node.value);
+      line.manualUpdatedAt = new Date().toISOString();
+    } else if (field === 'person') line.person = node.value;
   } else if (field === 'name') team.name = node.value;
   else if (field === 'lead') team.lead = node.value;
   else if (field === 'overrunFactor') team.overrunFactor = node.value === '' ? null : num(node.value);
@@ -993,18 +996,35 @@ function exportDealCSV() {
   const rows = [];
   rows.push([`תקציב עסקה: ${snap.deal.name}`, snap.deal.client, '', '', '', '', '']);
   rows.push([]);
-  rows.push(['צוות', 'דרגה', 'שעות מוערכות', 'שעות תקציב', 'תעריף', 'תקציב ₪', 'שעות בפועל', 'בפועל ₪', 'יתרה ₪', 'ניצול']);
+  rows.push(['צוות', 'דרגה', 'חבר צוות', 'שעות מוערכות', 'שעות תקציב', 'תעריף', 'תקציב ₪',
+    'ידני: שעות', 'ידני: ₪', 'ידני: יתרה ₪', 'ידני: ניצול',
+    'חשבונות: שעות', 'חשבונות: ₪', 'חשבונות: יתרה ₪', 'חשבונות: ניצול']);
   for (const t of snap.teams) {
     for (const l of t.lines) {
-      rows.push([t.name, l.roleName, l.estHours, l.budgetHours, l.rate, l.budgetCost, l.actualHours, l.actualCost, l.remainingCost, fmtPct(l.util)]);
+      rows.push([t.name, l.roleName, l.person, l.estHours, l.budgetHours, l.rate, l.budgetCost,
+        l.manualHoursValue, l.manualCost, l.manualRemainingCost, fmtPct(l.manualUtil),
+        l.actualHours, l.actualCost, l.remainingCost, fmtPct(l.util)]);
     }
-    rows.push([`${t.name} — סה"כ`, '', t.estHours, t.budgetHours, '', t.budgetCost, t.actualHours, t.actualCost, t.remainingCost, fmtPct(t.util)]);
+    rows.push([`${t.name} — סה"כ`, '', '', t.estHours, t.budgetHours, '', t.budgetCost,
+      t.manualHours, t.manualCost, t.manualRemainingCost, fmtPct(t.manualUtil),
+      t.actualHours, t.actualCost, t.remainingCost, fmtPct(t.util)]);
   }
   rows.push([]);
-  rows.push(['סה"כ עסקה', '', snap.estHours, snap.budgetHours, '', snap.budgetCost, snap.actualHours, snap.actualCost, snap.remainingCost, fmtPct(snap.util)]);
-  rows.push(['תעריף בלנדד (שעות ללא ג\'וניור)', snap.blendedRate]);
+  rows.push(['סה"כ עסקה', '', '', snap.estHours, snap.budgetHours, '', snap.budgetCost,
+    snap.manualHours, snap.manualCost, snap.manualRemainingCost, fmtPct(snap.manualUtil),
+    snap.actualHours, snap.actualCost, snap.remainingCost, fmtPct(snap.util)]);
+  rows.push(['תעריף בלנדד (ללא ג\'וניור)', snap.blendedRate]);
   rows.push(['תעריף ממוצע כולל', snap.blendedAll]);
-  rows.push(['תעריף אפקטיבי בפועל', snap.effectiveRate]);
+  rows.push(['תעריף אפקטיבי בפועל (חשבונות)', snap.effectiveRate]);
+  rows.push(['תעריף ממוצע לפי המעקב הידני', snap.manualEffectiveRate]);
+  if (snap.capBudget.applies) {
+    rows.push([]);
+    rows.push(['תקרת שכ"ט', snap.agreedFee, 'הנחה אפקטיבית', fmtPct(snap.capBudget.discountPct, 1)]);
+    rows.push(['תעריף', 'נומינלי', 'אפקטיבי']);
+    for (const r of snap.effectiveRates.roles) rows.push([r.name, r.rate, r.effective]);
+    rows.push(['בלנדד', snap.blendedRate, snap.effectiveRates.blended]);
+    rows.push(['ממוצע כולל', snap.blendedAll, snap.effectiveRates.blendedAll]);
+  }
   if (snap.eac !== null) rows.push(['תחזית לסיום (EAC)', snap.eac, snap.eacBasis]);
   downloadFile(`תקציב-${snap.deal.name}-${stamp()}.csv`, toCSV(rows));
 }

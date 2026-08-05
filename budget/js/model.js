@@ -133,6 +133,12 @@ export function normalizeLine(l) {
       ? null : num(l.hoursOverride),
     rateOverride: l?.rateOverride === null || l?.rateOverride === undefined || l?.rateOverride === ''
       ? null : num(l.rateOverride),
+    // חבר הצוות שהשורה מתייחסת אליו (אופציונלי — אפשר כמה שורות לאותה דרגה)
+    person: String(l?.person ?? ''),
+    // מעקב שוטף: שעות שהוזנו ידנית מדוח פנימי. נפרד לחלוטין מרישומי החשבונות.
+    manualHours: l?.manualHours === null || l?.manualHours === undefined || l?.manualHours === ''
+      ? null : num(l.manualHours),
+    manualUpdatedAt: l?.manualUpdatedAt || '',
     note: String(l?.note ?? ''),
   };
 }
@@ -325,6 +331,10 @@ export function computeDeal({ deal, teams, entries, rateCard }) {
         // ביצוע: מאוחד מהמפתח הישן והחדש, כדי שרישומים קיימים לא "ייעלמו" אחרי החלפת תעריפון
         const act = mergeActuals(byTeamRole, team.id, [line.roleId, effRoleId]);
         const util = cost > 0 ? act.cost / cost : (act.cost > 0 ? Infinity : 0);
+        // מסלול המעקב הידני — מחושב מהשעות שהוזנו בשורה, לפי אותו תעריף
+        const mh = num(line.manualHours);
+        const mCost = round2(mh * rate);
+        const mUtil = cost > 0 ? mCost / cost : (mCost > 0 ? Infinity : 0);
         return {
           ...line,
           roleId: effRoleId,
@@ -343,6 +353,12 @@ export function computeDeal({ deal, teams, entries, rateCard }) {
           remainingCost: round2(cost - act.cost),
           util,
           status: statusOf(util),
+          manualHoursValue: mh,
+          manualCost: mCost,
+          manualRemainingHours: round2(bh - mh),
+          manualRemainingCost: round2(cost - mCost),
+          manualUtil: mUtil,
+          manualStatus: statusOf(mUtil),
         };
       });
       const budgetCost = round2(lines.reduce((s, l) => s + l.budgetCost, 0));
@@ -350,6 +366,10 @@ export function computeDeal({ deal, teams, entries, rateCard }) {
       const estHours = round2(lines.reduce((s, l) => s + num(l.estHours), 0));
       const act = byTeam.get(team.id) || { hours: 0, cost: 0, count: 0 };
       const util = budgetCost > 0 ? act.cost / budgetCost : (act.cost > 0 ? Infinity : 0);
+      const manualHours = round2(lines.reduce((s, l) => s + l.manualHoursValue, 0));
+      const manualCost = round2(lines.reduce((s, l) => s + l.manualCost, 0));
+      const manualUtil = budgetCost > 0 ? manualCost / budgetCost : (manualCost > 0 ? Infinity : 0);
+      const manualUpdatedAt = lines.reduce((max, l) => (l.manualUpdatedAt > max ? l.manualUpdatedAt : max), '');
       return {
         ...team,
         factor,
@@ -364,6 +384,13 @@ export function computeDeal({ deal, teams, entries, rateCard }) {
         remainingHours: round2(budgetHours - act.hours),
         util,
         status: statusOf(util),
+        manualHours,
+        manualCost,
+        manualRemainingCost: round2(budgetCost - manualCost),
+        manualRemainingHours: round2(budgetHours - manualHours),
+        manualUtil,
+        manualStatus: statusOf(manualUtil),
+        manualUpdatedAt,
       };
     });
 
@@ -371,18 +398,22 @@ export function computeDeal({ deal, teams, entries, rateCard }) {
   const budgetHours = round2(teamRows.reduce((s, t) => s + t.budgetHours, 0));
   const estHours = round2(teamRows.reduce((s, t) => s + t.estHours, 0));
 
-  // תעריף בלנדד: כל התקציב (כולל עלות הג'וניורים) מחולק לשעות שאינן ג'וניור —
-  // כלומר כמה עולה בפועל שעה "נמכרת" אחת. אם אין שעות בכירים, נופל לממוצע הכולל.
+  // תעריף בלנדד (כמו בגיליון): עלות הדרגות שאינן ג'וניור חלקי שעות אותן דרגות.
+  // הג'וניורים יוצאים משני צדי השבר.
   let juniorCost = 0, juniorHours = 0, seniorHours = 0, seniorCost = 0;
   for (const t of teamRows) for (const l of t.lines) {
     if (l.junior) { juniorCost += l.budgetCost; juniorHours += l.budgetHours; }
     else { seniorHours += l.budgetHours; seniorCost += l.budgetCost; }
   }
   const blendedAll = budgetHours > 0 ? round2(budgetCost / budgetHours) : 0;
-  const blendedRate = seniorHours > 0 ? round2(budgetCost / seniorHours) : blendedAll;
-  // ממוצע התעריפים של הדרגות הבכירות בלבד (בלי לגלגל עליהן את עלות הג'וניורים)
-  const seniorAvgRate = seniorHours > 0 ? round2(seniorCost / seniorHours) : 0;
+  const blendedRate = seniorHours > 0 ? round2(seniorCost / seniorHours) : blendedAll;
   const effectiveRate = actualHours > 0 ? round2(actualCost / actualHours) : 0;
+
+  const manualHours = round2(teamRows.reduce((s, t) => s + t.manualHours, 0));
+  const manualCost = round2(teamRows.reduce((s, t) => s + t.manualCost, 0));
+  const manualUtil = budgetCost > 0 ? manualCost / budgetCost : (manualCost > 0 ? Infinity : 0);
+  const manualEffectiveRate = manualHours > 0 ? round2(manualCost / manualHours) : 0;
+  const manualUpdatedAt = teamRows.reduce((max, t) => (t.manualUpdatedAt > max ? t.manualUpdatedAt : max), '');
 
   const util = budgetCost > 0 ? actualCost / budgetCost : (actualCost > 0 ? Infinity : 0);
   const progress = deal.progressPct / 100;
@@ -401,17 +432,47 @@ export function computeDeal({ deal, teams, entries, rateCard }) {
   const marginPct = hasFee && agreed > 0 ? margin / agreed : null;
   const feeUtil = hasFee && agreed > 0 ? actualCost / agreed : null;
 
+  /**
+   * תקרת שכ"ט: מה שנגבה בפועל מוגבל לתקרה, ולכן כל שעה "מקבלת" פחות.
+   * המקדם = תקרה ÷ עלות. דוגמה: תקרה 100,000 מול עלות 120,000 → מקדם 0.833,
+   * כלומר הנחה אפקטיבית של 20,000/120,000 = 16.7% על כל תעריף.
+   */
+  const capFactorFor = (cost) => (hasFee && agreed > 0 && cost > agreed ? agreed / cost : 1);
+  const capBudget = buildCap(agreed, budgetCost, capFactorFor(budgetCost), hasFee);
+  const capActual = buildCap(agreed, actualCost, capFactorFor(actualCost), hasFee);
+  const capManual = buildCap(agreed, manualCost, capFactorFor(manualCost), hasFee);
+
+  // תעריפים אפקטיביים אחרי החלת מקדם התקרה (על התכנון)
+  const capF = capBudget.factor;
+  const effectiveRates = {
+    factor: capF,
+    blended: round2(blendedRate * capF),
+    blendedAll: round2(blendedAll * capF),
+    roles: (rateCard?.roles || []).map((r) => ({
+      roleId: r.id, name: r.name, junior: r.junior,
+      rate: num(r.rate), effective: round2(num(r.rate) * capF),
+    })),
+  };
+  // התעריף שהתקבל בפועל לשעה, אחרי התקרה
+  const realizedRate = actualHours > 0 ? round2(actualCost * capActual.factor / actualHours) : 0;
+  const manualRealizedRate = manualHours > 0 ? round2(manualCost * capManual.factor / manualHours) : 0;
+
   const byRoleRows = (rateCard?.roles || []).map((r) => {
-    let bHours = 0, bCost = 0;
-    for (const t of teamRows) for (const l of t.lines) if (l.roleId === r.id) { bHours += l.budgetHours; bCost += l.budgetCost; }
+    let bHours = 0, bCost = 0, mHours = 0, mCost = 0;
+    for (const t of teamRows) for (const l of t.lines) if (l.roleId === r.id) {
+      bHours += l.budgetHours; bCost += l.budgetCost;
+      mHours += l.manualHoursValue; mCost += l.manualCost;
+    }
     const act = byRole.get(r.id) || { hours: 0, cost: 0, count: 0 };
     return {
       roleId: r.id, name: r.name, rate: r.rate, junior: r.junior,
       budgetHours: round2(bHours), budgetCost: round2(bCost),
       actualHours: round2(act.hours), actualCost: round2(act.cost),
+      manualHours: round2(mHours), manualCost: round2(mCost),
       util: bCost > 0 ? act.cost / bCost : (act.cost > 0 ? Infinity : 0),
+      manualUtil: bCost > 0 ? mCost / bCost : (mCost > 0 ? Infinity : 0),
     };
-  }).filter((r) => r.budgetCost > 0 || r.actualCost > 0);
+  }).filter((r) => r.budgetCost > 0 || r.actualCost > 0 || r.manualCost > 0);
 
   return {
     deal, teams: teamRows, entries: dealEntries, rateCard,
@@ -421,15 +482,35 @@ export function computeDeal({ deal, teams, entries, rateCard }) {
     remainingCost: round2(budgetCost - actualCost),
     remainingHours: round2(budgetHours - actualHours),
     util, status: statusOf(util),
-    blendedRate, blendedAll, effectiveRate, seniorAvgRate,
+    blendedRate, blendedAll, effectiveRate,
     juniorCost: round2(juniorCost), juniorHours: round2(juniorHours),
     seniorHours: round2(seniorHours), seniorCost: round2(seniorCost),
+    // מסלול המעקב הידני (נפרד לחלוטין מהחשבונות)
+    manualHours, manualCost, manualUtil, manualEffectiveRate, manualUpdatedAt,
+    manualRemainingCost: round2(budgetCost - manualCost),
+    manualRemainingHours: round2(budgetHours - manualHours),
+    manualStatus: statusOf(manualUtil),
+    // תקרת שכ"ט ותעריפים אפקטיביים
+    capBudget, capActual, capManual, effectiveRates, realizedRate, manualRealizedRate,
     eac, eacBasis, eacVariance,
     timePace, progress,
     agreedFee: agreed, hasFee, margin, marginPct, feeUtil,
     byRole: byRoleRows,
-    alerts: buildAlerts({ deal, teamRows, util, actualCost, budgetCost, eac, feeUtil, unassignedCost, progress }),
+    alerts: buildAlerts({ deal, teamRows, util, actualCost, budgetCost, eac, feeUtil, unassignedCost, progress, manualUtil, manualCost, capBudget }),
     baselineDelta: baselineDelta(deal, budgetCost),
+  };
+}
+
+/** תיאור החריגה מהתקרה: כמה "ירד" מהעלות והמקדם שיש להחיל על התעריפים */
+function buildCap(agreedFee, cost, factor, hasFee) {
+  const over = hasFee && agreedFee > 0 && cost > agreedFee;
+  return {
+    applies: over,
+    factor,                                       // 1 = אין חריגה
+    cost: round2(cost),
+    collected: round2(over ? agreedFee : cost),   // מה שייגבה בפועל
+    discount: round2(over ? cost - agreedFee : 0),
+    discountPct: over ? 1 - factor : 0,
   };
 }
 
@@ -448,8 +529,21 @@ function baselineDelta(deal, budgetCost) {
   return { base, delta: round2(budgetCost - base), pct: base > 0 ? (budgetCost - base) / base : null, capturedAt: deal.baseline.capturedAt };
 }
 
-function buildAlerts({ deal, teamRows, util, actualCost, budgetCost, eac, feeUtil, unassignedCost, progress }) {
+function buildAlerts({ deal, teamRows, util, actualCost, budgetCost, eac, feeUtil, unassignedCost, progress, manualUtil, manualCost, capBudget }) {
   const out = [];
+  // מעקב ידני — הערוץ השוטף, מוצג ראשון ובנפרד מהחשבונות
+  if (budgetCost > 0 && manualCost > 0) {
+    if (manualUtil > 1) out.push({ level: 'over', track: 'manual', text: `מעקב ידני: חריגה של ${fmtMoney(manualCost - budgetCost)} מהתקציב (${fmtPct(manualUtil)} ניצול).` });
+    else if (manualUtil >= THRESHOLDS.risk) out.push({ level: 'risk', track: 'manual', text: `מעקב ידני: ניצול ${fmtPct(manualUtil)} מהתקציב — נותרו ${fmtMoney(budgetCost - manualCost)}.` });
+  }
+  for (const t of teamRows) {
+    if (t.manualCost > 0 && t.manualUtil > 1) {
+      out.push({ level: 'over', track: 'manual', text: `מעקב ידני: הצוות "${t.name}" חרג ב-${fmtMoney(t.manualCost - t.budgetCost)}.`, teamId: t.id });
+    }
+  }
+  if (capBudget?.applies) {
+    out.push({ level: 'watch', text: `התקציב (${fmtMoney(capBudget.cost)}) גבוה מהתקרה (${fmtMoney(capBudget.collected)}) — הנחה אפקטיבית של ${fmtPct(capBudget.discountPct, 1)} על כל התעריפים.` });
+  }
   if (budgetCost > 0 && util > 1) {
     out.push({ level: 'over', text: `חריגה מהתקציב: ${fmtMoney(actualCost - budgetCost)} מעל המתוכנן (${fmtPct(util)} ניצול).` });
   } else if (budgetCost > 0 && util >= THRESHOLDS.risk) {
@@ -490,25 +584,31 @@ export function aggregateTeams(snapshot, teamIds) {
   const t = {
     count: teams.length, names: teams.map((x) => x.name),
     budgetCost: 0, budgetHours: 0, estHours: 0, actualCost: 0, actualHours: 0,
+    manualCost: 0, manualHours: 0,
     juniorCost: 0, juniorHours: 0, seniorHours: 0, seniorCost: 0, entryCount: 0,
   };
   for (const team of teams) {
     t.budgetCost += team.budgetCost; t.budgetHours += team.budgetHours; t.estHours += team.estHours;
     t.actualCost += team.actualCost; t.actualHours += team.actualHours; t.entryCount += team.entryCount;
+    t.manualCost += team.manualCost; t.manualHours += team.manualHours;
     for (const l of team.lines) {
       if (l.junior) { t.juniorCost += l.budgetCost; t.juniorHours += l.budgetHours; }
       else { t.seniorHours += l.budgetHours; t.seniorCost += l.budgetCost; }
     }
   }
-  for (const k of ['budgetCost', 'budgetHours', 'estHours', 'actualCost', 'actualHours', 'juniorCost', 'juniorHours', 'seniorHours', 'seniorCost']) {
+  for (const k of ['budgetCost', 'budgetHours', 'estHours', 'actualCost', 'actualHours', 'manualCost', 'manualHours', 'juniorCost', 'juniorHours', 'seniorHours', 'seniorCost']) {
     t[k] = round2(t[k]);
   }
   t.remainingCost = round2(t.budgetCost - t.actualCost);
   t.remainingHours = round2(t.budgetHours - t.actualHours);
+  t.manualRemainingCost = round2(t.budgetCost - t.manualCost);
+  t.manualRemainingHours = round2(t.budgetHours - t.manualHours);
   t.util = t.budgetCost > 0 ? t.actualCost / t.budgetCost : (t.actualCost > 0 ? Infinity : 0);
+  t.manualUtil = t.budgetCost > 0 ? t.manualCost / t.budgetCost : (t.manualCost > 0 ? Infinity : 0);
   t.status = statusOf(t.util);
+  t.manualStatus = statusOf(t.manualUtil);
   t.blendedAll = t.budgetHours > 0 ? round2(t.budgetCost / t.budgetHours) : 0;
-  t.blendedRate = t.seniorHours > 0 ? round2(t.budgetCost / t.seniorHours) : t.blendedAll;
+  t.blendedRate = t.seniorHours > 0 ? round2(t.seniorCost / t.seniorHours) : t.blendedAll;
   t.effectiveRate = t.actualHours > 0 ? round2(t.actualCost / t.actualHours) : 0;
   t.shareOfDeal = snapshot.budgetCost > 0 ? t.budgetCost / snapshot.budgetCost : 0;
   return t;
@@ -516,16 +616,24 @@ export function aggregateTeams(snapshot, teamIds) {
 
 /** סיכום תיק העסקאות (לתצוגת הסקירה) */
 export function computePortfolio(snapshots) {
-  const t = { budgetCost: 0, actualCost: 0, actualHours: 0, budgetHours: 0, agreedFee: 0, deals: snapshots.length, over: 0, risk: 0 };
+  const t = {
+    budgetCost: 0, actualCost: 0, actualHours: 0, budgetHours: 0, agreedFee: 0,
+    manualCost: 0, manualHours: 0, deals: snapshots.length, over: 0, risk: 0,
+  };
   for (const s of snapshots) {
     t.budgetCost += s.budgetCost; t.actualCost += s.actualCost;
     t.actualHours += s.actualHours; t.budgetHours += s.budgetHours;
+    t.manualCost += s.manualCost; t.manualHours += s.manualHours;
     t.agreedFee += s.agreedFee;
-    if (s.status === 'over') t.over += 1;
-    else if (s.status === 'risk') t.risk += 1;
+    // הסטטוס נקבע לפי המסלול השוטף אם הוזן, אחרת לפי החשבונות
+    const st = s.manualCost > 0 ? s.manualStatus : s.status;
+    if (st === 'over') t.over += 1;
+    else if (st === 'risk') t.risk += 1;
   }
   t.util = t.budgetCost > 0 ? t.actualCost / t.budgetCost : 0;
+  t.manualUtil = t.budgetCost > 0 ? t.manualCost / t.budgetCost : 0;
   t.remainingCost = round2(t.budgetCost - t.actualCost);
+  t.manualRemainingCost = round2(t.budgetCost - t.manualCost);
   return t;
 }
 
