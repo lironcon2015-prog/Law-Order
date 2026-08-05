@@ -16,8 +16,20 @@ const computeCommission = (amount, rate) => round2((Number(amount) || 0) * (Numb
 export const clients = {
   getAll: () => db.getAll('clients'),
   get: (id) => db.get('clients', id),
-  add: async (name) => {
-    const id = await db.addAuto('clients', { name: String(name || '').trim(), createdAt: Date.now() });
+  /** מקבל שם (תאימות לאחור) או אובייקט עם פרטי לקוח מלאים.
+   *  שדות שלא סופקו נשמרים ריקים — אין השלמה אוטומטית. */
+  add: async (data) => {
+    const src = typeof data === 'string' ? { name: data } : (data || {});
+    const record = {
+      name: String(src.name || '').trim(),
+      clientNumber: String(src.clientNumber || '').trim(),
+      contactName: String(src.contactName || '').trim(),
+      contactEmail: String(src.contactEmail || '').trim(),
+      contactPhone: String(src.contactPhone || '').trim(),
+      crmContactId: src.crmContactId || '',
+      createdAt: Date.now(),
+    };
+    const id = await db.addAuto('clients', record);
     notify();
     return id;
   },
@@ -37,7 +49,8 @@ export const cases = {
       clientId: data.clientId,
       caseNumber: String(data.caseNumber || '').trim(),
       description: String(data.description || '').trim(),
-      caseType: data.caseType || 'שוטף',
+      // ברירת מחדל רק כשהשדה כלל לא נמסר; מחרוזת ריקה = "לא צוין" ונשמרת ככזו
+      caseType: data.caseType === undefined ? 'שוטף' : String(data.caseType).trim(),
       commissionRate: parseFloat(data.commissionRate) || 0,
       arrangementType: String(data.arrangementType || '').trim(),
       openDate: data.openDate || null,

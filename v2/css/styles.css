@@ -2345,3 +2345,40 @@ dialog.modal.modal--wide { width: min(980px, 96vw); }
 .fin-dropzone strong { color: var(--text-strong); font-weight: 700; }
 .drop-overlay__title { font-size: 1.2rem; font-weight: 800; color: var(--text-strong); }
 .drop-overlay__sub { font-size: 0.85rem; }
+
+/* ============================================================
+   פתיחת לקוח מתוך מייל (email → client)
+   ============================================================ */
+.fin-client__num { font-size: 0.8rem; color: var(--gold); font-weight: 700; margin-inline-start: 8px; }
+.fin-contact { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 5px; }
+.fin-contact__item { display: inline-flex; align-items: center; gap: 5px; font-size: 0.76rem;
+  color: var(--text-muted); text-decoration: none; }
+a.fin-contact__item:hover { color: var(--gold); }
+.ic-xs { display: inline-grid; place-items: center; }
+.ic-xs svg { width: 13px; height: 13px; }
+.bil-type--none { background: var(--surface-2); color: var(--text-faint); }
+
+/* טופס הדבקת המייל */
+.email-paste { width: 100%; min-height: 220px; resize: vertical; line-height: 1.6;
+  font-size: 0.86rem; white-space: pre-wrap; }
+
+/* מסך אישור הטיוטה */
+.draft-form .form__sep, .form__sep { margin: 18px 0 10px; font-size: 0.72rem; font-weight: 800;
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-faint);
+  border-top: 1px solid var(--line-soft); padding-top: 14px; }
+.draft-summary { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; margin-bottom: 4px;
+  background: var(--glass); border: 1px solid var(--glass-border); border-radius: var(--radius-md); font-size: 0.8rem; }
+.draft-summary__ok { display: inline-flex; align-items: center; gap: 7px; color: var(--positive, #34d399); font-weight: 700; }
+.draft-summary__miss { display: inline-flex; align-items: flex-start; gap: 7px; color: var(--gold); }
+.draft-summary__inf { color: var(--text-muted); }
+.draft-cases { display: flex; flex-direction: column; gap: 8px; }
+.draft-case { display: grid; grid-template-columns: minmax(90px, 0.8fr) minmax(120px, 1.6fr) minmax(100px, 0.9fr) 104px auto;
+  gap: 8px; align-items: center; }
+.draft-case .input, .draft-case .select { min-width: 0; }
+.draft-check { display: flex; align-items: center; gap: 9px; margin-top: 12px; font-size: 0.84rem; color: var(--text-secondary); }
+.draft-check input { accent-color: var(--gold); width: 16px; height: 16px; }
+.draft-check input:disabled + span { color: var(--text-faint); }
+@media (max-width: 640px) {
+  .draft-case { grid-template-columns: 1fr 1fr; }
+  .draft-case > button { grid-column: 2; justify-self: end; }
+}

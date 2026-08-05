@@ -596,6 +596,7 @@ function openModal(title, bodyEl, onSubmit) {
 /* ---------- service worker ---------- */
 function registerSW() {
   if (!('serviceWorker' in navigator)) return;
+  if (location.protocol === 'file:') return; // גרסת ה-HTML האופליין — אין SW ואין רשת
   // כשגרסת SW חדשה משתלטת — רענון אוטומטי פעם אחת (לא בהתקנה ראשונה),
   // כדי שפרסומים ייכנסו לתוקף בלי hard-refresh ידני.
   const hadController = !!navigator.serviceWorker.controller;

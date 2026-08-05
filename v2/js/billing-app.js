@@ -3,10 +3,12 @@
 // מסכים: clients (לקוחות ותיקים) · invoices (חשבוניות) · payments (תשלומים) · fin-settings (הגדרות).
 
 import * as billing from './billing.js';
+import * as store from './store.js';
 import { ICONS, toast, formatCurrency, formatCompactCurrency, buildToday } from './ui.js';
 import { barChart, donut } from './charts.js';
 import * as importer from './importer.js';
 import * as invImport from './invoice-import.js';
+import { parseClientEmail } from './email-parse.js';
 
 const MONTHS = ['', 'ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
 const TYPE_TONE = { 'שוטף': 'info', 'ליטיגציה': 'neg', 'עסקה': 'plum' };
@@ -29,6 +31,7 @@ const state = {
 const MONTHS_SHORT = ['', 'ינ', 'פבר', 'מרץ', 'אפר', 'מאי', 'יוני', 'יולי', 'אוג', 'ספט', 'אוק', 'נוב', 'דצמ'];
 const DONUT_PALETTE = ['#f2ca50', '#86dfff', '#c084fc', '#34d399', '#f87171', '#fbbf24'];
 const fmtNum = (v) => Math.round(v || 0).toLocaleString('he-IL');
+const casesLabel = (n) => (n === 1 ? 'תיק אחד' : `${n} תיקים`);
 const maxMonthFor = (year) => (year === new Date().getFullYear() ? new Date().getMonth() + 1 : 12);
 
 let refs = {};
@@ -155,16 +158,26 @@ function yearSelect() {
   return el('label', { class: 'bil-year-wrap' }, [icon('calendar'), sel]);
 }
 function typeBadge(type) {
-  return el('span', { class: `bil-type bil-type--${TYPE_TONE[type] || 'info'}`, text: type || 'שוטף' });
+  // אין סוג = "—" (לא מציגים ברירת מחדל שלא נאמרה)
+  return el('span', { class: `bil-type bil-type--${TYPE_TONE[type] || 'info'}${type ? '' : ' bil-type--none'}`, text: type || '—' });
 }
 
 /* ============================================================ מסך: לקוחות ותיקים ============================================================ */
 function renderClients(container) {
+  const mailBtn = el('button', { class: 'btn btn--ghost btn--sm', 'data-bil-action': 'client-from-email', title: 'הדבקת מייל פתיחת לקוח' }, [icon('mail'), el('span', { text: 'מתוך מייל' })]);
   const addBtn = el('button', { class: 'btn btn--primary btn--sm', 'data-bil-action': 'new-client' }, [icon('plus'), el('span', { text: 'לקוח חדש' })]);
-  const wrap = el('div', { class: 'fin-wrap' }, [viewHeader('לקוחות ותיקים', `${state.clients.length} לקוחות · ${state.cases.length} תיקים`, addBtn)]);
+  const wrap = el('div', { class: 'fin-wrap' }, [
+    viewHeader('לקוחות ותיקים', `${state.clients.length} לקוחות · ${state.cases.length} תיקים`, el('div', { class: 'view-h__tools' }, [mailBtn, addBtn])),
+  ]);
 
   if (!state.clients.length) {
-    wrap.append(el('div', { class: 'fin-empty' }, [icon('users', 'ic-lg'), el('p', { text: 'אין לקוחות עדיין' }), el('button', { class: 'btn btn--ghost btn--sm', 'data-bil-action': 'new-client', text: 'הוסף לקוח ראשון' })]));
+    wrap.append(el('div', { class: 'fin-empty' }, [
+      icon('users', 'ic-lg'), el('p', { text: 'אין לקוחות עדיין' }),
+      el('div', { class: 'fin-io-row' }, [
+        el('button', { class: 'btn btn--ghost btn--sm', 'data-bil-action': 'new-client', text: 'הוסף לקוח ראשון' }),
+        el('button', { class: 'btn btn--ghost btn--sm', 'data-bil-action': 'client-from-email', text: 'פתיחה מתוך מייל' }),
+      ]),
+    ]));
     container.replaceChildren(wrap);
     return;
   }
@@ -175,8 +188,12 @@ function renderClients(container) {
     const card = el('div', { class: 'fin-client' }, [
       el('div', { class: 'fin-client__head' }, [
         el('div', { class: 'fin-client__id' }, [
-          el('span', { class: 'fin-client__name', text: cl.name }),
-          el('span', { class: 'fin-client__sub muted', text: `${cCases.length} תיקים` }),
+          el('span', { class: 'fin-client__name' }, [
+            cl.name,
+            cl.clientNumber ? el('span', { class: 'fin-client__num num', text: `#${cl.clientNumber}` }) : null,
+          ]),
+          el('span', { class: 'fin-client__sub muted', text: casesLabel(cCases.length) }),
+          clientContactLine(cl),
         ]),
         el('div', { class: 'fin-row__tools' }, [
           el('button', { class: 'icon-btn', title: 'תיק חדש', 'data-bil-action': 'new-case', 'data-client': cl.id }, [icon('plus')]),
@@ -191,8 +208,8 @@ function renderClients(container) {
               el('span', { class: 'fin-case__num', text: cs.caseNumber || '—' }),
               cs.description && el('span', { class: 'fin-case__desc muted', text: cs.description }),
             ]),
-            cs.arrangementType && el('span', { class: 'tag', text: cs.arrangementType }),
-            el('span', { class: 'fin-case__rate num', text: `${cs.commissionRate}%` }),
+            cs.arrangementType ? el('span', { class: 'tag', text: cs.arrangementType }) : null,
+            cs.commissionRate ? el('span', { class: 'fin-case__rate num', text: `${cs.commissionRate}%` }) : null,
             el('div', { class: 'fin-row__tools' }, [
               el('button', { class: 'icon-btn', title: 'עריכה', 'data-bil-action': 'edit-case', 'data-id': cs.id }, [icon('edit')]),
               el('button', { class: 'icon-btn icon-btn--danger', title: 'מחיקה', 'data-bil-action': 'del-case', 'data-id': cs.id }, [icon('trash')]),
@@ -203,6 +220,15 @@ function renderClients(container) {
     wrap.append(card);
   }
   container.replaceChildren(wrap);
+}
+
+/** שורת איש הקשר של הלקוח (מוצגת רק אם יש מה להציג) */
+function clientContactLine(cl) {
+  const bits = [];
+  if (cl.contactName) bits.push(el('span', { class: 'fin-contact__item' }, [icon('users', 'ic-xs'), el('span', { text: cl.contactName })]));
+  if (cl.contactEmail) bits.push(el('a', { class: 'fin-contact__item', href: `mailto:${cl.contactEmail}` }, [icon('mail', 'ic-xs'), el('span', { text: cl.contactEmail })]));
+  if (cl.contactPhone) bits.push(el('a', { class: 'fin-contact__item', href: `tel:${cl.contactPhone.replace(/[^\d+]/g, '')}` }, [icon('phone', 'ic-xs'), el('span', { class: 'num', text: cl.contactPhone })]));
+  return bits.length ? el('div', { class: 'fin-contact' }, bits) : null;
 }
 
 /* ============================================================ מסך: חשבוניות ============================================================ */
@@ -839,6 +865,17 @@ async function onClick(e) {
 
   switch (action) {
     case 'new-client': return clientForm();
+    case 'client-from-email': return emailPasteForm();
+    case 'draft-add-case': {
+      t.closest('.form')?.querySelector('.draft-cases')?.append(draftCaseRow());
+      return;
+    }
+    case 'draft-del-case': {
+      const wrap = t.closest('.draft-cases');
+      t.closest('.draft-case')?.remove();
+      if (wrap && !wrap.children.length) wrap.append(draftCaseRow());
+      return;
+    }
     case 'edit-client': return clientForm(state.clients.find((c) => c.id === id));
     case 'del-client': return delClient(id);
     case 'new-case': return caseForm(null, parseInt(t.dataset.client, 10));
@@ -924,16 +961,181 @@ function selectEl(id, options, selected, props = {}) {
 const monthOptions = () => MONTHS.slice(1).map((m, i) => ({ value: i + 1, label: m }));
 
 function clientForm(client) {
-  const body = el('div', { class: 'form' }, [field('שם הלקוח', input('f-cl-name', { value: client ? client.name : '', placeholder: 'שם מלא' }))]);
+  const c = client || {};
+  const body = el('div', { class: 'form' }, [
+    el('div', { class: 'field--row' }, [
+      field('שם הלקוח', input('f-cl-name', { value: c.name || '', placeholder: 'שם מלא' })),
+      field('מספר לקוח', input('f-cl-num', { value: c.clientNumber || '', placeholder: 'אופציונלי' })),
+    ]),
+    el('div', { class: 'form__sep', text: 'איש קשר אצל הלקוח' }),
+    field('שם', input('f-cl-cname', { value: c.contactName || '', placeholder: 'אופציונלי' })),
+    el('div', { class: 'field--row' }, [
+      field('דוא"ל', input('f-cl-cmail', { type: 'email', value: c.contactEmail || '', placeholder: 'אופציונלי' })),
+      field('טלפון', input('f-cl-cphone', { type: 'tel', value: c.contactPhone || '', placeholder: 'אופציונלי' })),
+    ]),
+  ]);
   openModal(client ? 'עריכת לקוח' : 'לקוח חדש', body, async () => {
     const name = document.getElementById('f-cl-name').value.trim();
     if (!name) { toast('יש להזין שם', 'alert'); return false; }
-    if (client) await billing.clients.update({ ...client, name });
-    else await billing.clients.add(name);
+    const data = {
+      name,
+      clientNumber: document.getElementById('f-cl-num').value.trim(),
+      contactName: document.getElementById('f-cl-cname').value.trim(),
+      contactEmail: document.getElementById('f-cl-cmail').value.trim(),
+      contactPhone: document.getElementById('f-cl-cphone').value.trim(),
+    };
+    if (client) await billing.clients.update({ ...client, ...data });
+    else await billing.clients.add(data);
     toast(client ? 'הלקוח עודכן' : 'הלקוח נוסף');
     reload('clients');
     return true;
   });
+}
+
+/* ============================================================ פתיחת לקוח מתוך מייל ============================================================ */
+const EMAIL_PLACEHOLDER = `נא לפתוח לקוח חדש:
+שם הלקוח: אלפא נכסים בע"מ
+מספר לקוח: 4471
+תיקים:
+- תיק 4471/1 – ליווי שוטף
+- תיק 4471/2 – עסקת מכר מניות
+איש קשר: דנה לוי, dana@alpha.co.il, 052-1234567
+הסדר שכ"ט: 1,500 ש"ח לשעה + 3% דמי הצלחה`;
+
+/** שלב 1 — הדבקת המייל */
+function emailPasteForm() {
+  const ta = el('textarea', { id: 'f-mail-src', class: 'input email-paste', rows: '12', dir: 'auto', placeholder: EMAIL_PLACEHOLDER });
+  const body = el('div', { class: 'form' }, [
+    el('p', { class: 'muted fin-hint', text: 'הדבק את המייל שנשלח לפתיחת הלקוח. המערכת תזהה שם לקוח, מספר לקוח, תיקים, איש קשר והסדר שכ"ט — ותציג הכל לאישור לפני השמירה. מה שלא מופיע במייל יישאר ריק (בלי השלמות אוטומטיות).' }),
+    ta,
+  ]);
+  openModal('פתיחת לקוח מתוך מייל', body, async () => {
+    const text = ta.value.trim();
+    if (!text) { toast('יש להדביק את תוכן המייל', 'alert'); return false; }
+    const draft = parseClientEmail(text);
+    setTimeout(() => clientDraftForm(draft), 0); // המודאל הנוכחי נסגר קודם
+    return true;
+  }, 'ניתוח המייל');
+}
+
+function draftCaseRow(c = {}) {
+  const typeOpts = [{ value: '', label: '— לא צוין —' }, ...billing.CASE_TYPES.map((t) => ({ value: t, label: t }))];
+  return el('div', { class: 'draft-case' }, [
+    el('input', { class: 'input', 'data-role': 'c-num', value: c.caseNumber || '', placeholder: 'מספר תיק' }),
+    el('input', { class: 'input', 'data-role': 'c-desc', value: c.description || '', placeholder: 'תיאור התיק' }),
+    selectEl(null, typeOpts, c.caseType || '', { 'data-role': 'c-type' }),
+    el('input', { class: 'input num', 'data-role': 'c-rate', type: 'number', step: '0.5', min: '0', max: '100', placeholder: 'עמלה %', value: '' }),
+    el('button', { class: 'icon-btn icon-btn--danger', type: 'button', 'data-bil-action': 'draft-del-case', title: 'הסרת שורה' }, [icon('trash')]),
+  ]);
+}
+
+/** שלב 2 — אישור/השלמה של מה שזוהה */
+function clientDraftForm(draft) {
+  const missSet = new Set(draft.missing);
+  const missHint = (label) => (missSet.has(label) ? 'לא נמצא במייל' : null);
+
+  const casesWrap = el('div', { class: 'draft-cases' }, (draft.cases.length ? draft.cases : [{}]).map(draftCaseRow));
+  const addRowBtn = el('button', { class: 'btn btn--ghost btn--sm', type: 'button', 'data-bil-action': 'draft-add-case' }, [icon('plus'), el('span', { text: 'תיק נוסף' })]);
+
+  const foundCount = 7 - draft.missing.length;
+  const summary = el('div', { class: 'draft-summary' }, [
+    el('span', { class: 'draft-summary__ok' }, [icon('check', 'ic-xs'), el('span', { text: `זוהו ${foundCount} מתוך 7 פרטים${draft.cases.length ? ` · ${casesLabel(draft.cases.length)}` : ''}` })]),
+    draft.missing.length ? el('span', { class: 'draft-summary__miss' }, [icon('alert', 'ic-xs'), el('span', { text: `חסר: ${draft.missing.join(' · ')}` })]) : null,
+    draft.inferred.length ? el('span', { class: 'draft-summary__inf', text: `הוסק מגוף המייל (לבדיקה): ${draft.inferred.join(' · ')}` }) : null,
+  ]);
+
+  const crmCheck = el('input', { id: 'f-dr-crm', type: 'checkbox', checked: draft.contact.fullName ? true : null, disabled: draft.contact.fullName ? null : true });
+  const crmRow = el('label', { class: 'draft-check' }, [
+    crmCheck,
+    el('span', { text: draft.contact.fullName ? 'להוסיף/לעדכן גם באנשי הקשר (CRM) ולקשר ללקוח' : 'ללא שם איש קשר — לא ייווצר איש קשר ב-CRM' }),
+  ]);
+
+  const body = el('div', { class: 'form draft-form' }, [
+    summary,
+    el('div', { class: 'field--row' }, [
+      field('שם הלקוח', input('f-dr-name', { value: draft.clientName, placeholder: 'חובה' }), missHint('שם לקוח')),
+      field('מספר לקוח', input('f-dr-num', { value: draft.clientNumber, placeholder: 'להשלמה' }), missHint('מספר לקוח')),
+    ]),
+    el('div', { class: 'form__sep', text: 'תיקים' }),
+    casesWrap,
+    addRowBtn,
+    el('div', { class: 'form__sep', text: 'איש קשר' }),
+    field('שם', input('f-dr-cname', { value: draft.contact.fullName, placeholder: 'להשלמה' }), missHint('שם איש קשר')),
+    el('div', { class: 'field--row' }, [
+      field('דוא"ל', input('f-dr-cmail', { type: 'email', value: draft.contact.email, placeholder: 'להשלמה' }), missHint('דוא"ל')),
+      field('טלפון', input('f-dr-cphone', { type: 'tel', value: draft.contact.phone, placeholder: 'להשלמה' }), missHint('טלפון')),
+    ]),
+    crmRow,
+    el('div', { class: 'form__sep', text: 'הסדר שכ"ט' }),
+    field('הסדר', el('textarea', { id: 'f-dr-fee', class: 'input', rows: '2', text: draft.feeArrangement, placeholder: 'להשלמה' }), missHint('הסדר שכ"ט')),
+  ]);
+
+  openModal('אישור פתיחת לקוח', body, async () => {
+    const val = (id) => (document.getElementById(id)?.value || '').trim();
+    const name = val('f-dr-name');
+    if (!name) { toast('יש להזין שם לקוח', 'alert'); return false; }
+
+    const rows = [...casesWrap.querySelectorAll('.draft-case')].map((r) => ({
+      caseNumber: r.querySelector('[data-role="c-num"]').value.trim(),
+      description: r.querySelector('[data-role="c-desc"]').value.trim(),
+      caseType: r.querySelector('[data-role="c-type"]').value,
+      commissionRate: r.querySelector('[data-role="c-rate"]').value,
+    })).filter((r) => r.caseNumber || r.description);
+
+    const contact = { fullName: val('f-dr-cname'), email: val('f-dr-cmail'), phone: val('f-dr-cphone') };
+    const fee = val('f-dr-fee');
+
+    const clientId = await billing.clients.add({
+      name,
+      clientNumber: val('f-dr-num'),
+      contactName: contact.fullName,
+      contactEmail: contact.email,
+      contactPhone: contact.phone,
+    });
+    for (const r of rows) await billing.cases.add({ clientId, ...r, arrangementType: fee });
+
+    let crmMsg = '';
+    if (crmCheck.checked && contact.fullName) {
+      const res = await upsertCrmContact(contact, clientId);
+      crmMsg = res === 'updated' ? ' · איש הקשר עודכן ב-CRM' : ' · איש הקשר נוסף ל-CRM';
+    }
+
+    await loadData();
+    if (onMutate) await onMutate();  // רענון ה-CRM + תזמון סנכרון
+    renderView('clients');
+    toast(`נפתח לקוח "${name}" · ${casesLabel(rows.length)}${crmMsg}`);
+    return true;
+  }, 'פתיחת לקוח');
+}
+
+/** יוצר/מעדכן איש קשר ב-CRM ומקשר ללקוח החיוב. לא דורס ערכים קיימים. */
+async function upsertCrmContact(contact, clientId) {
+  const contacts = await store.getContacts();
+  const email = contact.email.toLowerCase();
+  const existing =
+    (email && contacts.find((c) => (c.contactInfo?.email || '').toLowerCase() === email)) ||
+    (contact.fullName && contacts.find((c) => c.fullName === contact.fullName)) || null;
+
+  if (existing) {
+    await store.saveContact({
+      ...existing,
+      contactInfo: {
+        ...existing.contactInfo,
+        email: existing.contactInfo?.email || contact.email,
+        phone: existing.contactInfo?.phone || contact.phone,
+      },
+      billingClientId: existing.billingClientId || clientId,
+      status: 'client',
+    });
+    return 'updated';
+  }
+  await store.saveContact({
+    fullName: contact.fullName,
+    status: 'client',
+    contactInfo: { email: contact.email, phone: contact.phone },
+    billingClientId: clientId,
+  });
+  return 'created';
 }
 
 function caseForm(caseRec, presetClientId) {
@@ -1038,7 +1240,10 @@ function paymentForm(pay) {
 }
 
 /* ---------- modal (מקומי, אותו DOM/CSS כמו app.js) ---------- */
+/** opts: { wide?: boolean, saveLabel?: string } — גם מחרוזת בודדת נתמכת (תווית כפתור השמירה) */
 function openModal(title, bodyEl, onSubmit, opts = {}) {
+  if (typeof opts === 'string') opts = { saveLabel: opts };
+  const saveLabel = opts.saveLabel || 'שמירה';
   const modal = document.getElementById('modal');
   modal.classList.toggle('modal--wide', !!opts.wide);
   modal.replaceChildren();
@@ -1049,7 +1254,7 @@ function openModal(title, bodyEl, onSubmit, opts = {}) {
     el('button', { class: 'modal__close', type: 'button', 'aria-label': 'סגירה', html: ICONS.close, onClick: close }),
   ]);
   const body = el('div', { class: 'modal__body' }, [bodyEl]);
-  const save = el('button', { class: 'btn btn--primary', type: 'button', html: ICONS.check + '<span>שמירה</span>' });
+  const save = el('button', { class: 'btn btn--primary', type: 'button' }, [icon('check'), el('span', { text: saveLabel })]);
   const foot = el('div', { class: 'modal__foot' }, [save, el('button', { class: 'btn btn--ghost', type: 'button', text: 'ביטול', onClick: close })]);
 
   save.addEventListener('click', async () => {

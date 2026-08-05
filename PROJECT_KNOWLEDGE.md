@@ -40,6 +40,15 @@ CRM אישי לעו"ד M&A, vanilla JS · PWA · offline-first · RTL. חי ב-`
 - בדיקת OAuth/Drive end-to-end רק אצל המשתמש (אין Google בסביבת הפיתוח).
 - seed (`seedDemo`) לא כולל `contactType`/`photoUrl` — נתוני דמו ישנים יציגו ברירות מחדל.
 
+## 5.1 פתיחת לקוח מתוך מייל (v2)
+- `v2/js/email-parse.js` — `parseClientEmail(text)` מחזיר טיוטה + `missing[]` + `inferred[]`. **לא משלים שדות חסרים.**
+  הרחבת זיהוי = הוספת תווית ל-`LABELS` (סדר = עדיפות) או כלל ל-`CASE_TYPE_RULES`. בדיקות: `node tools/test-email-parse.mjs`.
+- מודל הלקוח (`clients`) הורחב: `clientNumber`, `contactName`, `contactEmail`, `contactPhone`, `crmContactId`.
+  `clients.add` מקבל מחרוזת (תאימות לאחור) או אובייקט.
+- `cases.add` שומר `caseType: ''` כשנמסר ריק (ברירת מחדל 'שוטף' רק כשהשדה כלל לא נמסר) — כדי לא להציג סוג שלא נאמר.
+- **HTML אופליין**: כל מודול חדש ב-`v2/js/` חייב להיכנס למערך `ORDER` ב-`v2/build-offline.mjs` (סדר תלויות),
+  אחרת הוא לא ייארז. ה-IndexedDB של `file://` מבודד מזה של האתר — ההעברה בין השניים היא ייבוא/ייצוא JSON במסך ההגדרות.
+
 ## 6. לקחים אחרונים
 - **SW cache-first שבר פרסומים** (HTML התעדכן, JS ישן הוגש) → מעבר ל-network-first + auto-reload. בכל שינוי app-shell: להעלות `CACHE`.
 - מטמון SW תקוע אצל משתמש דורש איפוס חד-פעמי (Clear site data) לפני שהלוגיקה החדשה תופסת.
