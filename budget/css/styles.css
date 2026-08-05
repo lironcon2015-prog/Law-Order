@@ -485,6 +485,27 @@ table { border-collapse: collapse; }
   background: rgba(255,255,255,.014);
   flex-wrap: wrap;
 }
+.team__pick { display: inline-flex; align-items: center; flex: 0 0 auto; cursor: pointer; }
+.team__pick input { width: 16px; height: 16px; accent-color: var(--gold); cursor: pointer; }
+.team:has(.team__pick input:checked) { border-color: var(--gold-line); box-shadow: var(--elev-1), 0 0 22px -14px var(--gold-glow); }
+
+/* סרגל בחירת צוותים + פאנל החישוב המצרפי */
+.pickbar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 8px 14px; margin-bottom: 4px;
+  border: 1px dashed var(--line-soft); border-radius: var(--radius-md);
+  background: rgba(255,255,255,.015);
+}
+.pickbar input { accent-color: var(--gold); }
+.pickbar__hint { font-size: .78rem; color: var(--text-faint); }
+.panel--agg { border-color: var(--gold-line); background: linear-gradient(180deg, var(--gold-softer), rgba(255,255,255,0) 60%), var(--surface-1); }
+.agg__names { font-size: .76rem; font-weight: 500; color: var(--text-faint); margin-inline-start: 8px; }
+
+/* מסך שיוך אנשים לצוותים בייבוא */
+.panel--people { margin-top: 14px; }
+.people-bulk { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.btable--people td:first-child { display: flex; align-items: center; gap: 8px; }
+
 .team__swatch {
   width: 4px; align-self: stretch; min-height: 26px;
   border-radius: 3px;

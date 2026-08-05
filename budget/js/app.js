@@ -10,7 +10,7 @@ import {
 import * as ui from './ui.js';
 import { readTabularFile } from './xlsx.js';
 import {
-  detectHeaderRow, guessMapping, rowsToEntries, markDuplicates, parseBudgetSheet,
+  detectHeaderRow, guessMapping, rowsToEntries, markDuplicates, parseBudgetSheet, collectPeople,
 } from './importer.js';
 
 /* ============================================================
@@ -25,6 +25,7 @@ const state = {
   tab: 'budget',           // 'budget' | 'actuals' | 'control' | 'settings'
   filters: { q: '', teamId: '', kind: '', status: '' },
   snapshots: new Map(),
+  selectedTeams: new Set(),   // צוותים מסומנים לחישוב מצרפי (בעסקה הפעילה)
 };
 
 let els = {};
@@ -116,7 +117,7 @@ function render() {
     ui.renderDealHeader(els.main, { snap, tab: state.tab });
     const body = ui.el('div', { class: 'tab-body' });
     els.main.append(body);
-    if (state.tab === 'budget') ui.renderBudgetTab(body, { snap, rateCard: store.rateCardFor(snap.deal) });
+    if (state.tab === 'budget') ui.renderBudgetTab(body, { snap, rateCard: store.rateCardFor(snap.deal), selected: state.selectedTeams });
     else if (state.tab === 'actuals') ui.renderActualsTab(body, { snap, filters: state.filters });
     else if (state.tab === 'control') ui.renderControlTab(body, { snap });
     else ui.renderDealSettings(body, { snap, rateCards: store.cache.rateCards });
@@ -132,7 +133,25 @@ function refreshLive() {
   if (!deal) return;
   const snap = computeDeal({ deal, teams: store.cache.teams, entries: store.cache.entries, rateCard: store.rateCardFor(deal) });
   state.snapshots.set(deal.id, snap);
-  ui.refreshComputed(snap);
+  ui.refreshComputed(snap, state.selectedTeams);
+}
+
+/** מרענן את כותרת העסקה (תגיות + סרגל) בלי לרנדר מחדש את הטופס שבו המשתמש עובד */
+function refreshDealHeader() {
+  const deal = store.getDeal(state.dealId);
+  const head = els.main.querySelector('.deal-head');
+  if (!deal || !head) return;
+  rebuildSnapshots();
+  const snap = currentSnapshot();
+  if (!snap) return;
+  const holder = ui.el('div');
+  ui.renderDealHeader(holder, { snap, tab: state.tab });
+  head.replaceWith(holder.firstElementChild);
+  ui.renderDealTabs(els.tabs, {
+    deals: store.cache.deals,
+    snapshots: state.snapshots,
+    activeId: state.view === 'deal' ? state.dealId : null,
+  });
 }
 
 function markDirty() {
@@ -145,6 +164,7 @@ function markDirty() {
 }
 
 function goDeal(id, tab) {
+  if (id !== state.dealId) state.selectedTeams.clear();   // הסימון שייך לעסקה שממנה יצאנו
   state.view = 'deal';
   state.dealId = id;
   state.tab = tab || state.tab || 'budget';
@@ -170,6 +190,9 @@ function openModal({ title, body, actions = [], wide = false }) {
 
 function closeModal() {
   if (els.modal.open) els.modal.close();
+  // ניקוי התוכן: טופס שנשאר במודאל הסגור ממשיך להיתפס בשאילתות DOM ובדלגציית האירועים
+  els.modalBody.replaceChildren();
+  els.modalFoot.replaceChildren();
   importCtx = null;
 }
 
@@ -288,10 +311,15 @@ async function onClick(e) {
     case 'add-team':
       return openTeamModal();
 
+    case 'clear-picks':
+      state.selectedTeams.clear();
+      return render();
+
     case 'delete-team': {
       const team = store.getTeam(target.dataset.teamId);
       return confirmModal('מחיקת צוות', `למחוק את "${team?.name}"? רישומי הביצוע שלו יישמרו ויעברו למצב "ללא שיוך".`, async () => {
         const moved = await store.deleteTeam(target.dataset.teamId);
+        state.selectedTeams.delete(target.dataset.teamId);
         ui.toast(moved ? `הצוות נמחק · ${moved} רישומים עברו ל"ללא שיוך"` : 'הצוות נמחק');
         render();
       }, 'מחק');
@@ -302,7 +330,7 @@ async function onClick(e) {
       if (!team) return;
       await store.saveTeam({
         ...team, id: undefined, name: `${team.name} — עותק`,
-        order: store.teamsOf(team.dealId).length,
+        order: store.nextTeamOrder(team.dealId),
         lines: team.lines.map((l) => ({ ...l, id: undefined })),
       });
       ui.toast('הצוות שוכפל');
@@ -450,14 +478,9 @@ function onInput(e) {
   // חיפוש חופשי מרונדר נקודתית כדי לא לאבד פוקוס; שאר המסננים נתפסים ב-change
   if (node.dataset.filter === 'q') {
     state.filters.q = node.value;
-    const body = els.main.querySelector('.tab-body');
+    const list = els.main.querySelector('.actuals-body');
     const snap = currentSnapshot();
-    if (body && snap) {
-      body.replaceChildren();
-      ui.renderActualsTab(body, { snap, filters: state.filters });
-      const input = body.querySelector('[data-filter="q"]');
-      if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
-    }
+    if (list && snap) ui.renderActualsList(list, { snap, filters: state.filters });
     return;
   }
   if (node.dataset.filter) return;
@@ -504,6 +527,25 @@ async function onChange(e) {
 
   if (node.dataset.imp) return onImportChange(node);
 
+  // סימון צוותים לחישוב מצרפי
+  if (node.dataset.pick === 'team') {
+    if (node.checked) state.selectedTeams.add(node.dataset.teamId);
+    else state.selectedTeams.delete(node.dataset.teamId);
+    return render();
+  }
+  if (node.dataset.pick === 'all') {
+    const snap = currentSnapshot();
+    state.selectedTeams = new Set(node.checked && snap ? snap.teams.map((t) => t.id) : []);
+    return render();
+  }
+
+  // טופס פרטי העסקה — שמירה אוטומטית בכל שינוי שדה (כמו בגיליון התקציב),
+  // עם רענון התגיות והסרגל בכותרת. כפתור "שמור שינויים" נשאר כגיבוי.
+  if (node.form && node.form.id === 'deal-form') {
+    await saveDealForm(node.form, { silent: true });
+    return;
+  }
+
   if (node.dataset.field && node.dataset.teamId) {
     const team = applyTeamField(node);
     if (team) { await store.saveTeam(team); refreshLive(); }
@@ -525,24 +567,37 @@ async function onChange(e) {
 
   if (node.dataset.filter) {
     state.filters[node.dataset.filter] = node.value;
+    // רינדור הטבלה בלבד — שומר על מצב סרגל הסינון ועל מיקום הגלילה
+    const list = els.main.querySelector('.actuals-body');
+    const snap = currentSnapshot();
+    if (list && snap) return ui.renderActualsList(list, { snap, filters: state.filters });
     return render();
   }
+}
+
+/** שומר את טופס פרטי העסקה. silent = שמירה אוטומטית תוך כדי עריכה (בלי לרנדר מחדש את הטופס) */
+async function saveDealForm(form, { silent = false } = {}) {
+  const f = Object.fromEntries(new FormData(form).entries());
+  const before = store.getDeal(state.dealId);
+  await store.saveDeal({
+    id: state.dealId,
+    name: f.name, client: f.client, code: f.code, status: f.status,
+    startDate: f.startDate, targetDate: f.targetDate, notes: f.notes,
+    feeModel: f.feeModel, agreedFee: num(f.agreedFee), overrunFactor: num(f.overrunFactor),
+    vatRate: num(f.vatRate), rateCardId: f.rateCardId, progressPct: num(f.progressPct),
+  });
+  // החלפת תעריפון משנה את כל הגיליון — שם חובה רינדור מלא
+  if (silent && before && before.rateCardId === f.rateCardId) refreshDealHeader();
+  else render();
 }
 
 async function onSubmit(e) {
   const form = e.target;
   if (form.id === 'deal-form') {
     e.preventDefault();
-    const f = Object.fromEntries(new FormData(form).entries());
-    await store.saveDeal({
-      id: state.dealId,
-      name: f.name, client: f.client, code: f.code, status: f.status,
-      startDate: f.startDate, targetDate: f.targetDate, notes: f.notes,
-      feeModel: f.feeModel, agreedFee: num(f.agreedFee), overrunFactor: num(f.overrunFactor),
-      vatRate: num(f.vatRate), rateCardId: f.rateCardId, progressPct: num(f.progressPct),
-    });
+    await saveDealForm(form);
     ui.toast('העסקה עודכנה');
-    return render();
+    return;
   }
 }
 
@@ -631,7 +686,7 @@ function openEntryModal(entry) {
       dealId: state.dealId,
       teamId: f.teamId || '', roleId: f.roleId || '',
       kind: f.kind, date: f.date, description: f.description,
-      supplier: f.supplier, docNumber: f.docNumber,
+      person: f.person, supplier: f.supplier, docNumber: f.docNumber,
       hours, rate,
       amount: f.amount === '' ? round2(hours * rate) : num(f.amount),
       vatIncluded: !!f.vatIncluded,
@@ -693,18 +748,43 @@ async function startEntryImport(file) {
     headerRow: headerRow < 0 ? 0 : headerRow,
     mapping: guessMapping(sheets[sheetIndex].rows[headerRow < 0 ? 0 : headerRow] || []),
     defaultTeam: '',
+    peopleTeams: {},   // key של אדם → teamId (בעסקה הנוכחית)
   };
+  syncImportPeople();
   renderImportModal();
 }
 
+/** מרענן את רשימת האנשים בקובץ ואת השיוך שלהם — מהזיכרון השמור, בלי לדרוס בחירה ידנית */
+function syncImportPeople() {
+  const { sheets, sheetIndex, headerRow, mapping } = importCtx;
+  const rows = sheets[sheetIndex].rows.slice(headerRow + 1);
+  importCtx.people = collectPeople(rows, mapping);
+
+  const remembered = store.peopleTeamIdsFor(state.dealId);
+  const teams = store.teamsOf(state.dealId);
+  const teamByName = new Map(teams.map((t) => [String(t.name).trim().toLowerCase(), t.id]));
+  const next = {};
+  for (const p of importCtx.people) {
+    // 1) בחירה ידנית בהצגה הנוכחית  2) זיכרון קודם  3) הצוות שכתוב בשורה עצמה
+    next[p.key] = importCtx.peopleTeams[p.key]
+      ?? remembered[p.key]
+      ?? (p.teamHint ? (teamByName.get(p.teamHint.toLowerCase()) || '') : '')
+      ?? '';
+    importCtx.peopleRemembered = importCtx.peopleRemembered || {};
+    importCtx.peopleRemembered[p.key] = !!remembered[p.key];
+  }
+  importCtx.peopleTeams = next;
+}
+
 function computeImportPreview() {
-  const { sheets, sheetIndex, headerRow, mapping, defaultTeam } = importCtx;
+  const { sheets, sheetIndex, headerRow, mapping, defaultTeam, peopleTeams } = importCtx;
   const snap = currentSnapshot();
   const rows = sheets[sheetIndex].rows.slice(headerRow + 1).filter((r) => r && r.some((c) => c !== null && c !== undefined && c !== ''));
   const { entries, warnings, skipped } = rowsToEntries(rows, mapping, {
     dealId: state.dealId,
     teams: snap.teams,
     roles: store.rateCardFor(snap.deal).roles,
+    personTeams: peopleTeams || {},
     defaults: { teamId: defaultTeam, fileName: importCtx.file.name },
   });
   const marked = markDuplicates(entries, snap.entries);
@@ -720,14 +800,24 @@ function renderImportModal() {
     sheets: importCtx.sheets, sheetIndex: importCtx.sheetIndex,
     headerRow: importCtx.headerRow, mapping: importCtx.mapping,
     marked, teams: snap.teams, warnings, mode: 'entries',
+    people: importCtx.people, peopleTeams: importCtx.peopleTeams,
+    peopleRemembered: importCtx.peopleRemembered,
   });
 
   const save = btn('ייבא רישומים', { primary: true, iconName: 'check' });
   save.addEventListener('click', async () => {
     const skipDupes = els.modalBody.querySelector('[data-imp="skipDupes"]')?.checked ?? true;
+    const remember = els.modalBody.querySelector('[data-imp="rememberPeople"]')?.checked ?? true;
     const list = importCtx.marked.filter((m) => !(skipDupes && m.duplicate)).map((m) => m.entry);
     if (!list.length) { closeModal(); return ui.toast('לא נותרו רישומים לייבוא', 'error'); }
     await store.saveEntries(list);
+    // זכירת השיוך לעסקאות הבאות — לפי שם הצוות
+    if (remember && importCtx.people?.length) {
+      const teamName = new Map(store.teamsOf(state.dealId).map((t) => [t.id, t.name]));
+      await store.rememberPeopleTeams(importCtx.people.map((p) => ({
+        key: p.key, name: p.name, teamName: teamName.get(importCtx.peopleTeams[p.key]) || '',
+      })));
+    }
     closeModal();
     ui.toast(`${list.length} רישומים יובאו`);
     state.tab = 'actuals';
@@ -746,11 +836,15 @@ function onImportChange(node) {
     const hr = detectHeaderRow(importCtx.sheets[importCtx.sheetIndex].rows);
     importCtx.headerRow = hr < 0 ? 0 : hr;
     importCtx.mapping = guessMapping(importCtx.sheets[importCtx.sheetIndex].rows[importCtx.headerRow] || []);
+    importCtx.peopleTeams = {};
+    syncImportPeople();
     return renderImportModal();
   }
   if (kind === 'headerRow') {
     importCtx.headerRow = Math.max(0, Number(node.value) - 1);
     importCtx.mapping = guessMapping(importCtx.sheets[importCtx.sheetIndex].rows[importCtx.headerRow] || []);
+    importCtx.peopleTeams = {};
+    syncImportPeople();
     return renderImportModal();
   }
   if (kind === 'defaultTeam') {
@@ -761,6 +855,15 @@ function onImportChange(node) {
     const col = Number(node.dataset.col);
     for (const [k, v] of Object.entries(importCtx.mapping)) if (v === col) delete importCtx.mapping[k];
     if (node.value) importCtx.mapping[node.value] = col;
+    syncImportPeople();
+    return renderImportModal();
+  }
+  if (kind === 'personTeam') {
+    importCtx.peopleTeams[node.dataset.personKey] = node.value;
+    return renderImportModal();
+  }
+  if (kind === 'personTeamAll') {
+    for (const p of importCtx.people || []) importCtx.peopleTeams[p.key] = node.value;
     return renderImportModal();
   }
 }
@@ -824,13 +927,14 @@ async function applyBudgetImport(parsed, { applyFactor, applyRates }) {
   }
 
   const factor = applyFactor && parsed.overrunFactor !== null ? parsed.overrunFactor : deal.overrunFactor;
-  const base = store.teamsOf(deal.id).length;
+  const base = store.nextTeamOrder(deal.id);
   const teams = parsed.teams.map((t, i) => ({
     id: uid('team'), dealId: deal.id, name: t.name, order: base + i,
     // צוות שזוהה ללא שורות מקבל את מתודולוגיית הבסיס — שורה לכל דרגה, אפס שעות
     lines: (t.lines.length ? t.lines : card.roles.map((r) => ({ roleName: r.name, estHours: 0, budgetHours: 0 }))).map((l) => ({
       id: uid('ln'),
       roleId: byName.get(l.roleName.trim())?.id || '',
+      roleName: l.roleName.trim(),
       estHours: l.estHours,
       // אם שעות התקציב בגיליון אינן נגזרות מהנוסחה — נשמרות כדריסה מפורשת
       hoursOverride: l.budgetHours > 0 && l.budgetHours !== roundUpHours(l.estHours * (1 + factor)) ? l.budgetHours : null,
@@ -871,10 +975,10 @@ function exportEntriesCSV() {
   if (!snap) return;
   const teamName = new Map(snap.teams.map((t) => [t.id, t.name]));
   const roleName = new Map(store.rateCardFor(snap.deal).roles.map((r) => [r.id, r.name]));
-  const rows = [['תאריך', 'תיאור', 'צוות', 'דרגה', 'סוג', 'שעות', 'תעריף', 'סכום', 'כולל מע"מ', 'סטטוס', 'ספק', 'מסמך']];
+  const rows = [['תאריך', 'תיאור', 'עורך דין', 'צוות', 'דרגה', 'סוג', 'שעות', 'תעריף', 'סכום', 'כולל מע"מ', 'סטטוס', 'ספק', 'מסמך']];
   for (const e of ui.filterEntries(snap.entries, state.filters)) {
     rows.push([
-      e.date, e.description, teamName.get(e.teamId) || '', roleName.get(e.roleId) || '',
+      e.date, e.description, e.person, teamName.get(e.teamId) || '', roleName.get(e.roleId) || '',
       (ENTRY_KINDS.find((k) => k.id === e.kind) || {}).label || '', e.hours, e.rate, e.amount,
       e.vatIncluded ? 'כן' : 'לא', (ENTRY_STATUSES.find((s) => s.id === e.status) || {}).label || '',
       e.supplier, e.docNumber,
@@ -898,7 +1002,7 @@ function exportDealCSV() {
   }
   rows.push([]);
   rows.push(['סה"כ עסקה', '', snap.estHours, snap.budgetHours, '', snap.budgetCost, snap.actualHours, snap.actualCost, snap.remainingCost, fmtPct(snap.util)]);
-  rows.push(['תעריף בלנדד (ללא ג\'וניור)', snap.blendedRate]);
+  rows.push(['תעריף בלנדד (שעות ללא ג\'וניור)', snap.blendedRate]);
   rows.push(['תעריף ממוצע כולל', snap.blendedAll]);
   rows.push(['תעריף אפקטיבי בפועל', snap.effectiveRate]);
   if (snap.eac !== null) rows.push(['תחזית לסיום (EAC)', snap.eac, snap.eacBasis]);
@@ -999,7 +1103,7 @@ async function seedDemo() {
   for (const [i, [name, hours]] of plan.entries()) {
     await store.saveTeam({
       id: uid('team'), dealId: deal.id, name, order: i,
-      lines: Object.entries(hours).map(([roleName, h]) => ({ id: uid('ln'), roleId: roles[roleName], estHours: h })),
+      lines: Object.entries(hours).map(([roleName, h]) => ({ id: uid('ln'), roleId: roles[roleName], roleName, estHours: h })),
     });
   }
 

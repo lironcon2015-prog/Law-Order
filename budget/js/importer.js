@@ -12,7 +12,8 @@ export const TARGET_FIELDS = [
   { id: 'date',        label: 'תאריך',        keys: ['תאריך', 'date', 'יום', 'invoice date', 'תאריך חשבונית'] },
   { id: 'description', label: 'תיאור',        keys: ['תיאור', 'פירוט', 'נושא', 'description', 'details', 'עבודה', 'משימה', 'narrative'] },
   { id: 'teamName',    label: 'צוות',         keys: ['צוות', 'team', 'מחלקה', 'תחום', 'practice', 'department'] },
-  { id: 'roleName',    label: 'דרגה',         keys: ['דרגה', 'תפקיד', 'role', 'level', 'seniority', 'עובד', 'שם עורך דין', 'timekeeper'] },
+  { id: 'personName',  label: 'עורך דין / עובד', keys: ['שם עורך דין', 'עורך דין', 'עו"ד מטפל', 'עובד', 'שם עובד', 'מבצע', 'ביצע', 'איש צוות', 'timekeeper', 'lawyer', 'attorney', 'employee', 'user', 'שם'] },
+  { id: 'roleName',    label: 'דרגה',         keys: ['דרגה', 'תפקיד', 'role', 'level', 'seniority', 'רמה'] },
   { id: 'hours',       label: 'שעות',         keys: ['שעות', 'hours', 'זמן', 'units', 'כמות שעות'] },
   { id: 'rate',        label: 'תעריף',        keys: ['תעריף', 'rate', 'מחיר לשעה', 'שכר שעתי'] },
   { id: 'amount',      label: 'סכום',         keys: ['סכום', 'סה"כ', 'סך הכל', 'עלות', 'amount', 'total', 'value', 'לתשלום', 'חיוב'] },
@@ -60,6 +61,34 @@ export function guessMapping(headerCells) {
   return mapping;
 }
 
+/** נרמול שם אדם להשוואה בין קבצים (גרשיים, רווחים, סדר לא משתנה) */
+export const normPerson = (s) => norm(s);
+
+/**
+ * מוציא את רשימת האנשים (עורכי דין / עובדים) שמופיעים בקובץ, עם היקף העבודה שלהם.
+ * משמש למסך שיוך אנשים לצוותים.
+ * @returns {Array<{name, key, rows, hours, amount, teamHint}>}
+ */
+export function collectPeople(rows, mapping) {
+  if (mapping.personName === undefined) return [];
+  const map = new Map();
+  for (const row of rows || []) {
+    const raw = row?.[mapping.personName];
+    const name = String(raw ?? '').trim();
+    if (!name) continue;
+    const key = normPerson(name);
+    const cur = map.get(key) || { name, key, rows: 0, hours: 0, amount: 0, teamHint: '' };
+    cur.rows += 1;
+    cur.hours += num(mapping.hours === undefined ? 0 : row[mapping.hours]);
+    cur.amount += num(mapping.amount === undefined ? 0 : row[mapping.amount]);
+    if (!cur.teamHint && mapping.teamName !== undefined) cur.teamHint = String(row[mapping.teamName] ?? '').trim();
+    map.set(key, cur);
+  }
+  return [...map.values()]
+    .map((p) => ({ ...p, hours: round2(p.hours), amount: round2(p.amount) }))
+    .sort((a, b) => b.hours - a.hours || b.rows - a.rows);
+}
+
 /** ממיר ערך תא לתאריך ISO (yyyy-mm-dd) — תומך בפורמט ישראלי dd/mm/yyyy */
 export function toISODate(v) {
   if (v === null || v === undefined || v === '') return '';
@@ -86,7 +115,7 @@ export function toISODate(v) {
  * @returns { entries, skipped, warnings }
  */
 export function rowsToEntries(rows, mapping, opts) {
-  const { dealId, teams = [], roles = [], defaults = {} } = opts;
+  const { dealId, teams = [], roles = [], defaults = {}, personTeams = {} } = opts;
   const teamByName = new Map(teams.map((t) => [norm(t.name), t.id]));
   const roleByName = new Map(roles.map((r) => [norm(r.name), r.id]));
   const entries = [];
@@ -107,9 +136,13 @@ export function rowsToEntries(rows, mapping, opts) {
 
     const teamRaw = pick(row, 'teamName');
     const roleRaw = pick(row, 'roleName');
-    const teamId = teamRaw ? (teamByName.get(norm(teamRaw)) || '') : (defaults.teamId || '');
+    const person = String(pick(row, 'personName') ?? '').trim();
+    // עדיפות: הצוות שהמשתמש שייך לאיש הזה → הצוות שכתוב בשורה → ברירת המחדל
+    const mappedTeam = person ? (personTeams[normPerson(person)] || '') : '';
+    const teamFromRow = teamRaw ? (teamByName.get(norm(teamRaw)) || '') : '';
+    const teamId = mappedTeam || teamFromRow || defaults.teamId || '';
     const roleId = roleRaw ? (roleByName.get(norm(roleRaw)) || '') : (defaults.roleId || '');
-    if (teamRaw && !teamId) warnings.add(`הצוות "${teamRaw}" לא קיים בעסקה — הרישום ייכנס ללא שיוך.`);
+    if (teamRaw && !teamFromRow && !mappedTeam) warnings.add(`הצוות "${teamRaw}" לא קיים בעסקה — הרישום ייכנס ללא שיוך.`);
     if (roleRaw && !roleId) warnings.add(`הדרגה "${roleRaw}" לא קיימת בתעריפון — הרישום ייכנס ללא דרגה.`);
 
     entries.push({
@@ -117,6 +150,7 @@ export function rowsToEntries(rows, mapping, opts) {
       dealId,
       teamId,
       roleId,
+      person,
       kind: defaults.kind || (hours > 0 ? 'hours' : 'invoice'),
       date: toISODate(pick(row, 'date')) || new Date().toISOString().slice(0, 10),
       description,
@@ -214,34 +248,44 @@ export function parseBudgetSheet(rows, knownRoleNames = []) {
   // גבול ימני לעמודות המספרים של התקציב — כדי לא לשאוב מספרים מטבלת התעריפים
   const numberLimit = rateCols.size ? Math.min(...rateCols) : Infinity;
 
+  const candByRow = new Map();
   for (const rc of roleCells) {
     if (rc.c !== budgetCol) continue;
     const numbers = [];
     (rows[rc.r] || []).forEach((cell, c) => {
       if (isNum(cell) && c !== rc.c && c < numberLimit) numbers.push({ col: c, value: cell });
     });
-    if (numbers.length) rowRoles.push({ r: rc.r, labelCol: rc.c, roleName: rc.name, numbers });
+    if (numbers.length) candByRow.set(rc.r, { r: rc.r, labelCol: rc.c, roleName: rc.name, numbers });
   }
 
   // צוותים: כותרת = תא טקסט בעמודת התקציב (או משמאלה) שאינו כותרת עמודה ואינו שם דרגה
   const headerNoise = /מספר שעות|סך הכל|סה"כ|תקציב|שעות|תעריפ|מקדם|בלנדד|hours|total|rate/i;
+  const ratesHeader = /תעריפ|מחירון|rate card|rates/i;
   const teams = [];
   let current = null;
-  const roleRowSet = new Set(rowRoles.map((x) => x.r));
+  let inRatesBlock = false;
 
   rows.forEach((row, r) => {
-    if (roleRowSet.has(r)) {
-      const rr = rowRoles.find((x) => x.r === r);
+    const cand = candByRow.get(r);
+    if (cand) {
+      // טבלת תעריפים שיושבת באותה עמודה כמו שורות התקציב: מזוהה לפי כותרת "תעריפים",
+      // או לפי שורת דרגה עם מספר יחיד שמופיעה לפני שהוגדר צוות כלשהו.
+      const isRateRow = cand.numbers.length === 1 && (inRatesBlock || !current);
+      if (isRateRow) {
+        if (!rates.has(norm(cand.roleName))) rates.set(norm(cand.roleName), cand.numbers[0].value);
+        return;
+      }
       if (!current) { current = { name: 'צוות 1', lines: [] }; teams.push(current); }
-      current.lines.push(buildLine(rr, rates));
+      current.lines.push(buildLine(cand, rates));
       return;
     }
-    const cand = (row || []).find((c, ci) => typeof c === 'string' && c.trim()
-      && ci <= budgetCol && !headerNoise.test(c) && !roleNames.has(norm(c)));
-    if (cand) {
-      const name = String(cand).trim();
-      if (name.length <= 40) { current = { name, lines: [] }; teams.push(current); }
-    }
+    const label = (row || []).find((c, ci) => typeof c === 'string' && c.trim()
+      && ci <= budgetCol && !roleNames.has(norm(c)));
+    if (!label) return;
+    if (ratesHeader.test(label)) { inRatesBlock = true; return; }
+    if (headerNoise.test(label)) return;
+    const name = String(label).trim();
+    if (name.length <= 40) { current = { name, lines: [] }; teams.push(current); inRatesBlock = false; }
   });
 
   // צוות שהוגדר בגיליון אך לא מולא נשמר רק אם הוא בתוך גוש התקציב (לפני הצוות המלא האחרון)

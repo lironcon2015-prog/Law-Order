@@ -117,6 +117,44 @@ export async function setSetting(key, value) {
 }
 
 /* ============================================================
+   זיכרון שיוך אנשים לצוותים (חוצה עסקאות)
+   ============================================================ */
+
+/**
+ * מיפוי נשמר לפי **שם הצוות** ולא לפי id — כדי שיחול גם על עסקאות עתידיות
+ * שבהן נוצרים צוותים חדשים באותם שמות.
+ * מבנה: { [שם מנורמל]: { name, teamName } }
+ */
+export function getPeopleMemory() {
+  const raw = getSetting('peopleTeams', {});
+  return raw && typeof raw === 'object' ? raw : {};
+}
+
+/** מיפוי שם-אדם → teamId בעסקה נתונה, לפי הזיכרון השמור */
+export function peopleTeamIdsFor(dealId) {
+  const memory = getPeopleMemory();
+  const byName = new Map(teamsOf(dealId).map((t) => [String(t.name || '').trim().toLowerCase(), t.id]));
+  const out = {};
+  for (const [key, rec] of Object.entries(memory)) {
+    const teamId = byName.get(String(rec?.teamName || '').trim().toLowerCase());
+    if (teamId) out[key] = teamId;
+  }
+  return out;
+}
+
+/** שומר/מעדכן שיוכים. entries: [{ key, name, teamName }] — teamName ריק מוחק מהזיכרון */
+export async function rememberPeopleTeams(list) {
+  const memory = { ...getPeopleMemory() };
+  for (const rec of list || []) {
+    if (!rec?.key) continue;
+    if (rec.teamName) memory[rec.key] = { name: rec.name || rec.key, teamName: rec.teamName };
+    else delete memory[rec.key];
+  }
+  await setSetting('peopleTeams', memory);
+  return memory;
+}
+
+/* ============================================================
    תעריפונים
    ============================================================ */
 
@@ -352,9 +390,16 @@ export async function clearBaseline(dealId) {
 
 export function getTeam(id) { return cache.teams.find((t) => t.id === id) || null; }
 
+/** הסדר הבא בתור בעסקה — max+1, כדי שצוות חדש תמיד ייכנס לסוף גם אחרי מחיקות */
+export function nextTeamOrder(dealId) {
+  const list = cache.teams.filter((t) => t.dealId === dealId);
+  return list.reduce((max, t) => Math.max(max, Number.isFinite(t.order) ? t.order : 0), -1) + 1;
+}
+
 export async function saveTeam(patch) {
   const existing = patch.id ? getTeam(patch.id) : null;
-  const team = normalizeTeam({ ...(existing || {}), ...patch, updatedAt: new Date().toISOString() }, existing?.order ?? cache.teams.length);
+  const fallbackOrder = existing?.order ?? nextTeamOrder(patch.dealId || existing?.dealId);
+  const team = normalizeTeam({ ...(existing || {}), ...patch, updatedAt: new Date().toISOString() }, fallbackOrder);
   const i = cache.teams.findIndex((t) => t.id === team.id);
   if (i >= 0) cache.teams[i] = team; else cache.teams.push(team);
   await db.put('teams', team);
@@ -368,6 +413,7 @@ export async function addTeam(dealId, name) {
   const card = rateCardFor(deal);
   const index = teamsOf(dealId).length;
   const team = buildTeamFromTemplate({ dealId, name: name || `צוות ${index + 1}`, roles: card.roles, index });
+  team.order = nextTeamOrder(dealId);   // סוף הרשימה — גם אם נמחקו צוותים באמצע
   cache.teams.push(team);
   await db.put('teams', team);
   notify('team');

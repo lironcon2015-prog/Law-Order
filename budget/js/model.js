@@ -189,6 +189,8 @@ export function normalizeEntry(e) {
     dealId: e?.dealId || '',
     teamId: e?.teamId || '',
     roleId: e?.roleId || '',
+    // עורך הדין / העובד שביצע — מגיע מפירוט השעות ומשמש לשיוך אוטומטי לצוות
+    person: String(e?.person ?? '').trim(),
     kind: ENTRY_KINDS.some((k) => k.id === e?.kind) ? e.kind : 'hours',
     date: e?.date || new Date().toISOString().slice(0, 10),
     description: String(e?.description ?? ''),
@@ -369,14 +371,17 @@ export function computeDeal({ deal, teams, entries, rateCard }) {
   const budgetHours = round2(teamRows.reduce((s, t) => s + t.budgetHours, 0));
   const estHours = round2(teamRows.reduce((s, t) => s + t.estHours, 0));
 
-  // תעריף בלנדד (לא כולל דרגות ג'וניור) — כמו בגיליון
-  let juniorCost = 0, seniorHours = 0, seniorCost = 0;
+  // תעריף בלנדד: כל התקציב (כולל עלות הג'וניורים) מחולק לשעות שאינן ג'וניור —
+  // כלומר כמה עולה בפועל שעה "נמכרת" אחת. אם אין שעות בכירים, נופל לממוצע הכולל.
+  let juniorCost = 0, juniorHours = 0, seniorHours = 0, seniorCost = 0;
   for (const t of teamRows) for (const l of t.lines) {
-    if (l.junior) juniorCost += l.budgetCost;
+    if (l.junior) { juniorCost += l.budgetCost; juniorHours += l.budgetHours; }
     else { seniorHours += l.budgetHours; seniorCost += l.budgetCost; }
   }
-  const blendedRate = seniorHours > 0 ? round2((budgetCost - juniorCost) / seniorHours) : 0;
   const blendedAll = budgetHours > 0 ? round2(budgetCost / budgetHours) : 0;
+  const blendedRate = seniorHours > 0 ? round2(budgetCost / seniorHours) : blendedAll;
+  // ממוצע התעריפים של הדרגות הבכירות בלבד (בלי לגלגל עליהן את עלות הג'וניורים)
+  const seniorAvgRate = seniorHours > 0 ? round2(seniorCost / seniorHours) : 0;
   const effectiveRate = actualHours > 0 ? round2(actualCost / actualHours) : 0;
 
   const util = budgetCost > 0 ? actualCost / budgetCost : (actualCost > 0 ? Infinity : 0);
@@ -416,8 +421,9 @@ export function computeDeal({ deal, teams, entries, rateCard }) {
     remainingCost: round2(budgetCost - actualCost),
     remainingHours: round2(budgetHours - actualHours),
     util, status: statusOf(util),
-    blendedRate, blendedAll, effectiveRate,
-    juniorCost: round2(juniorCost), seniorHours: round2(seniorHours), seniorCost: round2(seniorCost),
+    blendedRate, blendedAll, effectiveRate, seniorAvgRate,
+    juniorCost: round2(juniorCost), juniorHours: round2(juniorHours),
+    seniorHours: round2(seniorHours), seniorCost: round2(seniorCost),
     eac, eacBasis, eacVariance,
     timePace, progress,
     agreedFee: agreed, hasFee, margin, marginPct, feeUtil,
@@ -472,6 +478,40 @@ function buildAlerts({ deal, teamRows, util, actualCost, budgetCost, eac, feeUti
   }
   if (!teamRows.length) out.push({ level: 'info', text: 'לא הוגדרו צוותים לעסקה — הוסף צוות כדי לבנות תקציב.' });
   return out;
+}
+
+/**
+ * חישוב מצרפי לקבוצת צוותים מסומנים בתוך עסקה.
+ * אותה מתודולוגיה כמו סיכום העסקה, רק על תת-קבוצה.
+ */
+export function aggregateTeams(snapshot, teamIds) {
+  const ids = new Set(teamIds || []);
+  const teams = snapshot.teams.filter((t) => ids.has(t.id));
+  const t = {
+    count: teams.length, names: teams.map((x) => x.name),
+    budgetCost: 0, budgetHours: 0, estHours: 0, actualCost: 0, actualHours: 0,
+    juniorCost: 0, juniorHours: 0, seniorHours: 0, seniorCost: 0, entryCount: 0,
+  };
+  for (const team of teams) {
+    t.budgetCost += team.budgetCost; t.budgetHours += team.budgetHours; t.estHours += team.estHours;
+    t.actualCost += team.actualCost; t.actualHours += team.actualHours; t.entryCount += team.entryCount;
+    for (const l of team.lines) {
+      if (l.junior) { t.juniorCost += l.budgetCost; t.juniorHours += l.budgetHours; }
+      else { t.seniorHours += l.budgetHours; t.seniorCost += l.budgetCost; }
+    }
+  }
+  for (const k of ['budgetCost', 'budgetHours', 'estHours', 'actualCost', 'actualHours', 'juniorCost', 'juniorHours', 'seniorHours', 'seniorCost']) {
+    t[k] = round2(t[k]);
+  }
+  t.remainingCost = round2(t.budgetCost - t.actualCost);
+  t.remainingHours = round2(t.budgetHours - t.actualHours);
+  t.util = t.budgetCost > 0 ? t.actualCost / t.budgetCost : (t.actualCost > 0 ? Infinity : 0);
+  t.status = statusOf(t.util);
+  t.blendedAll = t.budgetHours > 0 ? round2(t.budgetCost / t.budgetHours) : 0;
+  t.blendedRate = t.seniorHours > 0 ? round2(t.budgetCost / t.seniorHours) : t.blendedAll;
+  t.effectiveRate = t.actualHours > 0 ? round2(t.actualCost / t.actualHours) : 0;
+  t.shareOfDeal = snapshot.budgetCost > 0 ? t.budgetCost / snapshot.budgetCost : 0;
+  return t;
 }
 
 /** סיכום תיק העסקאות (לתצוגת הסקירה) */

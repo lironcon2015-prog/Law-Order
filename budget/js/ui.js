@@ -4,6 +4,7 @@
 import {
   fmtMoney, fmtHours, fmtPct, STATUS_LABEL, DEAL_STATUSES, FEE_MODELS,
   ENTRY_KINDS, ENTRY_STATUSES, TEAM_COLORS, num, round2, computePortfolio, burnSeries,
+  aggregateTeams,
 } from './model.js';
 import { barCompare, donut, burnLine, gauge, miniBar } from './charts.js';
 
@@ -70,8 +71,11 @@ function calcCell(key, text, extraClass = '') {
   return el('span', { class: `num ${extraClass}`.trim(), dataset: { calc: key }, text });
 }
 
-function statusPill(status, label) {
-  return el('span', { class: `pill pill--${status}`, text: label || STATUS_LABEL[status] || '' });
+function statusPill(status, label, calcKey) {
+  return el('span', {
+    class: `pill pill--${status}`, text: label || STATUS_LABEL[status] || '',
+    dataset: calcKey ? { calc: calcKey, pill: '1' } : null,
+  });
 }
 
 function kpi(label, value, { sub = '', tone = '', icon: iconName = '' } = {}) {
@@ -236,13 +240,13 @@ export function renderDealHeader(root, { snap, tab }) {
       ]),
     ]),
     el('div', { class: 'strip' }, [
-      stripItem('תקציב', money(snap.budgetCost, d)),
-      stripItem('בפועל', money(snap.actualCost, d)),
-      stripItem('יתרה', money(snap.remainingCost, d), snap.remainingCost < 0 ? 'neg' : 'pos'),
-      stripItem('ניצול', fmtPct(snap.util), snap.status === 'over' ? 'neg' : ''),
-      stripItem('שעות', `${fmtHours(snap.actualHours)} / ${fmtHours(snap.budgetHours)}`),
-      stripItem('בלנדד', money(snap.blendedRate, d)),
-      snap.hasFee ? stripItem('רווח גולמי', money(snap.margin, d), snap.margin < 0 ? 'neg' : 'pos') : null,
+      stripItem('תקציב', money(snap.budgetCost, d), '', 'strip-budget'),
+      stripItem('בפועל', money(snap.actualCost, d), '', 'strip-actual'),
+      stripItem('יתרה', money(snap.remainingCost, d), snap.remainingCost < 0 ? 'neg' : 'pos', 'strip-remaining'),
+      stripItem('ניצול', fmtPct(snap.util), snap.status === 'over' ? 'neg' : '', 'strip-util'),
+      stripItem('שעות', `${fmtHours(snap.actualHours)} / ${fmtHours(snap.budgetHours)}`, '', 'strip-hours'),
+      stripItem('בלנדד', money(snap.blendedRate, d), '', 'strip-blended'),
+      snap.hasFee ? stripItem('רווח גולמי', money(snap.margin, d), snap.margin < 0 ? 'neg' : 'pos', 'strip-margin') : null,
     ]),
     el('nav', { class: 'subtabs', role: 'tablist' }, [
       subtab('budget', 'תקציב', 'target', tab),
@@ -254,10 +258,12 @@ export function renderDealHeader(root, { snap, tab }) {
   root.append(head);
 }
 
-function stripItem(label, value, tone = '') {
+function stripItem(label, value, tone = '', calcKey = '') {
   return el('div', { class: `strip__item ${tone ? `strip__item--${tone}` : ''}`.trim() }, [
     el('span', { class: 'strip__label', text: label }),
-    el('span', { class: 'strip__value num', text: value }),
+    calcKey
+      ? el('span', { class: 'strip__value num', dataset: { calc: calcKey }, text: value })
+      : el('span', { class: 'strip__value num', text: value }),
   ]);
 }
 
@@ -273,24 +279,66 @@ function subtab(id, label, iconName, active) {
    טאב תקציב — הגיליון החי
    ============================================================ */
 
-export function renderBudgetTab(root, { snap, rateCard }) {
+export function renderBudgetTab(root, { snap, rateCard, selected = new Set() }) {
   const d = snap.deal;
 
   if (!snap.teams.length) {
-    root.append(emptyState('אין צוותים בעסקה', 'כל צוות מקבל את אותה מתודולוגיה: שורה לכל דרגה, שעות מוערכות, מקדם חריגה ותעריף.', 'הוסף צוות', 'add-team'));
+    root.append(el('div', { class: 'empty' }, [
+      el('h2', { text: 'אין צוותים בעסקה' }),
+      el('p', { text: 'כל צוות מקבל את אותה מתודולוגיה: שורה לכל דרגה, שעות מוערכות, מקדם חריגה ותעריף.' }),
+      el('div', { class: 'form-actions form-actions--wrap' }, [
+        el('button', { class: 'btn btn--primary btn--sm', type: 'button', dataset: { action: 'add-team' } }, [icon('plus'), 'הוסף צוות']),
+        // בלי הכפתור הזה אי אפשר היה לייבא תקציב לעסקה ריקה
+        el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'import-budget' } }, [icon('upload'), 'ייבוא תקציב מאקסל']),
+      ]),
+    ]));
     return;
   }
 
   const wrap = el('div', { class: 'budget-wrap' });
 
+  // סרגל בחירת צוותים — חישוב מצרפי לצוותים המסומנים
+  const allBox = el('input', {
+    type: 'checkbox', dataset: { pick: 'all' },
+    checked: selected.size === snap.teams.length ? 'checked' : null,
+  });
+  allBox.indeterminate = selected.size > 0 && selected.size < snap.teams.length;
+  wrap.append(el('div', { class: 'pickbar' }, [
+    el('label', { class: 'inline-check' }, [allBox, el('span', { text: 'סמן את כל הצוותים' })]),
+    el('span', { class: 'pickbar__hint', text: selected.size ? `${selected.size} צוותים מסומנים` : 'סמן צוותים כדי לקבל חישוב מצרפי' }),
+    selected.size ? el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'clear-picks' } }, [icon('close'), 'נקה סימון']) : null,
+  ]));
+
   for (const team of snap.teams) {
-    wrap.append(renderTeamCard(team, { snap, rateCard }));
+    wrap.append(renderTeamCard(team, { snap, rateCard, selected }));
   }
 
   wrap.append(el('div', { class: 'team-add-row' }, [
     el('button', { class: 'btn-add-row', type: 'button', dataset: { action: 'add-team' } }, [icon('plus'), 'הוסף צוות (אותה מתודולוגיה)']),
     el('button', { class: 'btn-add-row', type: 'button', dataset: { action: 'import-budget' } }, [icon('upload'), 'ייבוא תקציב מאקסל']),
   ]));
+
+  // חישוב מצרפי לצוותים המסומנים
+  if (selected.size) {
+    const agg = aggregateTeams(snap, selected);
+    wrap.append(el('section', { class: 'panel panel--agg' }, [
+      el('h2', { class: 'panel__title' }, [
+        icon('layers'),
+        `חישוב מצרפי · ${agg.count} צוותים`,
+        el('span', { class: 'agg__names', text: agg.names.join(' · ') }),
+      ]),
+      el('div', { class: 'totals' }, [
+        totalItem('תקציב מצרפי', money(agg.budgetCost, d), 'agg-budget'),
+        totalItem('בפועל', money(agg.actualCost, d), 'agg-actual'),
+        totalItem('יתרה', money(agg.remainingCost, d), 'agg-remaining'),
+        totalItem('ניצול', fmtPct(agg.util), 'agg-util'),
+        totalItem('שעות תקציב', fmtHours(agg.budgetHours), 'agg-hours'),
+        totalItem('שעות בפועל', fmtHours(agg.actualHours), 'agg-actual-hours'),
+        totalItem('בלנדד (שעות ללא ג\'וניור)', money(agg.blendedRate, d), 'agg-blended'),
+        totalItem('חלק מתקציב העסקה', fmtPct(agg.shareOfDeal), 'agg-share'),
+      ]),
+    ]));
+  }
 
   // סיכום העסקה
   wrap.append(el('section', { class: 'panel panel--total' }, [
@@ -299,8 +347,9 @@ export function renderBudgetTab(root, { snap, rateCard }) {
       totalItem('סה"כ תקציב', money(snap.budgetCost, d), 'total-budget'),
       totalItem('שעות תקציב', fmtHours(snap.budgetHours), 'total-hours'),
       totalItem('שעות מוערכות', fmtHours(snap.estHours), 'total-est'),
-      totalItem('תעריף בלנדד (ללא ג\'וניור)', money(snap.blendedRate, d), 'total-blended'),
-      totalItem('תעריף ממוצע כולל', money(snap.blendedAll, d), 'total-blended-all'),
+      totalItem('תעריף בלנדד (שעות ללא ג\'וניור)', money(snap.blendedRate, d), 'total-blended',
+        'כל התקציב — כולל עלות הג\'וניורים — מחולק בשעות שאינן ג\'וניור. זה המחיר האפקטיבי לשעה "נמכרת".'),
+      totalItem('תעריף ממוצע כולל', money(snap.blendedAll, d), 'total-blended-all', 'התקציב חלקי כל שעות התקציב.'),
       snap.hasFee ? totalItem('שכ"ט מוסכם', money(snap.agreedFee, d)) : null,
     ]),
     snap.baselineDelta ? el('div', { class: `baseline ${snap.baselineDelta.delta > 0 ? 'baseline--up' : ''}` }, [
@@ -314,18 +363,25 @@ export function renderBudgetTab(root, { snap, rateCard }) {
   root.append(wrap);
 }
 
-function totalItem(label, value, calcKey) {
-  return el('div', { class: 'total' }, [
+function totalItem(label, value, calcKey, hint) {
+  return el('div', { class: 'total', title: hint || null }, [
     el('span', { class: 'total__label', text: label }),
     calcKey ? calcCell(calcKey, value, 'total__value') : el('span', { class: 'total__value num', text: value }),
   ]);
 }
 
-function renderTeamCard(team, { snap, rateCard }) {
+function renderTeamCard(team, { snap, rateCard, selected = new Set() }) {
   const d = snap.deal;
   const card = el('section', { class: 'team', dataset: { teamId: team.id }, style: `--team-color:${team.color}` });
 
   card.append(el('header', { class: 'team__head' }, [
+    el('label', { class: 'team__pick', title: 'סימון הצוות לחישוב מצרפי' }, [
+      el('input', {
+        type: 'checkbox', dataset: { pick: 'team', teamId: team.id },
+        checked: selected.has(team.id) ? 'checked' : null,
+        'aria-label': `סימון הצוות ${team.name} לחישוב מצרפי`,
+      }),
+    ]),
     el('span', { class: 'team__swatch' }),
     el('input', {
       class: 'team__name', value: team.name, 'aria-label': 'שם הצוות',
@@ -334,8 +390,8 @@ function renderTeamCard(team, { snap, rateCard }) {
     el('div', { class: 'team__stats' }, [
       el('span', { class: 'team__stat' }, [el('span', { class: 'lbl', text: 'תקציב' }), calcCell(`team-budget-${team.id}`, money(team.budgetCost, d))]),
       el('span', { class: 'team__stat' }, [el('span', { class: 'lbl', text: 'בפועל' }), el('span', { class: 'num', text: money(team.actualCost, d) })]),
-      el('span', { class: 'team__stat' }, [el('span', { class: 'lbl', text: 'יתרה' }), el('span', { class: `num ${team.remainingCost < 0 ? 'neg' : ''}`, text: money(team.remainingCost, d) })]),
-      statusPill(team.status, `${STATUS_LABEL[team.status]} · ${fmtPct(team.util)}`),
+      el('span', { class: 'team__stat' }, [el('span', { class: 'lbl', text: 'יתרה' }), calcCell(`team-remaining-${team.id}`, money(team.remainingCost, d), team.remainingCost < 0 ? 'neg' : '')]),
+      statusPill(team.status, `${STATUS_LABEL[team.status]} · ${fmtPct(team.util)}`, `team-status-${team.id}`),
     ]),
     el('div', { class: 'team__tools' }, [
       el('button', { class: 'iconbtn', type: 'button', title: 'שכפל צוות', dataset: { action: 'duplicate-team', teamId: team.id }, html: ICONS.copy }),
@@ -394,9 +450,9 @@ function renderTeamCard(team, { snap, rateCard }) {
       el('td', { class: 'td-strong' }, [calcCell(`line-cost-${line.id}`, money(line.budgetCost, d))]),
       el('td', {}, [el('span', { class: 'num', text: fmtHours(line.actualHours) })]),
       el('td', {}, [el('span', { class: 'num', text: money(line.actualCost, d) })]),
-      el('td', {}, [el('span', { class: `num ${line.remainingCost < 0 ? 'neg' : ''}`, text: money(line.remainingCost, d) })]),
+      el('td', {}, [calcCell(`line-remaining-${line.id}`, money(line.remainingCost, d), line.remainingCost < 0 ? 'neg' : '')]),
       el('td', { class: 'td-util' }, [
-        el('span', { class: `num pct pct--${line.status}`, text: fmtPct(line.util) }),
+        el('span', { class: `num pct pct--${line.status}`, dataset: { calc: `line-util-${line.id}` }, text: fmtPct(line.util) }),
         el('span', { class: 'mbar-wrap', html: miniBar(line.util, line.status) }),
       ]),
       el('td', { class: 'td-tools' }, [
@@ -475,10 +531,6 @@ export function renderActualsTab(root, { snap, filters }) {
     el('button', { class: 'btn btn--primary btn--sm', type: 'button', dataset: { action: 'import-entries' } }, [icon('upload'), 'העלאת קובץ']),
   ]));
 
-  const rows = filterEntries(snap.entries, filters);
-  const sum = rows.reduce((s, e) => s + num(e.amount), 0);
-  const sumHours = rows.reduce((s, e) => s + num(e.hours), 0);
-
   root.append(el('div', { class: 'dropzone', dataset: { action: 'dropzone' } }, [
     icon('upload'),
     el('div', {}, [
@@ -486,6 +538,23 @@ export function renderActualsTab(root, { snap, filters }) {
       el('span', { text: ' — XLSX או CSV. אפשר גם PDF/תמונה כצירוף לרישום.' }),
     ]),
   ]));
+
+  // הטבלה בתוך מכל נפרד: חיפוש חופשי מרנדר רק אותה, כך שתיבת החיפוש לא נהרסת
+  // בזמן ההקלדה (הריסה שלה גורמת לאיבוד פוקוס אחרי התו הראשון).
+  const listWrap = el('div', { class: 'actuals-body' });
+  renderActualsList(listWrap, { snap, filters });
+  root.append(listWrap);
+}
+
+export function renderActualsList(root, { snap, filters }) {
+  const d = snap.deal;
+  const teamName = new Map(snap.teams.map((t) => [t.id, t.name]));
+  const roleName = new Map((snap.rateCard?.roles || []).map((r) => [r.id, r.name]));
+  root.replaceChildren();
+
+  const rows = filterEntries(snap.entries, filters);
+  const sum = rows.reduce((s, e) => s + num(e.amount), 0);
+  const sumHours = rows.reduce((s, e) => s + num(e.hours), 0);
 
   if (!rows.length) {
     root.append(el('div', { class: 'list-empty', text: snap.entries.length ? 'אין רישומים התואמים לסינון.' : 'טרם נרשמו חשבונות או שעות בעסקה זו.' }));
@@ -506,6 +575,7 @@ export function renderActualsTab(root, { snap, filters }) {
       el('td', { class: 'num', text: e.date }),
       el('td', { class: 'td-desc' }, [
         el('span', { text: e.description || '—' }),
+        e.person ? el('span', { class: 'sub', text: e.person }) : null,
         e.supplier ? el('span', { class: 'sub', text: e.supplier }) : null,
       ]),
       el('td', { text: e.teamId ? (teamName.get(e.teamId) || '—') : '—', class: e.teamId ? '' : 'muted' }),
@@ -546,7 +616,7 @@ export function filterEntries(entries, filters = {}) {
     if (filters.kind && e.kind !== filters.kind) return false;
     if (filters.status && e.status !== filters.status) return false;
     if (q) {
-      const hay = `${e.description} ${e.supplier} ${e.docNumber}`.toLowerCase();
+      const hay = `${e.description} ${e.supplier} ${e.docNumber} ${e.person}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -825,7 +895,8 @@ export function renderEntryForm(entry, { teams, roles, deal }) {
       field('תעריף', el('input', { class: 'input num', type: 'number', step: '10', min: '0', name: 'rate', value: String(e.rate ?? '') })),
       field('סכום (₪)', el('input', { class: 'input num', type: 'number', step: '1', name: 'amount', value: String(e.amount ?? ''), placeholder: 'אוטומטי' })),
     ]),
-    el('div', { class: 'grid-2' }, [
+    el('div', { class: 'grid-3' }, [
+      field('עורך דין / עובד', el('input', { class: 'input', name: 'person', value: e.person || '', placeholder: 'שם מפירוט השעות' })),
       field('ספק / גורם', el('input', { class: 'input', name: 'supplier', value: e.supplier || '' })),
       field('מספר מסמך', el('input', { class: 'input num', name: 'docNumber', value: e.docNumber || '' })),
     ]),
@@ -845,7 +916,10 @@ export function renderEntryForm(entry, { teams, roles, deal }) {
    אשף ייבוא
    ============================================================ */
 
-export function renderImportPreview({ sheets, sheetIndex, headerRow, mapping, marked, teams, warnings, mode }) {
+export function renderImportPreview({
+  sheets, sheetIndex, headerRow, mapping, marked, teams, warnings, mode,
+  people = [], peopleTeams = {}, peopleRemembered = {},
+}) {
   const wrap = el('div', { class: 'import' });
 
   if (sheets.length > 1) {
@@ -881,6 +955,48 @@ export function renderImportPreview({ sheets, sheetIndex, headerRow, mapping, ma
       })),
     ]);
     wrap.append(el('div', { class: 'btable-wrap btable-wrap--map' }, mapTable));
+
+    // שיוך עורכי הדין שבפירוט לצוותים — נזכר לעסקאות הבאות
+    if (people.length) {
+      const unassigned = people.filter((p) => !peopleTeams[p.key]).length;
+      const teamOptions = (selectedId) => [
+        el('option', { value: '', text: '— ללא שיוך —' }),
+        ...teams.map((t) => el('option', { value: t.id, text: t.name, selected: t.id === selectedId ? 'selected' : null })),
+      ];
+      wrap.append(el('section', { class: 'panel panel--people' }, [
+        el('h3', { class: 'panel__title' }, [
+          icon('users'), `שיוך עורכי דין לצוותים · ${people.length} שמות בקובץ`,
+          unassigned ? el('span', { class: 'pill pill--watch', text: `${unassigned} ללא שיוך` }) : null,
+        ]),
+        el('p', { class: 'panel__hint', text: 'כל שורה בפירוט תשויך לצוות לפי עורך הדין שביצע. השיוך נשמר וייטען אוטומטית בייבוא הבא, גם בעסקאות אחרות.' }),
+        el('div', { class: 'people-bulk' }, [
+          el('span', { class: 'muted', text: 'שייך את כולם ל:' }),
+          el('select', { class: 'select select--sm', dataset: { imp: 'personTeamAll' } }, teamOptions(undefined)),
+        ]),
+        el('div', { class: 'btable-wrap' }, el('table', { class: 'btable btable--people' }, [
+          el('thead', {}, el('tr', {}, [
+            el('th', { text: 'עורך דין / עובד' }), el('th', { text: 'שורות' }),
+            el('th', { text: 'שעות' }), el('th', { text: 'צוות' }),
+          ])),
+          el('tbody', {}, people.map((p) => el('tr', { class: peopleTeams[p.key] ? '' : 'row--dupe' }, [
+            el('td', {}, [
+              el('span', { text: p.name }),
+              peopleRemembered[p.key] ? el('span', { class: 'chip-mini', text: 'נזכר' }) : null,
+            ]),
+            el('td', { class: 'num', text: String(p.rows) }),
+            el('td', { class: 'num', text: fmtHours(p.hours) }),
+            el('td', {}, [el('select', {
+              class: 'select select--sm',
+              dataset: { imp: 'personTeam', personKey: p.key },
+            }, teamOptions(peopleTeams[p.key]))]),
+          ]))),
+        ])),
+        el('label', { class: 'inline-check' }, [
+          el('input', { type: 'checkbox', checked: 'checked', dataset: { imp: 'rememberPeople' } }),
+          el('span', { text: 'זכור את השיוך לעסקאות הבאות' }),
+        ]),
+      ]));
+    }
   }
 
   if (warnings?.length) {
@@ -1003,28 +1119,72 @@ export function toast(message, tone = '') {
    עדכון תאים מחושבים ללא רינדור מלא (שמירה על פוקוס בהקלדה)
    ============================================================ */
 
-export function refreshComputed(snap) {
+export function refreshComputed(snap, selected = new Set()) {
   const d = snap.deal;
-  const set = (key, text) => {
+  const set = (key, text, tone) => {
     const node = document.querySelector(`[data-calc="${CSS.escape(key)}"]`);
-    if (node) node.textContent = text;
+    if (!node) return;
+    node.textContent = text;
+    if (tone !== undefined) node.classList.toggle('neg', !!tone);
   };
+  const setStatus = (key, status, label) => {
+    const node = document.querySelector(`[data-calc="${CSS.escape(key)}"]`);
+    if (!node) return;
+    node.textContent = label;
+    node.className = `pill pill--${status}`;
+  };
+
   for (const team of snap.teams) {
     set(`team-budget-${team.id}`, money(team.budgetCost, d));
     set(`team-cost-${team.id}`, money(team.budgetCost, d));
     set(`team-hours-${team.id}`, fmtHours(team.budgetHours));
     set(`team-est-${team.id}`, fmtHours(team.estHours));
+    set(`team-remaining-${team.id}`, money(team.remainingCost, d), team.remainingCost < 0);
+    setStatus(`team-status-${team.id}`, team.status, `${STATUS_LABEL[team.status]} · ${fmtPct(team.util)}`);
+    const bar = document.querySelector(`.team[data-team-id="${CSS.escape(team.id)}"] .team__bar`);
+    if (bar) bar.innerHTML = miniBar(team.util, team.status);
     for (const line of team.lines) {
       set(`line-cost-${line.id}`, money(line.budgetCost, d));
+      set(`line-remaining-${line.id}`, money(line.remainingCost, d), line.remainingCost < 0);
+      const util = document.querySelector(`[data-calc="line-util-${CSS.escape(line.id)}"]`);
+      if (util) { util.textContent = fmtPct(line.util); util.className = `num pct pct--${line.status}`; }
       const input = document.querySelector(`input[data-field="hoursOverride"][data-line-id="${CSS.escape(line.id)}"]`);
       if (input && input.dataset.auto === '1' && document.activeElement !== input) input.value = String(line.budgetHours);
     }
   }
+
   set('total-budget', money(snap.budgetCost, d));
   set('total-hours', fmtHours(snap.budgetHours));
   set('total-est', fmtHours(snap.estHours));
   set('total-blended', money(snap.blendedRate, d));
   set('total-blended-all', money(snap.blendedAll, d));
+
+  // סרגל הכותרת של העסקה — היה נשאר תקוע על הערכים מהרינדור האחרון
+  set('strip-budget', money(snap.budgetCost, d));
+  set('strip-actual', money(snap.actualCost, d));
+  set('strip-remaining', money(snap.remainingCost, d));
+  set('strip-util', fmtPct(snap.util));
+  set('strip-hours', `${fmtHours(snap.actualHours)} / ${fmtHours(snap.budgetHours)}`);
+  set('strip-blended', money(snap.blendedRate, d));
+  if (snap.hasFee) set('strip-margin', money(snap.margin, d));
+
+  if (selected.size) {
+    const agg = aggregateTeams(snap, selected);
+    set('agg-budget', money(agg.budgetCost, d));
+    set('agg-actual', money(agg.actualCost, d));
+    set('agg-remaining', money(agg.remainingCost, d), agg.remainingCost < 0);
+    set('agg-util', fmtPct(agg.util));
+    set('agg-hours', fmtHours(agg.budgetHours));
+    set('agg-actual-hours', fmtHours(agg.actualHours));
+    set('agg-blended', money(agg.blendedRate, d));
+    set('agg-share', fmtPct(agg.shareOfDeal));
+  }
+
+  // אחוז הניצול על טאב העסקה
+  const tabUtil = document.querySelector(`.dtab[data-id="${CSS.escape(snap.deal.id)}"] .dtab__util`);
+  if (tabUtil) tabUtil.textContent = fmtPct(snap.util);
+  const tabDot = document.querySelector(`.dtab[data-id="${CSS.escape(snap.deal.id)}"] .dtab__dot`);
+  if (tabDot) tabDot.className = `dtab__dot dtab__dot--${snap.status}`;
 }
 
 export { round2 };
