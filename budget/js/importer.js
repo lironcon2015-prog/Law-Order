@@ -77,11 +77,12 @@ export function collectPeople(rows, mapping) {
     const name = String(raw ?? '').trim();
     if (!name) continue;
     const key = normPerson(name);
-    const cur = map.get(key) || { name, key, rows: 0, hours: 0, amount: 0, teamHint: '' };
+    const cur = map.get(key) || { name, key, rows: 0, hours: 0, amount: 0, teamHint: '', roleHint: '' };
     cur.rows += 1;
     cur.hours += num(mapping.hours === undefined ? 0 : row[mapping.hours]);
     cur.amount += num(mapping.amount === undefined ? 0 : row[mapping.amount]);
     if (!cur.teamHint && mapping.teamName !== undefined) cur.teamHint = String(row[mapping.teamName] ?? '').trim();
+    if (!cur.roleHint && mapping.roleName !== undefined) cur.roleHint = String(row[mapping.roleName] ?? '').trim();
     map.set(key, cur);
   }
   return [...map.values()]
@@ -167,6 +168,61 @@ export function rowsToEntries(rows, mapping, opts) {
     });
   }
   return { entries, skipped, warnings: [...warnings] };
+}
+
+/**
+ * ממיר שורות דוח שעות לעדכוני ביצוע (מעקב ידני).
+ * @param opts { dealId, resolve(person, roleName) → { teamId, lineId, roleId } | null,
+ *               cumulative: boolean, currentByLine: Map<lineId, hours>, fileName, batchId, defaultDate }
+ */
+export function rowsToProgress(rows, mapping, opts) {
+  const { dealId, resolve, cumulative = false, currentByLine = new Map(), fileName = '', batchId = '', defaultDate = '' } = opts;
+  const pick = (row, field) => (mapping[field] === undefined ? null : row[mapping[field]]);
+  const out = [];
+  const unmatched = new Set();
+  const totals = new Map();   // lineId → שעות בקובץ (למצב מצטבר)
+  let skipped = 0;
+
+  for (const row of rows || []) {
+    if (!row || !row.length) continue;
+    const hours = num(pick(row, 'hours'));
+    if (!hours) { skipped++; continue; }
+    const person = String(pick(row, 'personName') ?? '').trim();
+    const roleName = String(pick(row, 'roleName') ?? '').trim();
+    const target = resolve ? resolve(person, roleName) : null;
+    if (!target) unmatched.add(person || roleName || '(ללא שם)');
+    const date = toISODate(pick(row, 'date')) || defaultDate || new Date().toISOString().slice(0, 10);
+
+    if (cumulative) {
+      const key = target?.lineId || `~${person}`;
+      const cur = totals.get(key) || { hours: 0, date, target, person };
+      cur.hours += hours;
+      if (date > cur.date) cur.date = date;
+      totals.set(key, cur);
+      continue;
+    }
+    out.push({
+      dealId, teamId: target?.teamId || '', lineId: target?.lineId || '', roleId: target?.roleId || '',
+      person, date, hours, source: 'import', fileName, batchId,
+      note: roleName && !target?.lineId ? `דרגה בדוח: ${roleName}` : '',
+    });
+  }
+
+  // דוח מצטבר: רושמים רק את ההפרש מול מה שכבר דווח
+  if (cumulative) {
+    for (const [key, rec] of totals) {
+      const already = num(currentByLine.get(rec.target?.lineId) || 0);
+      const delta = round2(rec.hours - already);
+      if (!delta) { skipped++; continue; }
+      out.push({
+        dealId, teamId: rec.target?.teamId || '', lineId: rec.target?.lineId || '', roleId: rec.target?.roleId || '',
+        person: rec.person, date: rec.date, hours: delta, source: 'import', fileName, batchId,
+        note: `דוח מצטבר: ${round2(rec.hours)} שעות · דווח קודם ${already}`,
+      });
+      void key;
+    }
+  }
+  return { records: out, skipped, unmatched: [...unmatched] };
 }
 
 /** מסמן רישומים שכנראה כבר קיימים (אותו תאריך+סכום+מסמך) */

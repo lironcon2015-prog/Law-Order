@@ -214,6 +214,28 @@ export function normalizeEntry(e) {
   };
 }
 
+/**
+ * עדכון ביצוע במעקב הידני: שעות שדווחו לתאריך מסוים.
+ * `hours` הוא **תוספת לתקופה** (אפשר גם שלילי לתיקון); הסך המצטבר = סכום הרשומות.
+ */
+export function normalizeProgress(p) {
+  return {
+    id: p?.id || uid('prg'),
+    dealId: p?.dealId || '',
+    teamId: p?.teamId || '',
+    lineId: p?.lineId || '',
+    roleId: p?.roleId || '',
+    person: String(p?.person ?? ''),
+    date: p?.date || new Date().toISOString().slice(0, 10),
+    hours: num(p?.hours),
+    note: String(p?.note ?? ''),
+    source: p?.source === 'import' ? 'import' : 'manual',
+    fileName: String(p?.fileName ?? ''),
+    batchId: p?.batchId || '',
+    createdAt: p?.createdAt || new Date().toISOString(),
+  };
+}
+
 /** סכום נטו של רישום (ללא מע"מ) — הבסיס להשוואה מול תקציב */
 export function entryNet(entry, vatRate) {
   const a = num(entry.amount);
@@ -273,11 +295,27 @@ export function lineRate(line, role) {
  * מחשב תמונת מצב מלאה של עסקה: תקציב, ביצוע, סטיות, תחזית.
  * @returns {object} snapshot
  */
-export function computeDeal({ deal, teams, entries, rateCard }) {
+export function computeDeal({ deal, teams, entries, rateCard, progress: progressLog }) {
   const roles = roleMap(rateCard);
   const rolesByName = roleNameMap(rateCard);
   const dealEntries = (entries || []).filter((e) => e.dealId === deal.id);
   const vat = deal.vatRate;
+
+  // מעקב ידני: צבירת שעות לפי שורה (ומה שלא שויך לשורה — לפי צוות)
+  const dealProgress = (progressLog || []).filter((p) => p.dealId === deal.id);
+  const progByLine = new Map();
+  const progByTeamOnly = new Map();
+  for (const p of dealProgress) {
+    if (p.lineId) progByLine.set(p.lineId, (progByLine.get(p.lineId) || 0) + num(p.hours));
+    else if (p.teamId) progByTeamOnly.set(p.teamId, (progByTeamOnly.get(p.teamId) || 0) + num(p.hours));
+  }
+  const progUpdatedAt = new Map();
+  for (const p of dealProgress) {
+    const key = p.lineId || p.teamId;
+    if (!key) continue;
+    const cur = progUpdatedAt.get(key) || '';
+    if (p.date > cur) progUpdatedAt.set(key, p.date);
+  }
 
   // צבירת ביצוע לפי צוות+דרגה, לפי צוות, ולפי דרגה
   const byTeamRole = new Map(); // `${teamId}|${roleId}` → {hours, cost, count}
@@ -331,8 +369,8 @@ export function computeDeal({ deal, teams, entries, rateCard }) {
         // ביצוע: מאוחד מהמפתח הישן והחדש, כדי שרישומים קיימים לא "ייעלמו" אחרי החלפת תעריפון
         const act = mergeActuals(byTeamRole, team.id, [line.roleId, effRoleId]);
         const util = cost > 0 ? act.cost / cost : (act.cost > 0 ? Infinity : 0);
-        // מסלול המעקב הידני — מחושב מהשעות שהוזנו בשורה, לפי אותו תעריף
-        const mh = num(line.manualHours);
+        // מסלול המעקב הידני — סכום עדכוני הביצוע של השורה, לפי אותו תעריף
+        const mh = round2(progByLine.get(line.id) || 0);
         const mCost = round2(mh * rate);
         const mUtil = cost > 0 ? mCost / cost : (mCost > 0 ? Infinity : 0);
         return {
@@ -354,6 +392,7 @@ export function computeDeal({ deal, teams, entries, rateCard }) {
           util,
           status: statusOf(util),
           manualHoursValue: mh,
+          manualUpdatedAt: progUpdatedAt.get(line.id) || '',
           manualCost: mCost,
           manualRemainingHours: round2(bh - mh),
           manualRemainingCost: round2(cost - mCost),
@@ -370,6 +409,8 @@ export function computeDeal({ deal, teams, entries, rateCard }) {
       const manualCost = round2(lines.reduce((s, l) => s + l.manualCost, 0));
       const manualUtil = budgetCost > 0 ? manualCost / budgetCost : (manualCost > 0 ? Infinity : 0);
       const manualUpdatedAt = lines.reduce((max, l) => (l.manualUpdatedAt > max ? l.manualUpdatedAt : max), '');
+      // שעות שדווחו לצוות בלי שיוך לשורה — אין להן תעריף, לכן מוצגות בנפרד
+      const manualUnassignedHours = round2(progByTeamOnly.get(team.id) || 0);
       return {
         ...team,
         factor,
@@ -391,6 +432,7 @@ export function computeDeal({ deal, teams, entries, rateCard }) {
         manualUtil,
         manualStatus: statusOf(manualUtil),
         manualUpdatedAt,
+        manualUnassignedHours,
       };
     });
 
@@ -413,7 +455,8 @@ export function computeDeal({ deal, teams, entries, rateCard }) {
   const manualCost = round2(teamRows.reduce((s, t) => s + t.manualCost, 0));
   const manualUtil = budgetCost > 0 ? manualCost / budgetCost : (manualCost > 0 ? Infinity : 0);
   const manualEffectiveRate = manualHours > 0 ? round2(manualCost / manualHours) : 0;
-  const manualUpdatedAt = teamRows.reduce((max, t) => (t.manualUpdatedAt > max ? t.manualUpdatedAt : max), '');
+  const manualUpdatedAt = dealProgress.reduce((max, p) => (p.date > max ? p.date : max), '');
+  const manualUnassignedHours = round2(teamRows.reduce((s, t) => s + t.manualUnassignedHours, 0));
 
   const util = budgetCost > 0 ? actualCost / budgetCost : (actualCost > 0 ? Infinity : 0);
   const progress = deal.progressPct / 100;
@@ -486,7 +529,8 @@ export function computeDeal({ deal, teams, entries, rateCard }) {
     juniorCost: round2(juniorCost), juniorHours: round2(juniorHours),
     seniorHours: round2(seniorHours), seniorCost: round2(seniorCost),
     // מסלול המעקב הידני (נפרד לחלוטין מהחשבונות)
-    manualHours, manualCost, manualUtil, manualEffectiveRate, manualUpdatedAt,
+    progressLog: dealProgress,
+    manualHours, manualCost, manualUtil, manualEffectiveRate, manualUpdatedAt, manualUnassignedHours,
     manualRemainingCost: round2(budgetCost - manualCost),
     manualRemainingHours: round2(budgetHours - manualHours),
     manualStatus: statusOf(manualUtil),
@@ -646,6 +690,41 @@ export function buildTeamFromTemplate({ dealId, name, roles, index = 0, estHours
     color: TEAM_COLORS[index % TEAM_COLORS.length],
     lines: (roles || []).map((r) => ({ roleId: r.id, roleName: r.name, estHours: num(estHours[r.id]) })),
   }, index);
+}
+
+/**
+ * סיכום עדכוני הביצוע לפי תקופה (יום / שבוע / חודש) — לדוח התקופתי ולגרף.
+ * מחזיר גם שעות וגם עלות (לפי התעריף של השורה שאליה שויכו).
+ */
+export function progressByPeriod(snapshot, period = 'week') {
+  const rateByLine = new Map();
+  for (const t of snapshot.teams) for (const l of t.lines) rateByLine.set(l.id, l.rate);
+
+  const keyOf = (date) => {
+    if (period === 'day') return date;
+    if (period === 'month') return date.slice(0, 7);
+    // שבוע: תאריך יום ראשון שבו מתחיל השבוע (ISO date arithmetic)
+    const d = new Date(`${date}T00:00:00`);
+    if (Number.isNaN(d.getTime())) return date;
+    d.setDate(d.getDate() - d.getDay());
+    return d.toISOString().slice(0, 10);
+  };
+
+  const map = new Map();
+  for (const p of snapshot.progressLog || []) {
+    const k = keyOf(p.date);
+    const cur = map.get(k) || { key: k, hours: 0, cost: 0, count: 0 };
+    cur.hours += num(p.hours);
+    cur.cost += num(p.hours) * num(rateByLine.get(p.lineId) || 0);
+    cur.count += 1;
+    map.set(k, cur);
+  }
+  const rows = [...map.values()].sort((a, b) => a.key.localeCompare(b.key));
+  let acc = 0, accCost = 0;
+  return rows.map((r) => {
+    acc += r.hours; accCost += r.cost;
+    return { ...r, hours: round2(r.hours), cost: round2(r.cost), cumulativeHours: round2(acc), cumulativeCost: round2(accCost) };
+  });
 }
 
 /** סדרת burn מצטברת לפי חודש — לגרף */

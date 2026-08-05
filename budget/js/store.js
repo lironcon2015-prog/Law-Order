@@ -3,9 +3,9 @@
 
 import * as db from './db.js';
 import {
-  normalizeDeal, normalizeTeam, normalizeEntry, normalizeRateCard,
+  normalizeDeal, normalizeTeam, normalizeEntry, normalizeRateCard, normalizeProgress,
   DEFAULT_ROLES, DEFAULT_TEAM_NAMES, buildTeamFromTemplate, uid, computeDeal,
-  roleMap, roleNameMap, normRoleName, resolveLineRole, num,
+  roleMap, roleNameMap, normRoleName, resolveLineRole, num, round2,
 } from './model.js';
 
 /* ---------- מטמון בזיכרון ---------- */
@@ -13,6 +13,7 @@ export const cache = {
   deals: [],
   teams: [],
   entries: [],
+  progress: [],
   rateCards: [],
   settings: {},
   healedDeals: 0,   // עסקאות ששורות התקציב שלהן חוברו מחדש לתעריפון בטעינה
@@ -34,15 +35,17 @@ function notify(kind) {
    ============================================================ */
 
 export async function loadAll() {
-  const [deals, teams, entries, rateCards, settings] = await Promise.all([
+  const [deals, teams, entries, rateCards, settings, progress] = await Promise.all([
     db.getAll('deals'), db.getAll('teams'), db.getAll('entries'),
-    db.getAll('rateCards'), db.getAll('settings'),
+    db.getAll('rateCards'), db.getAll('settings'), db.getAll('progress'),
   ]);
   cache.deals = (deals || []).map(normalizeDeal).sort((a, b) => a.order - b.order);
   cache.teams = (teams || []).map(normalizeTeam);
   cache.entries = (entries || []).map(normalizeEntry);
   cache.rateCards = (rateCards || []).map(normalizeRateCard);
   cache.settings = Object.fromEntries((settings || []).map((s) => [s.key, s.value]));
+  cache.progress = (progress || []).map(normalizeProgress);
+  await migrateManualHours();
 
   if (!cache.rateCards.length) {
     const card = normalizeRateCard({ name: 'תעריפון המשרד', isDefault: true, roles: DEFAULT_ROLES });
@@ -116,6 +119,122 @@ export async function setSetting(key, value) {
   await db.put('settings', { key, value });
 }
 
+/**
+ * מיגרציה: שעות שהוזנו בשדה `manualHours` של השורה (לפני שהיה מסד עדכונים)
+ * הופכות לעדכון ביצוע יחיד, כדי שההיסטוריה תתחיל מהמצב הקיים.
+ */
+async function migrateManualHours() {
+  const dirtyTeams = [];
+  const records = [];
+  for (const team of cache.teams) {
+    let changed = false;
+    for (const line of team.lines) {
+      const h = num(line.manualHours);
+      if (!h) { if (line.manualHours !== null && line.manualHours !== undefined) { line.manualHours = null; changed = true; } continue; }
+      records.push(normalizeProgress({
+        dealId: team.dealId, teamId: team.id, lineId: line.id, roleId: line.roleId,
+        person: line.person, hours: h, source: 'manual', note: 'הועבר מהמעקב הקודם',
+        date: (line.manualUpdatedAt || new Date().toISOString()).slice(0, 10),
+      }));
+      line.manualHours = null;
+      changed = true;
+    }
+    if (changed) dirtyTeams.push(team);
+  }
+  if (records.length) {
+    cache.progress.push(...records);
+    await db.putMany('progress', records);
+  }
+  if (dirtyTeams.length) await db.putMany('teams', dirtyTeams);
+}
+
+/* ============================================================
+   עדכוני ביצוע (מעקב ידני)
+   ============================================================ */
+
+export function progressOf(dealId) {
+  return cache.progress.filter((p) => p.dealId === dealId);
+}
+
+export function progressOfLine(lineId) {
+  return cache.progress.filter((p) => p.lineId === lineId);
+}
+
+/** סך השעות שדווחו לשורה */
+export function manualHoursOfLine(lineId) {
+  return round2(progressOfLine(lineId).reduce((s, p) => s + num(p.hours), 0));
+}
+
+export async function addProgress(patch) {
+  const rec = normalizeProgress(patch);
+  cache.progress.push(rec);
+  await db.put('progress', rec);
+  notify('progress');
+  return rec;
+}
+
+export async function addProgressMany(list) {
+  const recs = (list || []).map(normalizeProgress);
+  if (!recs.length) return [];
+  cache.progress.push(...recs);
+  await db.putMany('progress', recs);
+  notify('progress');
+  return recs;
+}
+
+export async function updateProgress(patch) {
+  const rec = normalizeProgress({ ...(cache.progress.find((p) => p.id === patch.id) || {}), ...patch });
+  const i = cache.progress.findIndex((p) => p.id === rec.id);
+  if (i >= 0) cache.progress[i] = rec; else cache.progress.push(rec);
+  await db.put('progress', rec);
+  notify('progress');
+  return rec;
+}
+
+export async function deleteProgress(id) {
+  cache.progress = cache.progress.filter((p) => p.id !== id);
+  await db.remove('progress', id);
+  notify('progress');
+}
+
+/** מחיקת אצווה שלמה שיובאה (batchId) */
+export async function deleteProgressBatch(batchId) {
+  const ids = cache.progress.filter((p) => p.batchId === batchId).map((p) => p.id);
+  if (!ids.length) return 0;
+  cache.progress = cache.progress.filter((p) => p.batchId !== batchId);
+  await db.removeMany('progress', ids);
+  notify('progress');
+  return ids.length;
+}
+
+/**
+ * קובע את הסך המצטבר של שורה: רושם עדכון-התאמה בהפרש מול מה שכבר דווח.
+ * כך אפשר להקליד "כמה שעות בוצעו עד היום" בלי לאבד את ההיסטוריה.
+ */
+export async function setLineManualTotal(lineId, total, { date, note } = {}) {
+  const line = findLine(lineId);
+  if (!line) return null;
+  const current = manualHoursOfLine(lineId);
+  const delta = round2(num(total) - current);
+  if (!delta) return null;
+  return addProgress({
+    dealId: line.team.dealId, teamId: line.team.id, lineId,
+    roleId: line.line.roleId, person: line.line.person,
+    hours: delta, source: 'manual',
+    date: date || new Date().toISOString().slice(0, 10),
+    note: note || (current === 0 ? 'הזנה ידנית' : 'עדכון מצטבר'),
+  });
+}
+
+/** מאתר שורה לפי מזהה, יחד עם הצוות שלה */
+export function findLine(lineId) {
+  for (const team of cache.teams) {
+    const line = team.lines.find((l) => l.id === lineId);
+    if (line) return { team, line };
+  }
+  return null;
+}
+
 /* ============================================================
    זיכרון שיוך אנשים לצוותים (חוצה עסקאות)
    ============================================================ */
@@ -142,16 +261,72 @@ export function peopleTeamIdsFor(dealId) {
   return out;
 }
 
-/** שומר/מעדכן שיוכים. entries: [{ key, name, teamName }] — teamName ריק מוחק מהזיכרון */
+/** שומר/מעדכן שיוכים. entries: [{ key, name, teamName, roleName }] — teamName ריק מוחק מהזיכרון */
 export async function rememberPeopleTeams(list) {
   const memory = { ...getPeopleMemory() };
   for (const rec of list || []) {
     if (!rec?.key) continue;
-    if (rec.teamName) memory[rec.key] = { name: rec.name || rec.key, teamName: rec.teamName };
-    else delete memory[rec.key];
+    if (rec.teamName) {
+      memory[rec.key] = {
+        name: rec.name || rec.key,
+        teamName: rec.teamName,
+        roleName: rec.roleName || memory[rec.key]?.roleName || '',
+      };
+    } else delete memory[rec.key];
   }
   await setSetting('peopleTeams', memory);
   return memory;
+}
+
+/** כל האנשים שהמערכת מכירה: מהזיכרון, משורות התקציב, מעדכוני הביצוע ומהחשבונות */
+export function knownPeople(dealId) {
+  const out = new Map();
+  const add = (name, roleName = '') => {
+    const key = String(name || '').trim();
+    if (!key) return;
+    const cur = out.get(key.toLowerCase()) || { name: key, roleName: '' };
+    if (!cur.roleName && roleName) cur.roleName = roleName;
+    out.set(key.toLowerCase(), cur);
+  };
+  for (const rec of Object.values(getPeopleMemory())) add(rec?.name, rec?.roleName);
+  for (const t of teamsOf(dealId)) for (const l of t.lines) add(l.person, l.roleName);
+  for (const p of progressOf(dealId)) add(p.person);
+  for (const e of entriesOf(dealId)) add(e.person);
+  return [...out.values()].sort((a, b) => a.name.localeCompare(b.name, 'he'));
+}
+
+/**
+ * פריסת צוות לשורות לפי אנשים: שורה לכל אדם (עם דרגה ותעריף משלו אם נדרש).
+ * שורות דרגה קיימות שאין להן שעות מוערכות ולא דווח עליהן — נמחקות, כדי לא להכפיל.
+ */
+export async function splitTeamByPeople(teamId, people) {
+  const team = getTeam(teamId);
+  if (!team) return 0;
+  const card = rateCardFor(getDeal(team.dealId));
+  const byId = roleMap(card);
+  const existing = new Set(team.lines.map((l) => String(l.person || '').trim().toLowerCase()).filter(Boolean));
+
+  const added = [];
+  for (const p of people || []) {
+    const name = String(p.name || '').trim();
+    if (!name || existing.has(name.toLowerCase())) continue;
+    const role = byId.get(p.roleId) || card.roles[0];
+    added.push({
+      id: uid('ln'), roleId: role?.id || '', roleName: role?.name || '',
+      person: name, estHours: 0, hoursOverride: null,
+      rateOverride: p.rate === '' || p.rate === undefined || p.rate === null ? null : num(p.rate),
+      manualHours: null, manualUpdatedAt: '', note: '',
+    });
+    existing.add(name.toLowerCase());
+  }
+  if (!added.length) return 0;
+
+  // שורות דרגה "ריקות" מיותרות אחרי הפריסה
+  const usedLineIds = new Set(cache.progress.filter((x) => x.teamId === teamId).map((x) => x.lineId));
+  const keep = team.lines.filter((l) => l.person || num(l.estHours) > 0 || usedLineIds.has(l.id));
+  team.lines = [...keep, ...added];
+  await saveTeam(team);
+  return added.length;
 }
 
 /* ============================================================
@@ -284,7 +459,7 @@ export function entriesOf(dealId) {
 export function snapshotOf(dealId) {
   const deal = getDeal(dealId);
   if (!deal) return null;
-  return computeDeal({ deal, teams: cache.teams, entries: cache.entries, rateCard: rateCardFor(deal) });
+  return computeDeal({ deal, teams: cache.teams, entries: cache.entries, rateCard: rateCardFor(deal), progress: cache.progress });
 }
 
 export async function saveDeal(patch) {
@@ -343,14 +518,17 @@ export async function deleteDeal(dealId) {
   const teamIds = teamsOf(dealId).map((t) => t.id);
   const entryIds = entriesOf(dealId).map((e) => e.id);
   const fileIds = entriesOf(dealId).map((e) => e.fileId).filter(Boolean);
+  const progressIds = progressOf(dealId).map((p) => p.id);
   cache.deals = cache.deals.filter((d) => d.id !== dealId);
   cache.teams = cache.teams.filter((t) => t.dealId !== dealId);
   cache.entries = cache.entries.filter((e) => e.dealId !== dealId);
+  cache.progress = cache.progress.filter((p) => p.dealId !== dealId);
   await Promise.all([
     db.remove('deals', dealId),
     db.removeMany('teams', teamIds),
     db.removeMany('entries', entryIds),
     db.removeMany('files', fileIds),
+    db.removeMany('progress', progressIds),
   ]);
   notify('deal');
 }
@@ -532,6 +710,7 @@ export async function collectBackup() {
     deals: cache.deals,
     teams: cache.teams,
     entries: cache.entries,
+    progress: cache.progress,
     rateCards: cache.rateCards,
     settings: Object.entries(cache.settings).map(([key, value]) => ({ key, value })),
   };
@@ -548,6 +727,7 @@ export async function applyBackup(d) {
     await db.replaceAll('deals', (d.deals || []).map(normalizeDeal));
     await db.replaceAll('teams', (d.teams || []).map(normalizeTeam));
     await db.replaceAll('entries', (d.entries || []).map(normalizeEntry));
+    await db.replaceAll('progress', (d.progress || []).map(normalizeProgress));
     if (Array.isArray(d.rateCards) && d.rateCards.length) await db.replaceAll('rateCards', d.rateCards.map(normalizeRateCard));
     if (Array.isArray(d.settings)) await db.replaceAll('settings', d.settings);
     await loadAll();

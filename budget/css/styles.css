@@ -632,6 +632,21 @@ table { border-collapse: collapse; }
 .cbar__val { font-size: .78rem; color: var(--text-secondary); text-align: start; }
 .cbar__row--budget .cbar__name, .cbar__row--budget .cbar__val { color: var(--text-faint); }
 
+/* פריסת צוות לפי אנשים */
+.split-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+.split-row { display: grid; grid-template-columns: 1.4fr 1fr .8fr; gap: 8px; }
+@media (max-width: 560px) { .split-row { grid-template-columns: 1fr; } }
+
+/* מתג תקופה במסך המעקב */
+.seg { display: inline-flex; border: 1px solid var(--line-soft); border-radius: var(--radius-pill); overflow: hidden; }
+.seg__btn {
+  padding: 6px 14px; font-size: .8rem; font-weight: 600;
+  background: transparent; color: var(--text-muted); border: none; cursor: pointer;
+  transition: all var(--t-fast);
+}
+.seg__btn:hover { color: var(--text-primary); background: var(--surface-3); }
+.seg__btn.is-on { color: var(--gold-bright); background: var(--gold-grad-soft); }
+
 /* פאנל תקרת שכ"ט */
 .panel--cap-on { border-color: rgba(251,146,60,.35); }
 .btable--rates .row--total td { border-top: 1px solid var(--line-soft); font-weight: 700; }

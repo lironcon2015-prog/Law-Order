@@ -11,6 +11,7 @@ import * as ui from './ui.js';
 import { readTabularFile } from './xlsx.js';
 import {
   detectHeaderRow, guessMapping, rowsToEntries, markDuplicates, parseBudgetSheet, collectPeople,
+  rowsToProgress,
 } from './importer.js';
 
 /* ============================================================
@@ -26,6 +27,7 @@ const state = {
   filters: { q: '', teamId: '', kind: '', status: '' },
   snapshots: new Map(),
   selectedTeams: new Set(),   // צוותים מסומנים לחישוב מצרפי (בעסקה הפעילה)
+  progressPeriod: 'week',     // תקופת הסיכום במסך המעקב: day | week | month
 };
 
 let els = {};
@@ -86,7 +88,8 @@ function rebuildSnapshots() {
   state.snapshots = new Map();
   for (const deal of store.cache.deals) {
     state.snapshots.set(deal.id, computeDeal({
-      deal, teams: store.cache.teams, entries: store.cache.entries, rateCard: store.rateCardFor(deal),
+      deal, teams: store.cache.teams, entries: store.cache.entries,
+      rateCard: store.rateCardFor(deal), progress: store.cache.progress,
     }));
   }
 }
@@ -118,6 +121,7 @@ function render() {
     const body = ui.el('div', { class: 'tab-body' });
     els.main.append(body);
     if (state.tab === 'budget') ui.renderBudgetTab(body, { snap, rateCard: store.rateCardFor(snap.deal), selected: state.selectedTeams });
+    else if (state.tab === 'progress') ui.renderProgressTab(body, { snap, period: state.progressPeriod });
     else if (state.tab === 'actuals') ui.renderActualsTab(body, { snap, filters: state.filters });
     else if (state.tab === 'control') ui.renderControlTab(body, { snap });
     else ui.renderDealSettings(body, { snap, rateCards: store.cache.rateCards });
@@ -131,7 +135,10 @@ function render() {
 function refreshLive() {
   const deal = store.getDeal(state.dealId);
   if (!deal) return;
-  const snap = computeDeal({ deal, teams: store.cache.teams, entries: store.cache.entries, rateCard: store.rateCardFor(deal) });
+  const snap = computeDeal({
+    deal, teams: store.cache.teams, entries: store.cache.entries,
+    rateCard: store.rateCardFor(deal), progress: store.cache.progress,
+  });
   state.snapshots.set(deal.id, snap);
   ui.refreshComputed(snap, state.selectedTeams);
 }
@@ -314,6 +321,32 @@ async function onClick(e) {
     case 'clear-picks':
       state.selectedTeams.clear();
       return render();
+
+    case 'set-period':
+      state.progressPeriod = target.dataset.period;
+      return render();
+
+    case 'add-progress':
+      return openProgressModal(null);
+
+    case 'edit-progress':
+      return openProgressModal(store.cache.progress.find((p) => p.id === target.dataset.progressId));
+
+    case 'delete-progress':
+      return confirmModal('מחיקת עדכון', 'העדכון יימחק והשעות ירדו מהמעקב.', async () => {
+        await store.deleteProgress(target.dataset.progressId);
+        ui.toast('העדכון נמחק');
+        render();
+      }, 'מחק');
+
+    case 'import-progress':
+      return pickFile((file) => startProgressImport(file));
+
+    case 'export-progress':
+      return exportProgressCSV();
+
+    case 'split-by-person':
+      return openSplitModal(target.dataset.teamId);
 
     case 'delete-team': {
       const team = store.getTeam(target.dataset.teamId);
@@ -514,9 +547,6 @@ function applyTeamField(node) {
     } else if (field === 'rateOverride') {
       line.rateOverride = node.value === '' ? null : num(node.value);
       node.dataset.auto = line.rateOverride === null ? '1' : '0';
-    } else if (field === 'manualHours') {
-      line.manualHours = node.value === '' ? null : num(node.value);
-      line.manualUpdatedAt = new Date().toISOString();
     } else if (field === 'person') line.person = node.value;
   } else if (field === 'name') team.name = node.value;
   else if (field === 'lead') team.lead = node.value;
@@ -546,6 +576,13 @@ async function onChange(e) {
   // עם רענון התגיות והסרגל בכותרת. כפתור "שמור שינויים" נשאר כגיבוי.
   if (node.form && node.form.id === 'deal-form') {
     await saveDealForm(node.form, { silent: true });
+    return;
+  }
+
+  // הזנת סך מצטבר בשורה → נרשם כעדכון ביצוע מתוארך (שומר היסטוריה)
+  if (node.dataset.field === 'manualHours' && node.dataset.lineId) {
+    await store.setLineManualTotal(node.dataset.lineId, node.value === '' ? 0 : num(node.value));
+    refreshLive();
     return;
   }
 
@@ -704,6 +741,62 @@ function openEntryModal(entry) {
   openModal({ title: entry ? 'עריכת רישום' : 'רישום ביצוע', body, actions: [save, cancel] });
 }
 
+function openProgressModal(record) {
+  const snap = currentSnapshot();
+  if (!snap) return;
+  const body = ui.renderProgressForm(record, { snap });
+  const save = btn(record ? 'שמור' : 'הוסף עדכון', { primary: true, iconName: 'check' });
+  save.addEventListener('click', async () => {
+    const f = Object.fromEntries(new FormData(body).entries());
+    const hours = num(f.hours);
+    if (!hours) return ui.toast('נדרשות שעות (אפשר גם שליליות לתיקון)', 'error');
+    const [teamId = '', lineId = ''] = String(f.target || '').split('|');
+    const line = lineId ? store.findLine(lineId) : null;
+    const patch = {
+      id: record?.id,
+      dealId: state.dealId, teamId, lineId,
+      roleId: line?.line.roleId || '', person: line?.line.person || record?.person || '',
+      date: f.date, hours, note: f.note, source: record?.source || 'manual',
+      fileName: record?.fileName || '', batchId: record?.batchId || '',
+    };
+    if (record) await store.updateProgress(patch); else await store.addProgress(patch);
+    closeModal();
+    ui.toast(record ? 'העדכון נשמר' : 'העדכון נוסף');
+    render();
+  });
+  const cancel = btn('ביטול');
+  cancel.addEventListener('click', closeModal);
+  openModal({ title: record ? 'עריכת עדכון ביצוע' : 'עדכון ביצוע', body, actions: [save, cancel] });
+}
+
+/** פריסת צוות לשורות לפי אנשים — לתמחור לפי אדם במקום לפי דרג */
+function openSplitModal(teamId) {
+  const snap = currentSnapshot();
+  const team = store.getTeam(teamId);
+  if (!snap || !team) return;
+  const roles = store.rateCardFor(snap.deal).roles;
+  const known = store.knownPeople(state.dealId);
+  const body = ui.renderSplitForm({ team, roles, people: known });
+  const save = btn('צור שורות', { primary: true, iconName: 'check' });
+  save.addEventListener('click', async () => {
+    const rows = [...body.querySelectorAll('[data-person-row]')]
+      .map((row) => ({
+        name: row.querySelector('[data-person-name]').value.trim(),
+        roleId: row.querySelector('[data-person-role]').value,
+        rate: row.querySelector('[data-person-rate]').value,
+      }))
+      .filter((r) => r.name);
+    if (!rows.length) return ui.toast('לא הוזנו שמות', 'error');
+    const n = await store.splitTeamByPeople(teamId, rows);
+    closeModal();
+    ui.toast(`${n} שורות נוספו לצוות`);
+    render();
+  });
+  const cancel = btn('ביטול');
+  cancel.addEventListener('click', closeModal);
+  openModal({ title: `פריסה לפי אנשי צוות · ${team.name}`, body, actions: [save, cancel], wide: true });
+}
+
 async function openAttachment(fileId) {
   const rec = await store.getFile(fileId);
   if (!rec) return ui.toast('הקובץ לא נמצא', 'error');
@@ -834,6 +927,35 @@ function renderImportModal() {
 function onImportChange(node) {
   if (!importCtx) return;
   const kind = node.dataset.imp;
+
+  // ---- ייבוא דוח שעות למעקב ----
+  if (importCtx.mode === 'progress') {
+    if (kind === 'sheet') {
+      importCtx.sheetIndex = Number(node.value);
+      const hr = detectHeaderRow(importCtx.sheets[importCtx.sheetIndex].rows);
+      importCtx.headerRow = hr < 0 ? 0 : hr;
+      importCtx.mapping = guessMapping(importCtx.sheets[importCtx.sheetIndex].rows[importCtx.headerRow] || []);
+      importCtx.peopleLines = {};
+      syncProgressPeople();
+    } else if (kind === 'headerRow') {
+      importCtx.headerRow = Math.max(0, Number(node.value) - 1);
+      importCtx.mapping = guessMapping(importCtx.sheets[importCtx.sheetIndex].rows[importCtx.headerRow] || []);
+      importCtx.peopleLines = {};
+      syncProgressPeople();
+    } else if (kind === 'map') {
+      const col = Number(node.dataset.col);
+      for (const [k, v] of Object.entries(importCtx.mapping)) if (v === col) delete importCtx.mapping[k];
+      if (node.value) importCtx.mapping[node.value] = col;
+      syncProgressPeople();
+    } else if (kind === 'cumulative') {
+      importCtx.cumulative = node.value === '1';
+    } else if (kind === 'personLine') {
+      importCtx.peopleLines[node.dataset.personKey] = node.value;
+    } else if (kind === 'personTeamBulk') {
+      assignPeopleToTeam(node.value);
+    }
+    return renderProgressImportModal();
+  }
   if (kind === 'sheet') {
     importCtx.sheetIndex = Number(node.value);
     const hr = detectHeaderRow(importCtx.sheets[importCtx.sheetIndex].rows);
@@ -869,6 +991,153 @@ function onImportChange(node) {
     for (const p of importCtx.people || []) importCtx.peopleTeams[p.key] = node.value;
     return renderImportModal();
   }
+}
+
+/* ============================================================
+   ייבוא דוח שעות למעקב השוטף
+   ============================================================ */
+
+async function startProgressImport(file) {
+  const snap = currentSnapshot();
+  if (!snap) return ui.toast('בחר עסקה תחילה', 'error');
+  if (!snap.teams.length) return ui.toast('צור צוותים בתקציב לפני ייבוא דוח', 'error');
+
+  let sheets;
+  try { sheets = await readTabularFile(file); }
+  catch (err) { return ui.toast(err.message || 'קריאת הקובץ נכשלה', 'error'); }
+
+  const headerRow = detectHeaderRow(sheets[0].rows);
+  importCtx = {
+    mode: 'progress', file, sheets, sheetIndex: 0,
+    headerRow: headerRow < 0 ? 0 : headerRow,
+    mapping: guessMapping(sheets[0].rows[headerRow < 0 ? 0 : headerRow] || []),
+    cumulative: false,
+    peopleTeams: {}, peopleLines: {},
+  };
+  syncProgressPeople();
+  renderProgressImportModal();
+}
+
+/** מזהה את האנשים בדוח ומשייך כל אחד לשורת תקציב (לפי הזיכרון, שם השורה או הדרגה) */
+function syncProgressPeople() {
+  const { sheets, sheetIndex, headerRow, mapping } = importCtx;
+  const rows = sheets[sheetIndex].rows.slice(headerRow + 1);
+  importCtx.people = collectPeople(rows, mapping);
+
+  const snap = currentSnapshot();
+  const remembered = store.peopleTeamIdsFor(state.dealId);
+  const memory = store.getPeopleMemory();
+  const norm = (s) => String(s || '').trim().toLowerCase();
+
+  const lines = [];
+  for (const t of snap.teams) for (const l of t.lines) lines.push({ teamId: t.id, lineId: l.id, roleId: l.roleId, person: l.person, roleName: l.roleName });
+
+  const next = {};
+  for (const p of importCtx.people) {
+    if (importCtx.peopleLines[p.key]) { next[p.key] = importCtx.peopleLines[p.key]; continue; }
+    const teamId = remembered[p.key] || '';
+    const roleName = memory[p.key]?.roleName || '';
+    // 1) שורה על שם האדם  2) שורה של הדרגה הזכורה בצוות שלו  3) ריק
+    const byPerson = lines.find((l) => norm(l.person) && norm(l.person) === norm(p.name));
+    const byRole = teamId && roleName
+      ? lines.find((l) => l.teamId === teamId && norm(l.roleName) === norm(roleName))
+      : null;
+    const hit = byPerson || byRole || null;
+    next[p.key] = hit ? `${hit.teamId}|${hit.lineId}` : '';
+  }
+  importCtx.peopleLines = next;
+}
+
+/** שיוך מהיר של כל האנשים בדוח לצוות אחד: לפי שורה על שמם, ואם אין — לפי הדרגה שבדוח */
+function assignPeopleToTeam(teamId) {
+  if (!teamId) return;
+  const team = store.getTeam(teamId);
+  if (!team) return;
+  const norm = (s) => String(s || '').trim().toLowerCase();
+  for (const p of importCtx.people || []) {
+    const byPerson = team.lines.find((l) => norm(l.person) && norm(l.person) === norm(p.name));
+    const byRole = p.roleHint ? team.lines.find((l) => norm(l.roleName) === norm(p.roleHint)) : null;
+    const hit = byPerson || byRole || team.lines[0];
+    if (hit) importCtx.peopleLines[p.key] = `${team.id}|${hit.id}`;
+  }
+}
+
+function progressPreview() {
+  const { sheets, sheetIndex, headerRow, mapping, cumulative, peopleLines, file } = importCtx;
+  const rows = sheets[sheetIndex].rows.slice(headerRow + 1).filter((r) => r && r.some((c) => c !== null && c !== undefined && c !== ''));
+  const currentByLine = new Map();
+  for (const [, target] of Object.entries(peopleLines)) {
+    const lineId = String(target || '').split('|')[1];
+    if (lineId && !currentByLine.has(lineId)) currentByLine.set(lineId, store.manualHoursOfLine(lineId));
+  }
+  const resolve = (person) => {
+    const target = peopleLines[importerNormPerson(person)];
+    if (!target) return null;
+    const [teamId, lineId] = target.split('|');
+    const line = lineId ? store.findLine(lineId) : null;
+    return { teamId, lineId, roleId: line?.line.roleId || '' };
+  };
+  const res = rowsToProgress(rows, mapping, {
+    dealId: state.dealId, resolve, cumulative, currentByLine,
+    fileName: file.name, batchId: importCtx.batchId || (importCtx.batchId = uid('bat')),
+  });
+  importCtx.records = res.records;
+  return res;
+}
+
+const importerNormPerson = (s) => String(s ?? '').trim().toLowerCase().replace(/["'׳״]/g, '').replace(/\s+/g, ' ');
+
+function renderProgressImportModal() {
+  const snap = currentSnapshot();
+  const res = progressPreview();
+  const body = ui.renderProgressImportPreview({
+    sheets: importCtx.sheets, sheetIndex: importCtx.sheetIndex, headerRow: importCtx.headerRow,
+    mapping: importCtx.mapping, people: importCtx.people, peopleLines: importCtx.peopleLines,
+    cumulative: importCtx.cumulative, teams: snap.teams, records: res.records,
+    unmatched: res.unmatched, skipped: res.skipped,
+  });
+
+  const save = btn('הוסף למעקב', { primary: true, iconName: 'check' });
+  save.addEventListener('click', async () => {
+    const list = (importCtx.records || []).filter((r) => r.lineId || r.teamId);
+    const orphans = (importCtx.records || []).length - list.length;
+    if (!list.length) { closeModal(); return ui.toast('אף שורה לא שויכה לשורת תקציב', 'error'); }
+    const remember = els.modalBody.querySelector('[data-imp="rememberPeople"]')?.checked ?? true;
+    if (remember) {
+      const teamName = new Map(store.teamsOf(state.dealId).map((t) => [t.id, t.name]));
+      await store.rememberPeopleTeams((importCtx.people || []).map((p) => {
+        const [teamId, lineId] = String(importCtx.peopleLines[p.key] || '').split('|');
+        const line = lineId ? store.findLine(lineId) : null;
+        return { key: p.key, name: p.name, teamName: teamName.get(teamId) || '', roleName: line?.line.roleName || '' };
+      }));
+    }
+    await store.addProgressMany(list);
+    closeModal();
+    ui.toast(orphans ? `${list.length} עדכונים נוספו · ${orphans} שורות ללא שיוך דולגו` : `${list.length} עדכונים נוספו למעקב`);
+    state.tab = 'progress';
+    render();
+  });
+  const cancel = btn('ביטול');
+  cancel.addEventListener('click', closeModal);
+  openModal({ title: `ייבוא דוח שעות · ${importCtx.file.name}`, body, actions: [save, cancel], wide: true });
+}
+
+function exportProgressCSV() {
+  const snap = currentSnapshot();
+  if (!snap) return;
+  const teamName = new Map(snap.teams.map((t) => [t.id, t.name]));
+  const lineLabel = new Map();
+  for (const t of snap.teams) for (const l of t.lines) lineLabel.set(l.id, l.person ? `${l.person} · ${l.roleName}` : l.roleName);
+  const rows = [['תאריך', 'צוות', 'שורה', 'עורך דין', 'שעות', 'מקור', 'קובץ', 'הערה']];
+  for (const p of [...snap.progressLog].sort((a, b) => (a.date || '').localeCompare(b.date || ''))) {
+    rows.push([p.date, teamName.get(p.teamId) || '', lineLabel.get(p.lineId) || '', p.person,
+      p.hours, p.source === 'import' ? 'יובא' : 'ידני', p.fileName, p.note]);
+  }
+  rows.push([]);
+  const periods = ui.progressPeriods(snap, state.progressPeriod);
+  rows.push([`סיכום ${state.progressPeriod}`, 'שעות', 'עלות', 'מצטבר שעות', 'מצטבר עלות']);
+  for (const r of periods) rows.push([r.key, r.hours, r.cost, r.cumulativeHours, r.cumulativeCost]);
+  downloadFile(`מעקב-${snap.deal.name}-${stamp()}.csv`, toCSV(rows));
 }
 
 /* ============================================================
