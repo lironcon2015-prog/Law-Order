@@ -949,6 +949,8 @@ function onImportChange(node) {
       syncProgressPeople();
     } else if (kind === 'cumulative') {
       importCtx.cumulative = node.value === '1';
+    } else if (kind === 'overlap') {
+      importCtx.overlap = node.value;
     } else if (kind === 'personLine') {
       importCtx.peopleLines[node.dataset.personKey] = node.value;
     } else if (kind === 'personTeamBulk') {
@@ -1012,6 +1014,7 @@ async function startProgressImport(file) {
     headerRow: headerRow < 0 ? 0 : headerRow,
     mapping: guessMapping(sheets[0].rows[headerRow < 0 ? 0 : headerRow] || []),
     cumulative: false,
+    overlap: 'skip',        // חפיפה עם דיווחים קודמים: skip | replace | add
     peopleTeams: {}, peopleLines: {},
   };
   syncProgressPeople();
@@ -1079,9 +1082,11 @@ function progressPreview() {
   };
   const res = rowsToProgress(rows, mapping, {
     dealId: state.dealId, resolve, cumulative, currentByLine,
+    existing: store.progressOf(state.dealId),
     fileName: file.name, batchId: importCtx.batchId || (importCtx.batchId = uid('bat')),
   });
   importCtx.records = res.records;
+  importCtx.dateRange = res.dateRange;
   return res;
 }
 
@@ -1094,13 +1099,31 @@ function renderProgressImportModal() {
     sheets: importCtx.sheets, sheetIndex: importCtx.sheetIndex, headerRow: importCtx.headerRow,
     mapping: importCtx.mapping, people: importCtx.people, peopleLines: importCtx.peopleLines,
     cumulative: importCtx.cumulative, teams: snap.teams, records: res.records,
-    unmatched: res.unmatched, skipped: res.skipped,
+    unmatched: res.unmatched, skipped: res.skipped, duplicates: res.duplicates,
+    dateRange: res.dateRange, overlap: importCtx.overlap || 'skip',
   });
 
   const save = btn('הוסף למעקב', { primary: true, iconName: 'check' });
   save.addEventListener('click', async () => {
-    const list = (importCtx.records || []).filter((r) => r.lineId || r.teamId);
+    const overlap = importCtx.overlap || 'skip';
+    let list = (importCtx.records || []).filter((r) => r.lineId || r.teamId);
     const orphans = (importCtx.records || []).length - list.length;
+
+    // טיפול בחפיפה בין דוחות (רק במצב "שעות לתקופה"; דוח מצטבר מטפל בזה בעצמו)
+    let replaced = 0, skippedDupes = 0;
+    if (!importCtx.cumulative) {
+      if (overlap === 'skip') {
+        const before = list.length;
+        list = list.filter((r) => !r.duplicate);
+        skippedDupes = before - list.length;
+      } else if (overlap === 'replace' && importCtx.dateRange) {
+        replaced = await store.clearImportedProgressRange({
+          dealId: state.dealId,
+          from: importCtx.dateRange.from, to: importCtx.dateRange.to,
+          lineIds: [...new Set(list.map((r) => r.lineId).filter(Boolean))],
+        });
+      }
+    }
     if (!list.length) { closeModal(); return ui.toast('אף שורה לא שויכה לשורת תקציב', 'error'); }
     const remember = els.modalBody.querySelector('[data-imp="rememberPeople"]')?.checked ?? true;
     if (remember) {
@@ -1113,7 +1136,12 @@ function renderProgressImportModal() {
     }
     await store.addProgressMany(list);
     closeModal();
-    ui.toast(orphans ? `${list.length} עדכונים נוספו · ${orphans} שורות ללא שיוך דולגו` : `${list.length} עדכונים נוספו למעקב`);
+    const extra = [
+      orphans ? `${orphans} ללא שיוך` : '',
+      skippedDupes ? `${skippedDupes} כפילויות דולגו` : '',
+      replaced ? `${replaced} דיווחים קודמים בטווח הוחלפו` : '',
+    ].filter(Boolean).join(' · ');
+    ui.toast(`${list.length} עדכונים נוספו למעקב${extra ? ` · ${extra}` : ''}`);
     state.tab = 'progress';
     render();
   });

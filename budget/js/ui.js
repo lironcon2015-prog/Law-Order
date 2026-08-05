@@ -848,7 +848,8 @@ export const progressPeriods = (snap, period) => progressByPeriod(snap, period);
 
 /** מסך ייבוא דוח שעות: מיפוי עמודות + שיוך כל אדם לשורת תקציב */
 export function renderProgressImportPreview({
-  sheets, sheetIndex, headerRow, mapping, people, peopleLines, cumulative, teams, records, unmatched, skipped,
+  sheets, sheetIndex, headerRow, mapping, people, peopleLines, cumulative, teams, records,
+  unmatched, skipped, duplicates = 0, dateRange = null, overlap = 'skip',
 }) {
   const wrap = el('div', { class: 'import' });
 
@@ -866,6 +867,21 @@ export function renderProgressImportPreview({
       ? 'המערכת תרשום רק את ההפרש מול מה שכבר דווח — כדי לא לספור פעמיים.'
       : 'כל שורה בדוח נוספת לשעות שכבר דווחו.'),
   ]));
+
+  // חפיפה בין דוחות — רלוונטי רק בדוח לתקופה
+  if (!cumulative) {
+    wrap.append(field('שורות שכבר דווחו בעבר', el('select', { class: 'select', dataset: { imp: 'overlap' } }, [
+      el('option', { value: 'skip', text: 'דלג עליהן (מומלץ)', selected: overlap === 'skip' ? 'selected' : null }),
+      el('option', { value: 'replace', text: 'החלף את מה שיובא בטווח התאריכים של הדוח', selected: overlap === 'replace' ? 'selected' : null }),
+      el('option', { value: 'add', text: 'הוסף בכל זאת (ייספר פעמיים)', selected: overlap === 'add' ? 'selected' : null }),
+    ]),
+    `זיהוי לפי שורת תקציב + תאריך + שם. ${duplicates ? `זוהו ${duplicates} שורות שכבר דווחו.` : 'לא זוהתה חפיפה עם דיווחים קיימים.'}${
+      dateRange ? ` הדוח מכסה ${dateRange.from} עד ${dateRange.to}.` : ''}`));
+
+    if (overlap === 'replace' && dateRange) {
+      wrap.append(el('p', { class: 'alert alert--watch', text: `כל הדיווחים שיובאו בעבר לטווח ${dateRange.from}–${dateRange.to} (לשורות שבדוח) יימחקו ויוחלפו בתוכן הקובץ. דיווחים שהוזנו ידנית לא ייפגעו.` }));
+    }
+  }
 
   const rows = sheets[sheetIndex].rows;
   const header = rows[headerRow] || [];
@@ -928,9 +944,11 @@ export function renderProgressImportPreview({
     ]));
   }
 
-  const totalHours = (records || []).reduce((s, r) => s + num(r.hours), 0);
+  const counted = cumulative || overlap !== 'skip' ? records : records.filter((r) => !r.duplicate);
+  const totalHours = counted.reduce((s, r) => s + num(r.hours), 0);
   wrap.append(el('div', { class: 'import__summary' }, [
-    el('strong', { text: `${records.length} עדכונים · ${fmtHours(totalHours)} שעות` }),
+    el('strong', { text: `${counted.length} עדכונים · ${fmtHours(totalHours)} שעות` }),
+    duplicates ? el('span', { class: 'pill pill--watch', text: `${duplicates} כבר דווחו` }) : null,
     skipped ? el('span', { class: 'pill pill--watch', text: `${skipped} שורות דולגו` }) : null,
     unmatched.length ? el('span', { class: 'pill pill--over', text: `ללא שיוך: ${unmatched.slice(0, 4).join(', ')}${unmatched.length > 4 ? '…' : ''}` }) : null,
   ]));
@@ -938,11 +956,13 @@ export function renderProgressImportPreview({
   if (records.length) {
     wrap.append(el('div', { class: 'btable-wrap' }, el('table', { class: 'etable etable--preview' }, [
       el('thead', {}, el('tr', {}, [el('th', { text: 'תאריך' }), el('th', { text: 'עורך דין' }), el('th', { text: 'שעות' }), el('th', { text: 'הערה' })])),
-      el('tbody', {}, records.slice(0, 40).map((r) => el('tr', { class: r.lineId ? '' : 'row--dupe' }, [
+      el('tbody', {}, records.slice(0, 40).map((r) => el('tr', { class: (!r.lineId || (r.duplicate && overlap === 'skip')) ? 'row--dupe' : '' }, [
         el('td', { class: 'num', text: r.date }),
         el('td', { text: r.person || '—' }),
         el('td', { class: 'num', text: fmtHours(r.hours) }),
-        el('td', { class: 'muted', text: r.note || (r.lineId ? '' : 'לא שויך לשורה — לא ייובא') }),
+        el('td', { class: 'muted', text: r.note
+          || (!r.lineId ? 'לא שויך לשורה — לא ייובא'
+            : r.duplicate ? `כבר דווחו ${fmtHours(r.existingHours)} שעות לתאריך הזה${overlap === 'skip' ? ' — ידולג' : ''}` : '') }),
       ]))),
     ])));
   }

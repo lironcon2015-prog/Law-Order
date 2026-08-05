@@ -176,12 +176,25 @@ export function rowsToEntries(rows, mapping, opts) {
  *               cumulative: boolean, currentByLine: Map<lineId, hours>, fileName, batchId, defaultDate }
  */
 export function rowsToProgress(rows, mapping, opts) {
-  const { dealId, resolve, cumulative = false, currentByLine = new Map(), fileName = '', batchId = '', defaultDate = '' } = opts;
+  const {
+    dealId, resolve, cumulative = false, currentByLine = new Map(),
+    fileName = '', batchId = '', defaultDate = '', existing = [],
+  } = opts;
   const pick = (row, field) => (mapping[field] === undefined ? null : row[mapping[field]]);
   const out = [];
   const unmatched = new Set();
   const totals = new Map();   // lineId → שעות בקובץ (למצב מצטבר)
   let skipped = 0;
+
+  // מה שכבר דווח, לפי שורה+תאריך+אדם — לזיהוי חפיפה בין דוחות
+  const reported = new Map();
+  for (const p of existing) {
+    const k = progressKey(p);
+    const cur = reported.get(k) || { hours: 0, count: 0 };
+    cur.hours = round2(cur.hours + num(p.hours));
+    cur.count += 1;
+    reported.set(k, cur);
+  }
 
   for (const row of rows || []) {
     if (!row || !row.length) continue;
@@ -201,11 +214,16 @@ export function rowsToProgress(rows, mapping, opts) {
       totals.set(key, cur);
       continue;
     }
-    out.push({
+    const rec = {
       dealId, teamId: target?.teamId || '', lineId: target?.lineId || '', roleId: target?.roleId || '',
       person, date, hours, source: 'import', fileName, batchId,
       note: roleName && !target?.lineId ? `דרגה בדוח: ${roleName}` : '',
-    });
+    };
+    // חפיפה: אותה שורת תקציב, אותו תאריך ואותו אדם כבר דווחו בעבר
+    const prev = reported.get(progressKey(rec));
+    rec.duplicate = !!prev;
+    rec.existingHours = prev ? prev.hours : 0;
+    out.push(rec);
   }
 
   // דוח מצטבר: רושמים רק את ההפרש מול מה שכבר דווח
@@ -222,8 +240,17 @@ export function rowsToProgress(rows, mapping, opts) {
       void key;
     }
   }
-  return { records: out, skipped, unmatched: [...unmatched] };
+  return {
+    records: out, skipped, unmatched: [...unmatched],
+    duplicates: out.filter((r) => r.duplicate).length,
+    dateRange: out.length
+      ? { from: out.reduce((m, r) => (r.date < m ? r.date : m), out[0].date), to: out.reduce((m, r) => (r.date > m ? r.date : m), out[0].date) }
+      : null,
+  };
 }
+
+/** מפתח זהות של דיווח: שורת תקציב + תאריך + שם האדם */
+export const progressKey = (p) => `${p.lineId || ''}|${p.date || ''}|${normPerson(p.person)}`;
 
 /** מסמן רישומים שכנראה כבר קיימים (אותו תאריך+סכום+מסמך) */
 export function markDuplicates(candidates, existing) {

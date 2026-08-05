@@ -197,6 +197,23 @@ export async function deleteProgress(id) {
   notify('progress');
 }
 
+/**
+ * מוחק דיווחים **שיובאו** בטווח תאריכים (לשורות מסוימות) — לפני ייבוא מחדש של
+ * דוח מתוקן לאותה תקופה. דיווחים ידניים לא נוגעים בהם.
+ * @returns {number} כמה נמחקו
+ */
+export async function clearImportedProgressRange({ dealId, from, to, lineIds }) {
+  const set = lineIds && lineIds.length ? new Set(lineIds) : null;
+  const doomed = cache.progress.filter((p) => p.dealId === dealId && p.source === 'import'
+    && p.date >= from && p.date <= to && (!set || set.has(p.lineId)));
+  if (!doomed.length) return 0;
+  const ids = new Set(doomed.map((p) => p.id));
+  cache.progress = cache.progress.filter((p) => !ids.has(p.id));
+  await db.removeMany('progress', [...ids]);
+  notify('progress');
+  return ids.size;
+}
+
 /** מחיקת אצווה שלמה שיובאה (batchId) */
 export async function deleteProgressBatch(batchId) {
   const ids = cache.progress.filter((p) => p.batchId === batchId).map((p) => p.id);
