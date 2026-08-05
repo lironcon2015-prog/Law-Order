@@ -37,6 +37,18 @@ CRM אישי לעו"ד M&A, vanilla JS · PWA · offline-first · RTL. חי ב-`
 - בדיקת OAuth/Drive end-to-end רק אצל המשתמש (אין Google בסביבת הפיתוח).
 - seed (`seedDemo`) לא כולל `contactType`/`photoUrl` — נתוני דמו ישנים יציגו ברירות מחדל.
 
+## 5א. LexBudget — מערכת תקציב עסקה (`/budget/`, נפרדת לחלוטין)
+מערכת שנייה בריפו, ללא תלות ב-CRM: DB משלה (`lexBudgetDB`), SW משלה (`lexbudget-v1`, scope `/budget/`), manifest משלה.
+משותפת רק **השפה העיצובית** (טוקנים של Obsidian Gold מועתקים ל-`budget/css/styles.css`) והפונטים.
+- **מודל**: `deals` → `teams` (שורה לכל דרגה) → `entries` (ביצוע: שעות/חשבונות/הוצאות) + `files` (Blob של חשבון) + `rateCards`.
+- **מתודולוגיה** (מגיליון המשתמש): שעות תקציב = `ROUNDUP(מוערך × (1+מקדם))`; עלות = שעות×תעריף; בלנדד = ללא דרגות ג'וניור.
+- **מנוע החישוב** ב-`model.js` (`computeDeal`) — טהור, ללא DOM/DB. `app.js` מחזיק state יחיד ו-`render()`.
+- **עריכה חיה בגיליון**: `input` מעדכן את האובייקט בזיכרון + `ui.refreshComputed()` (עדכון `[data-calc]` בלבד, שמירת פוקוס); `change` מפעיל `store.saveTeam`.
+- **קריאת XLSX ללא ספריות** (`xlsx.js`): פענוח ZIP ידני + `DecompressionStream('deflate-raw')`, sharedStrings, זיהוי תאי תאריך מ-`styles.xml`.
+- **ייבוא תקציב** (`parseBudgetSheet`): העמודה עם הכי הרבה שמות דרגה = עמודת התקציב; דרגות בעמודות אחרות = טבלת תעריפים; מספרים נלקחים רק משמאל לעמודת התעריפים.
+- **CSV בעברית**: גרשיים נחשבים פותחי-ציטוט רק בתחילת שדה — אחרת `עו"ד`/`רו"ח` שוברים את הפרסור.
+- מה שאין (מכוון): סנכרון Drive, קישור ל-CRM. גיבוי = ייצוא/ייבוא JSON מקומי.
+
 ## 6. לקחים אחרונים
 - **SW cache-first שבר פרסומים** (HTML התעדכן, JS ישן הוגש) → מעבר ל-network-first + auto-reload. בכל שינוי app-shell: להעלות `CACHE`.
 - מטמון SW תקוע אצל משתמש דורש איפוס חד-פעמי (Clear site data) לפני שהלוגיקה החדשה תופסת.
