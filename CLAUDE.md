@@ -66,15 +66,18 @@
 | `sw.js` | Service Worker | `manifest.json` | PWA |
 | `cloudflare/crm-proxy.worker.js` | Worker שמ-proxy את `lironcon.com/crm` ל-Pages |
 | `v2/` | **המערכת המאוחדת** (CRM + חיוב) — מבנה מקביל: `v2/index.html`, `v2/css/`, `v2/js/`, `v2/sw.js` |
-| `LexLedger-Offline.html` | **קובץ האופליין** — v2 ארוז לקובץ HTML יחיד (file://, בלי שרת). בשורש ה-repo ב-**main** |
-| `v2/build-offline.mjs` | סקריפט הבנייה של קובץ האופליין: `node v2/build-offline.mjs` |
+| `budget/` | **LexBudget** — מערכת תקציב עסקה נפרדת (DB/SW/manifest משלה): `budget/index.html`, `budget/css/`, `budget/js/` |
+| `LexLedger-Offline.html` | **קובץ האופליין של v2** — ארוז לקובץ HTML יחיד (file://, בלי שרת). בשורש ה-repo ב-**main** |
+| `LexBudget-Offline.html` | **קובץ האופליין של LexBudget** — אותו רעיון, נבנה מ-`budget/` |
+| `v2/build-offline.mjs` · `budget/build-offline.mjs` | סקריפטי הבנייה: `node v2/build-offline.mjs` · `node budget/build-offline.mjs` |
 
-### ⚠️ קובץ האופליין — זיהוי ועדכון (לכל סשן)
-- **מיקום:** `LexLedger-Offline.html` בשורש ה-repo, בענף `main` **בלבד**. סשנים משוכפלים לרוב בלי `main` —
-  אם הקובץ לא נראה: `git fetch origin main` ואז `git show origin/main:LexLedger-Offline.html`.
-- **אחרי כל שינוי ב-`v2/`** (css/js/html): להריץ `node v2/build-offline.mjs` (בונה מחדש בשורש), לוודא שאין
-  שגיאות קונסול, ולכלול את הקובץ ב-commit. אחרת קובץ האופליין של המשתמש מתיישן.
-- למסירה למשתמש: לשלוח את `LexLedger-Offline.html` כקובץ מצורף (הוא עצמאי לחלוטין — פונטים/CSS/JS מוטמעים).
+### ⚠️ קבצי האופליין — זיהוי ועדכון (לכל סשן)
+- **מיקום:** `LexLedger-Offline.html` + `LexBudget-Offline.html` בשורש ה-repo, בענף `main` **בלבד**.
+  סשנים משוכפלים לרוב בלי `main` — אם קובץ לא נראה: `git fetch origin main` ואז `git show origin/main:<file>`.
+- **אחרי כל שינוי ב-`v2/`** → `node v2/build-offline.mjs`; **אחרי כל שינוי ב-`budget/`** → `node budget/build-offline.mjs`.
+  לוודא 0 שגיאות קונסול ולכלול את הקובץ הבנוי ב-commit, אחרת קובץ האופליין של המשתמש מתיישן.
+- כל מודול JS חדש חייב להיכנס למערך `ORDER` בסקריפט הבנייה המתאים (סדר תלויות) — אחרת לא ייארז.
+- למסירה למשתמש: לשלוח את הקובץ כמצורף (עצמאי לחלוטין — פונטים/CSS/JS מוטמעים).
 
 ### קשרים קריטיים בין קבצים
 - `render()` ב-`app.js` — מקור האמת לתצוגה. מנתב לפי `state.mainView` (`pipeline`/`list`); תצוגת פרטים יורדת ל-drawer (pipeline) או ל-`#main` (list) דרך `detailTarget()`.
