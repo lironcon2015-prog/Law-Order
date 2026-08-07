@@ -254,6 +254,10 @@ export function renderDealHeader(root, { snap, tab }) {
       stripItem('ניצול', fmtPct(snap.util), snap.status === 'over' ? 'neg' : '', 'strip-util'),
       stripItem('בלנדד מתוכנן', money(snap.blendedRate, d), '', 'strip-blended'),
       stripItem('בלנדד בפועל', money(snap.blendedActual, d), '', 'strip-blended-actual'),
+      snap.capBudget.applies
+        ? stripItem('בלנדד אחרי תקרה', money(snap.effectiveRates.blended, d), 'neg', 'strip-blended-eff')
+        : null,
+      snap.hasFee ? stripItem('שכ"ט מוסכם', money(snap.agreedFee, d), '', 'strip-fee') : null,
     ]),
     el('nav', { class: 'subtabs', role: 'tablist' }, [
       subtab('budget', 'תקציב', 'target', tab),
@@ -1024,6 +1028,8 @@ export function renderControlTab(root, { snap }) {
         fact('חשבונות', `${fmtHours(snap.hoursBySource.invoice)} שעות`),
         fact('בלנדד מתוכנן', money(snap.blendedRate, d)),
         fact('בלנדד בפועל', money(snap.blendedActual, d), snap.blendedActual > snap.blendedRate ? 'pos' : 'neg'),
+        fact('תעריף ממוצע לשעה', money(snap.effectiveRate, d)),
+        snap.capActual.applies ? fact('התקבל בפועל לשעה (אחרי תקרה)', money(snap.realizedRate, d), 'neg') : null,
         snap.unassignedHours ? fact('שעות ללא שיוך', fmtHours(snap.unassignedHours), 'neg') : null,
       ]),
       el('p', { class: 'panel__hint', text: 'מקור ודאי יותר מחליף את הפחות ודאי לאותו אדם ואותה תקופה — אין ספירה כפולה.' }),
@@ -1567,6 +1573,7 @@ export function refreshComputed(snap, selected = new Set()) {
   set('strip-util', fmtPct(snap.util));
   set('strip-blended', money(snap.blendedRate, d));
   set('strip-blended-actual', money(snap.blendedActual, d));
+  set('strip-blended-eff', money(snap.effectiveRates.blended, d));
 
   if (selected.size) {
     const agg = aggregateTeams(snap, selected);

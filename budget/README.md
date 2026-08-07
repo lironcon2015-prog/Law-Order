@@ -75,4 +75,4 @@ python3 -m http.server 8765     # ואז http://localhost:8765/budget/
 בקונסול: `window.lexBudget.seedDemo()` — טוען עסקת דמו עם 5 צוותים ורישומי ביצוע.
 
 **חשוב:** בכל שינוי ב-`index.html` / `css/*` / `js/*` — להעלות את `CACHE` ב-`budget/sw.js`
-(`lexbudget-vN` → `lexbudget-v(N+1)`). גרסה נוכחית: **v8**.
+(`lexbudget-vN` → `lexbudget-v(N+1)`). גרסה נוכחית: **v9**.
