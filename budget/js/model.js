@@ -236,7 +236,63 @@ export function normalizeProgress(p) {
   };
 }
 
-/** סכום נטו של רישום (ללא מע"מ) — הבסיס להשוואה מול תקציב */
+/* ============================================================
+   ביצוע: מדד אחד — שעות. הכסף תמיד = שעות × תעריף התכנון.
+   מקורות הנתונים משלימים זה את זה, לא נסכמים:
+   הזנה ידנית = הערכה שוטפת → דוח שעות = מדויק → חשבון = השעות שחויבו בסוף.
+   מקור ודאי יותר **מחליף** את הפחות ודאי לאותה שורה, אותו אדם ואותה תקופה.
+   ============================================================ */
+
+export const EXEC_SOURCES = {
+  manual:  { rank: 1, label: 'הזנה ידנית' },
+  import:  { rank: 2, label: 'דוח שעות' },
+  invoice: { rank: 3, label: 'חשבון' },
+};
+export const sourceRank = (s) => EXEC_SOURCES[s]?.rank || 1;
+export const sourceLabel = (s) => EXEC_SOURCES[s]?.label || 'הזנה ידנית';
+
+/**
+ * מאחד את כל דיווחי הביצוע (מעקב + חשבונות) לרשימה אחת, ומסמן מה הוחלף.
+ * @returns {Array} רשומות עם {lineId, teamId, person, date, hours, source, periodFrom, periodTo, superseded, supersededBy}
+ */
+export function reconcileExecution(records) {
+  const list = (records || []).map((r) => ({
+    ...r,
+    hours: num(r.hours),
+    periodFrom: r.periodFrom || r.date,
+    periodTo: r.periodTo || r.date,
+    superseded: false,
+    supersededBy: '',
+  }));
+
+  // מקבצים לפי שורת תקציב + אדם; בתוך כל קבוצה, תקופה שכוסתה ע"י מקור ודאי יותר מנטרלת את הישן
+  const groups = new Map();
+  for (const r of list) {
+    const key = `${r.lineId || `~team:${r.teamId || ''}`}|${normPerson(r.person)}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
+  }
+  for (const group of groups.values()) {
+    const byRankDesc = [...group].sort((a, b) => sourceRank(b.source) - sourceRank(a.source));
+    for (const high of byRankDesc) {
+      if (high.superseded) continue;
+      for (const low of group) {
+        if (low === high || low.superseded) continue;
+        if (sourceRank(low.source) >= sourceRank(high.source)) continue;
+        // הרשומה הישנה נמצאת בתוך התקופה שהמקור החדש מכסה
+        if (low.date >= high.periodFrom && low.date <= high.periodTo) {
+          low.superseded = true;
+          low.supersededBy = sourceLabel(high.source);
+        }
+      }
+    }
+  }
+  return list;
+}
+
+export const normPerson = (s) => String(s ?? '').trim().toLowerCase().replace(/["'׳״]/g, '').replace(/\s+/g, ' ');
+
+/** סכום נטו של רישום (ללא מע"מ) — נשמר לתאימות; לא בשימוש בחישוב התקציב */
 export function entryNet(entry, vatRate) {
   const a = num(entry.amount);
   return entry.vatIncluded ? round2(a / (1 + num(vatRate))) : a;
@@ -299,59 +355,51 @@ export function computeDeal({ deal, teams, entries, rateCard, progress: progress
   const roles = roleMap(rateCard);
   const rolesByName = roleNameMap(rateCard);
   const dealEntries = (entries || []).filter((e) => e.dealId === deal.id);
-  const vat = deal.vatRate;
 
-  // מעקב ידני: צבירת שעות לפי שורה (ומה שלא שויך לשורה — לפי צוות)
+  // שיוך רשומה לשורת תקציב כשהיא הגיעה בלי lineId (חשבונות ישנים, ייבוא לפי דרגה):
+  // קודם לפי שם האדם בתוך הצוות, אחרת לפי הדרגה.
+  const dealTeams = (teams || []).filter((t) => t.dealId === deal.id);
+  const resolveLineId = (rec) => {
+    if (rec.lineId) return rec.lineId;
+    const team = dealTeams.find((t) => t.id === rec.teamId);
+    if (!team) return '';
+    const byPerson = rec.person
+      ? team.lines.find((l) => normPerson(l.person) && normPerson(l.person) === normPerson(rec.person))
+      : null;
+    const byRole = rec.roleId ? team.lines.find((l) => l.roleId === rec.roleId) : null;
+    return (byPerson || byRole)?.id || '';
+  };
+
+  // כל מקורות הביצוע לרשימה אחת: מעקב שוטף + חשבונות. חשבון תורם **שעות** בלבד.
   const dealProgress = (progressLog || []).filter((p) => p.dealId === deal.id);
-  const progByLine = new Map();
-  const progByTeamOnly = new Map();
-  for (const p of dealProgress) {
-    if (p.lineId) progByLine.set(p.lineId, (progByLine.get(p.lineId) || 0) + num(p.hours));
-    else if (p.teamId) progByTeamOnly.set(p.teamId, (progByTeamOnly.get(p.teamId) || 0) + num(p.hours));
-  }
-  const progUpdatedAt = new Map();
-  for (const p of dealProgress) {
-    const key = p.lineId || p.teamId;
-    if (!key) continue;
-    const cur = progUpdatedAt.get(key) || '';
-    if (p.date > cur) progUpdatedAt.set(key, p.date);
+  const execution = reconcileExecution([
+    ...dealProgress,
+    ...dealEntries.filter((e) => num(e.hours) > 0).map((e) => ({
+      id: e.id, dealId: e.dealId, teamId: e.teamId, lineId: e.lineId || '', roleId: e.roleId,
+      person: e.person, date: e.date, hours: num(e.hours), source: 'invoice',
+      periodFrom: e.periodFrom || e.date, periodTo: e.periodTo || e.date,
+      note: e.description, fileName: e.fileName, fileId: e.fileId, entryId: e.id,
+    })),
+  ].map((r) => ({ ...r, lineId: resolveLineId(r) })));
+  const live = execution.filter((r) => !r.superseded);
+
+  const hoursByLine = new Map();
+  const hoursByTeamOnly = new Map();
+  const hoursBySource = { manual: 0, import: 0, invoice: 0 };
+  const lastReport = new Map();     // שורה/צוות → תאריך הדיווח האחרון
+  let unassignedHours = 0;
+
+  for (const r of live) {
+    hoursBySource[r.source] = round2((hoursBySource[r.source] || 0) + r.hours);
+    if (r.lineId) hoursByLine.set(r.lineId, (hoursByLine.get(r.lineId) || 0) + r.hours);
+    else if (r.teamId) hoursByTeamOnly.set(r.teamId, (hoursByTeamOnly.get(r.teamId) || 0) + r.hours);
+    else unassignedHours += r.hours;
+    const key = r.lineId || r.teamId;
+    if (key && r.date > (lastReport.get(key) || '')) lastReport.set(key, r.date);
   }
 
-  // צבירת ביצוע לפי צוות+דרגה, לפי צוות, ולפי דרגה
-  const byTeamRole = new Map(); // `${teamId}|${roleId}` → {hours, cost, count}
-  const byTeam = new Map();
+  // דיווח לפי דרגה (לגרף "לפי דרגה") — נגזר מהשורות עצמן בהמשך
   const byRole = new Map();
-  let actualCost = 0, actualHours = 0, unassignedCost = 0, unassignedHours = 0;
-
-  /** מאחד ביצוע של אותה שורה תחת כמה מזהי דרגה (ישן/חדש אחרי החלפת תעריפון) */
-  const mergeActuals = (map, teamId, roleIds) => {
-    const out = { hours: 0, cost: 0, count: 0 };
-    for (const rid of [...new Set(roleIds)]) {
-      const cur = map.get(`${teamId}|${rid}`);
-      if (!cur) continue;
-      out.hours += cur.hours; out.cost += cur.cost; out.count += cur.count;
-    }
-    return out;
-  };
-
-  const bump = (map, key, hours, cost) => {
-    const cur = map.get(key) || { hours: 0, cost: 0, count: 0 };
-    cur.hours += hours; cur.cost += cost; cur.count += 1;
-    map.set(key, cur);
-  };
-
-  for (const e of dealEntries) {
-    const cost = entryNet(e, vat);
-    const hours = num(e.hours);
-    actualCost += cost; actualHours += hours;
-    if (e.teamId) {
-      bump(byTeam, e.teamId, hours, cost);
-      bump(byTeamRole, `${e.teamId}|${e.roleId || '-'}`, hours, cost);
-    } else {
-      unassignedCost += cost; unassignedHours += hours;
-    }
-    if (e.roleId) bump(byRole, e.roleId, hours, cost);
-  }
 
   const teamRows = (teams || [])
     .filter((t) => t.dealId === deal.id)
@@ -366,13 +414,15 @@ export function computeDeal({ deal, teams, entries, rateCard, progress: progress
         const bh = lineBudgetHours(line, factor);
         const rate = lineRate(line, role);
         const cost = round2(bh * rate);
-        // ביצוע: מאוחד מהמפתח הישן והחדש, כדי שרישומים קיימים לא "ייעלמו" אחרי החלפת תעריפון
-        const act = mergeActuals(byTeamRole, team.id, [line.roleId, effRoleId]);
-        const util = cost > 0 ? act.cost / cost : (act.cost > 0 ? Infinity : 0);
-        // מסלול המעקב הידני — סכום עדכוני הביצוע של השורה, לפי אותו תעריף
-        const mh = round2(progByLine.get(line.id) || 0);
-        const mCost = round2(mh * rate);
-        const mUtil = cost > 0 ? mCost / cost : (mCost > 0 ? Infinity : 0);
+        // ביצוע = שעות שדווחו (מכל מקור, אחרי איחוד) × תעריף התכנון
+        const ah = round2(hoursByLine.get(line.id) || 0);
+        const aCost = round2(ah * rate);
+        const util = bh > 0 ? ah / bh : (ah > 0 ? Infinity : 0);
+        if (effRoleId) {
+          const cur = byRole.get(effRoleId) || { hours: 0, cost: 0 };
+          cur.hours += ah; cur.cost += aCost;
+          byRole.set(effRoleId, cur);
+        }
         return {
           ...line,
           roleId: effRoleId,
@@ -384,33 +434,24 @@ export function computeDeal({ deal, teams, entries, rateCard, progress: progress
           budgetHours: bh,
           rate,
           budgetCost: cost,
-          actualHours: round2(act.hours),
-          actualCost: round2(act.cost),
-          entryCount: act.count,
-          remainingHours: round2(bh - act.hours),
-          remainingCost: round2(cost - act.cost),
+          actualHours: ah,
+          actualCost: aCost,
+          lastReportAt: lastReport.get(line.id) || '',
+          remainingHours: round2(bh - ah),
+          remainingCost: round2(cost - aCost),
           util,
           status: statusOf(util),
-          manualHoursValue: mh,
-          manualUpdatedAt: progUpdatedAt.get(line.id) || '',
-          manualCost: mCost,
-          manualRemainingHours: round2(bh - mh),
-          manualRemainingCost: round2(cost - mCost),
-          manualUtil: mUtil,
-          manualStatus: statusOf(mUtil),
         };
       });
       const budgetCost = round2(lines.reduce((s, l) => s + l.budgetCost, 0));
       const budgetHours = round2(lines.reduce((s, l) => s + l.budgetHours, 0));
       const estHours = round2(lines.reduce((s, l) => s + num(l.estHours), 0));
-      const act = byTeam.get(team.id) || { hours: 0, cost: 0, count: 0 };
-      const util = budgetCost > 0 ? act.cost / budgetCost : (act.cost > 0 ? Infinity : 0);
-      const manualHours = round2(lines.reduce((s, l) => s + l.manualHoursValue, 0));
-      const manualCost = round2(lines.reduce((s, l) => s + l.manualCost, 0));
-      const manualUtil = budgetCost > 0 ? manualCost / budgetCost : (manualCost > 0 ? Infinity : 0);
-      const manualUpdatedAt = lines.reduce((max, l) => (l.manualUpdatedAt > max ? l.manualUpdatedAt : max), '');
-      // שעות שדווחו לצוות בלי שיוך לשורה — אין להן תעריף, לכן מוצגות בנפרד
-      const manualUnassignedHours = round2(progByTeamOnly.get(team.id) || 0);
+      const actualHours = round2(lines.reduce((s, l) => s + l.actualHours, 0));
+      const actualCost = round2(lines.reduce((s, l) => s + l.actualCost, 0));
+      const util = budgetHours > 0 ? actualHours / budgetHours : (actualHours > 0 ? Infinity : 0);
+      const lastReportAt = lines.reduce((max, l) => (l.lastReportAt > max ? l.lastReportAt : max), '');
+      // שעות שדווחו לצוות בלי שיוך לשורה — אין להן תעריף ולכן אינן מתומחרות
+      const unassignedTeamHours = round2(hoursByTeamOnly.get(team.id) || 0);
       return {
         ...team,
         factor,
@@ -418,21 +459,14 @@ export function computeDeal({ deal, teams, entries, rateCard, progress: progress
         estHours,
         budgetHours,
         budgetCost,
-        actualHours: round2(act.hours),
-        actualCost: round2(act.cost),
-        entryCount: act.count,
-        remainingCost: round2(budgetCost - act.cost),
-        remainingHours: round2(budgetHours - act.hours),
+        actualHours,
+        actualCost,
+        remainingCost: round2(budgetCost - actualCost),
+        remainingHours: round2(budgetHours - actualHours),
         util,
         status: statusOf(util),
-        manualHours,
-        manualCost,
-        manualRemainingCost: round2(budgetCost - manualCost),
-        manualRemainingHours: round2(budgetHours - manualHours),
-        manualUtil,
-        manualStatus: statusOf(manualUtil),
-        manualUpdatedAt,
-        manualUnassignedHours,
+        lastReportAt,
+        unassignedTeamHours,
       };
     });
 
@@ -449,14 +483,19 @@ export function computeDeal({ deal, teams, entries, rateCard, progress: progress
   }
   const blendedAll = budgetHours > 0 ? round2(budgetCost / budgetHours) : 0;
   const blendedRate = seniorHours > 0 ? round2(seniorCost / seniorHours) : blendedAll;
-  const effectiveRate = actualHours > 0 ? round2(actualCost / actualHours) : 0;
 
-  const manualHours = round2(teamRows.reduce((s, t) => s + t.manualHours, 0));
-  const manualCost = round2(teamRows.reduce((s, t) => s + t.manualCost, 0));
-  const manualUtil = budgetCost > 0 ? manualCost / budgetCost : (manualCost > 0 ? Infinity : 0);
-  const manualEffectiveRate = manualHours > 0 ? round2(manualCost / manualHours) : 0;
-  const manualUpdatedAt = dealProgress.reduce((max, p) => (p.date > max ? p.date : max), '');
-  const manualUnassignedHours = round2(teamRows.reduce((s, t) => s + t.manualUnassignedHours, 0));
+  const actualHours = round2(teamRows.reduce((s, t) => s + t.actualHours, 0));
+  const actualCost = round2(teamRows.reduce((s, t) => s + t.actualCost, 0));
+  const effectiveRate = actualHours > 0 ? round2(actualCost / actualHours) : 0;
+  const lastReportAt = live.reduce((max, r) => (r.date > max ? r.date : max), '');
+  const unassignedTeamHours = round2(teamRows.reduce((s, t) => s + t.unassignedTeamHours, 0));
+  unassignedHours = round2(unassignedHours + unassignedTeamHours);
+  // שעות בפועל של דרגות שאינן ג'וניור — לבלנדד שהושג בפועל
+  let actualSeniorHours = 0, actualSeniorCost = 0;
+  for (const t of teamRows) for (const l of t.lines) {
+    if (!l.junior) { actualSeniorHours += l.actualHours; actualSeniorCost += l.actualCost; }
+  }
+  const blendedActual = actualSeniorHours > 0 ? round2(actualSeniorCost / actualSeniorHours) : effectiveRate;
 
   const util = budgetCost > 0 ? actualCost / budgetCost : (actualCost > 0 ? Infinity : 0);
   const progress = deal.progressPct / 100;
@@ -464,9 +503,11 @@ export function computeDeal({ deal, teams, entries, rateCard, progress: progress
   // תחזית לסיום (EAC): לפי התקדמות אם דווחה, אחרת לפי קצב זמן
   const timePace = paceRatio(deal);
   let eac = null, eacBasis = '';
-  if (progress > 0.02) { eac = round2(actualCost / progress); eacBasis = 'לפי התקדמות שדווחה'; }
-  else if (timePace && timePace > 0.02 && actualCost > 0) { eac = round2(actualCost / timePace); eacBasis = 'לפי קצב לוח הזמנים'; }
+  let eacHours = null;
+  if (progress > 0.02) { eac = round2(actualCost / progress); eacHours = round2(actualHours / progress); eacBasis = 'לפי התקדמות שדווחה'; }
+  else if (timePace && timePace > 0.02 && actualCost > 0) { eac = round2(actualCost / timePace); eacHours = round2(actualHours / timePace); eacBasis = 'לפי קצב לוח הזמנים'; }
   const eacVariance = eac === null ? null : round2(budgetCost - eac);
+  const eacHoursVariance = eacHours === null ? null : round2(budgetHours - eacHours);
 
   // רווחיות מול שכ"ט מוסכם
   const agreed = num(deal.agreedFee);
@@ -483,7 +524,7 @@ export function computeDeal({ deal, teams, entries, rateCard, progress: progress
   const capFactorFor = (cost) => (hasFee && agreed > 0 && cost > agreed ? agreed / cost : 1);
   const capBudget = buildCap(agreed, budgetCost, capFactorFor(budgetCost), hasFee);
   const capActual = buildCap(agreed, actualCost, capFactorFor(actualCost), hasFee);
-  const capManual = buildCap(agreed, manualCost, capFactorFor(manualCost), hasFee);
+
 
   // תעריפים אפקטיביים אחרי החלת מקדם התקרה (על התכנון)
   const capF = capBudget.factor;
@@ -498,49 +539,42 @@ export function computeDeal({ deal, teams, entries, rateCard, progress: progress
   };
   // התעריף שהתקבל בפועל לשעה, אחרי התקרה
   const realizedRate = actualHours > 0 ? round2(actualCost * capActual.factor / actualHours) : 0;
-  const manualRealizedRate = manualHours > 0 ? round2(manualCost * capManual.factor / manualHours) : 0;
+
 
   const byRoleRows = (rateCard?.roles || []).map((r) => {
-    let bHours = 0, bCost = 0, mHours = 0, mCost = 0;
+    let bHours = 0, bCost = 0;
     for (const t of teamRows) for (const l of t.lines) if (l.roleId === r.id) {
       bHours += l.budgetHours; bCost += l.budgetCost;
-      mHours += l.manualHoursValue; mCost += l.manualCost;
     }
-    const act = byRole.get(r.id) || { hours: 0, cost: 0, count: 0 };
+    const act = byRole.get(r.id) || { hours: 0, cost: 0 };
     return {
       roleId: r.id, name: r.name, rate: r.rate, junior: r.junior,
       budgetHours: round2(bHours), budgetCost: round2(bCost),
       actualHours: round2(act.hours), actualCost: round2(act.cost),
-      manualHours: round2(mHours), manualCost: round2(mCost),
-      util: bCost > 0 ? act.cost / bCost : (act.cost > 0 ? Infinity : 0),
-      manualUtil: bCost > 0 ? mCost / bCost : (mCost > 0 ? Infinity : 0),
+      util: bHours > 0 ? act.hours / bHours : (act.hours > 0 ? Infinity : 0),
     };
-  }).filter((r) => r.budgetCost > 0 || r.actualCost > 0 || r.manualCost > 0);
+  }).filter((r) => r.budgetCost > 0 || r.actualCost > 0);
 
   return {
     deal, teams: teamRows, entries: dealEntries, rateCard,
     estHours, budgetHours, budgetCost,
     actualHours: round2(actualHours), actualCost: round2(actualCost),
-    unassignedCost: round2(unassignedCost), unassignedHours: round2(unassignedHours),
+    unassignedHours: round2(unassignedHours), unassignedTeamHours,
     remainingCost: round2(budgetCost - actualCost),
     remainingHours: round2(budgetHours - actualHours),
     util, status: statusOf(util),
-    blendedRate, blendedAll, effectiveRate,
+    blendedRate, blendedAll, effectiveRate, blendedActual,
     juniorCost: round2(juniorCost), juniorHours: round2(juniorHours),
     seniorHours: round2(seniorHours), seniorCost: round2(seniorCost),
-    // מסלול המעקב הידני (נפרד לחלוטין מהחשבונות)
-    progressLog: dealProgress,
-    manualHours, manualCost, manualUtil, manualEffectiveRate, manualUpdatedAt, manualUnassignedHours,
-    manualRemainingCost: round2(budgetCost - manualCost),
-    manualRemainingHours: round2(budgetHours - manualHours),
-    manualStatus: statusOf(manualUtil),
+    // כל דיווחי הביצוע (כולל מוחלפים) + פילוח לפי מקור
+    execution, progressLog: dealProgress, hoursBySource, lastReportAt,
     // תקרת שכ"ט ותעריפים אפקטיביים
-    capBudget, capActual, capManual, effectiveRates, realizedRate, manualRealizedRate,
-    eac, eacBasis, eacVariance,
+    capBudget, capActual, effectiveRates, realizedRate,
+    eac, eacHours, eacBasis, eacVariance, eacHoursVariance,
     timePace, progress,
     agreedFee: agreed, hasFee, margin, marginPct, feeUtil,
     byRole: byRoleRows,
-    alerts: buildAlerts({ deal, teamRows, util, actualCost, budgetCost, eac, feeUtil, unassignedCost, progress, manualUtil, manualCost, capBudget }),
+    alerts: buildAlerts({ deal, teamRows, util, actualHours, budgetHours, actualCost, budgetCost, eac, feeUtil, unassignedHours, progress, capBudget }),
     baselineDelta: baselineDelta(deal, budgetCost),
   };
 }
@@ -573,29 +607,19 @@ function baselineDelta(deal, budgetCost) {
   return { base, delta: round2(budgetCost - base), pct: base > 0 ? (budgetCost - base) / base : null, capturedAt: deal.baseline.capturedAt };
 }
 
-function buildAlerts({ deal, teamRows, util, actualCost, budgetCost, eac, feeUtil, unassignedCost, progress, manualUtil, manualCost, capBudget }) {
+function buildAlerts({ deal, teamRows, util, actualHours, budgetHours, actualCost, budgetCost, eac, feeUtil, unassignedHours, progress, capBudget }) {
   const out = [];
-  // מעקב ידני — הערוץ השוטף, מוצג ראשון ובנפרד מהחשבונות
-  if (budgetCost > 0 && manualCost > 0) {
-    if (manualUtil > 1) out.push({ level: 'over', track: 'manual', text: `מעקב ידני: חריגה של ${fmtMoney(manualCost - budgetCost)} מהתקציב (${fmtPct(manualUtil)} ניצול).` });
-    else if (manualUtil >= THRESHOLDS.risk) out.push({ level: 'risk', track: 'manual', text: `מעקב ידני: ניצול ${fmtPct(manualUtil)} מהתקציב — נותרו ${fmtMoney(budgetCost - manualCost)}.` });
-  }
-  for (const t of teamRows) {
-    if (t.manualCost > 0 && t.manualUtil > 1) {
-      out.push({ level: 'over', track: 'manual', text: `מעקב ידני: הצוות "${t.name}" חרג ב-${fmtMoney(t.manualCost - t.budgetCost)}.`, teamId: t.id });
-    }
-  }
   if (capBudget?.applies) {
     out.push({ level: 'watch', text: `התקציב (${fmtMoney(capBudget.cost)}) גבוה מהתקרה (${fmtMoney(capBudget.collected)}) — הנחה אפקטיבית של ${fmtPct(capBudget.discountPct, 1)} על כל התעריפים.` });
   }
-  if (budgetCost > 0 && util > 1) {
-    out.push({ level: 'over', text: `חריגה מהתקציב: ${fmtMoney(actualCost - budgetCost)} מעל המתוכנן (${fmtPct(util)} ניצול).` });
-  } else if (budgetCost > 0 && util >= THRESHOLDS.risk) {
-    out.push({ level: 'risk', text: `ניצול ${fmtPct(util)} מהתקציב — נותרו ${fmtMoney(budgetCost - actualCost)} בלבד.` });
+  if (budgetHours > 0 && util > 1) {
+    out.push({ level: 'over', text: `חריגה: ${fmtHours(actualHours - budgetHours)} שעות מעל התקציב (${fmtMoney(actualCost - budgetCost)} לפי תעריפי התכנון).` });
+  } else if (budgetHours > 0 && util >= THRESHOLDS.risk) {
+    out.push({ level: 'risk', text: `נשרפו ${fmtPct(util)} משעות התקציב — נותרו ${fmtHours(budgetHours - actualHours)} שעות.` });
   }
   for (const t of teamRows) {
-    if (t.util > 1) out.push({ level: 'over', text: `הצוות "${t.name}" חרג ב-${fmtMoney(t.actualCost - t.budgetCost)}.`, teamId: t.id });
-    else if (t.util >= THRESHOLDS.risk) out.push({ level: 'risk', text: `הצוות "${t.name}" בניצול ${fmtPct(t.util)}.`, teamId: t.id });
+    if (t.util > 1) out.push({ level: 'over', text: `הצוות "${t.name}" חרג ב-${fmtHours(t.actualHours - t.budgetHours)} שעות (${fmtMoney(t.actualCost - t.budgetCost)}).`, teamId: t.id });
+    else if (t.util >= THRESHOLDS.risk) out.push({ level: 'risk', text: `הצוות "${t.name}" בניצול ${fmtPct(t.util)} מהשעות.`, teamId: t.id });
     for (const l of t.lines) {
       if (l.budgetHours > 0 && l.actualHours > l.budgetHours) {
         out.push({ level: 'watch', text: `"${t.name}" · ${l.roleName}: ${fmtHours(l.actualHours)} שעות בפועל מול ${fmtHours(l.budgetHours)} בתקציב.`, teamId: t.id });
@@ -611,8 +635,8 @@ function buildAlerts({ deal, teamRows, util, actualCost, budgetCost, eac, feeUti
   if (progress > 0 && budgetCost > 0 && util > progress + 0.15) {
     out.push({ level: 'watch', text: `קצב השריפה מקדים את ההתקדמות: ${fmtPct(util)} מהתקציב מול ${fmtPct(progress)} התקדמות.` });
   }
-  if (unassignedCost > 0) {
-    out.push({ level: 'watch', text: `${fmtMoney(unassignedCost)} רשומים ללא שיוך לצוות — לא נכללים בבקרת הצוותים.` });
+  if (unassignedHours > 0) {
+    out.push({ level: 'watch', text: `${fmtHours(unassignedHours)} שעות דווחו בלי שיוך לשורת תקציב — אין להן תעריף ולכן אינן נספרות בעלות.` });
   }
   if (!teamRows.length) out.push({ level: 'info', text: 'לא הוגדרו צוותים לעסקה — הוסף צוות כדי לבנות תקציב.' });
   return out;
@@ -628,29 +652,23 @@ export function aggregateTeams(snapshot, teamIds) {
   const t = {
     count: teams.length, names: teams.map((x) => x.name),
     budgetCost: 0, budgetHours: 0, estHours: 0, actualCost: 0, actualHours: 0,
-    manualCost: 0, manualHours: 0,
-    juniorCost: 0, juniorHours: 0, seniorHours: 0, seniorCost: 0, entryCount: 0,
+    juniorCost: 0, juniorHours: 0, seniorHours: 0, seniorCost: 0,
   };
   for (const team of teams) {
     t.budgetCost += team.budgetCost; t.budgetHours += team.budgetHours; t.estHours += team.estHours;
-    t.actualCost += team.actualCost; t.actualHours += team.actualHours; t.entryCount += team.entryCount;
-    t.manualCost += team.manualCost; t.manualHours += team.manualHours;
+    t.actualCost += team.actualCost; t.actualHours += team.actualHours;
     for (const l of team.lines) {
       if (l.junior) { t.juniorCost += l.budgetCost; t.juniorHours += l.budgetHours; }
       else { t.seniorHours += l.budgetHours; t.seniorCost += l.budgetCost; }
     }
   }
-  for (const k of ['budgetCost', 'budgetHours', 'estHours', 'actualCost', 'actualHours', 'manualCost', 'manualHours', 'juniorCost', 'juniorHours', 'seniorHours', 'seniorCost']) {
+  for (const k of ['budgetCost', 'budgetHours', 'estHours', 'actualCost', 'actualHours', 'juniorCost', 'juniorHours', 'seniorHours', 'seniorCost']) {
     t[k] = round2(t[k]);
   }
   t.remainingCost = round2(t.budgetCost - t.actualCost);
   t.remainingHours = round2(t.budgetHours - t.actualHours);
-  t.manualRemainingCost = round2(t.budgetCost - t.manualCost);
-  t.manualRemainingHours = round2(t.budgetHours - t.manualHours);
-  t.util = t.budgetCost > 0 ? t.actualCost / t.budgetCost : (t.actualCost > 0 ? Infinity : 0);
-  t.manualUtil = t.budgetCost > 0 ? t.manualCost / t.budgetCost : (t.manualCost > 0 ? Infinity : 0);
+  t.util = t.budgetHours > 0 ? t.actualHours / t.budgetHours : (t.actualHours > 0 ? Infinity : 0);
   t.status = statusOf(t.util);
-  t.manualStatus = statusOf(t.manualUtil);
   t.blendedAll = t.budgetHours > 0 ? round2(t.budgetCost / t.budgetHours) : 0;
   t.blendedRate = t.seniorHours > 0 ? round2(t.seniorCost / t.seniorHours) : t.blendedAll;
   t.effectiveRate = t.actualHours > 0 ? round2(t.actualCost / t.actualHours) : 0;
@@ -662,22 +680,19 @@ export function aggregateTeams(snapshot, teamIds) {
 export function computePortfolio(snapshots) {
   const t = {
     budgetCost: 0, actualCost: 0, actualHours: 0, budgetHours: 0, agreedFee: 0,
-    manualCost: 0, manualHours: 0, deals: snapshots.length, over: 0, risk: 0,
+    deals: snapshots.length, over: 0, risk: 0,
   };
   for (const s of snapshots) {
     t.budgetCost += s.budgetCost; t.actualCost += s.actualCost;
     t.actualHours += s.actualHours; t.budgetHours += s.budgetHours;
-    t.manualCost += s.manualCost; t.manualHours += s.manualHours;
     t.agreedFee += s.agreedFee;
     // הסטטוס נקבע לפי המסלול השוטף אם הוזן, אחרת לפי החשבונות
-    const st = s.manualCost > 0 ? s.manualStatus : s.status;
-    if (st === 'over') t.over += 1;
-    else if (st === 'risk') t.risk += 1;
+    if (s.status === 'over') t.over += 1;
+    else if (s.status === 'risk') t.risk += 1;
   }
-  t.util = t.budgetCost > 0 ? t.actualCost / t.budgetCost : 0;
-  t.manualUtil = t.budgetCost > 0 ? t.manualCost / t.budgetCost : 0;
+  t.util = t.budgetHours > 0 ? t.actualHours / t.budgetHours : 0;
   t.remainingCost = round2(t.budgetCost - t.actualCost);
-  t.manualRemainingCost = round2(t.budgetCost - t.manualCost);
+  t.remainingHours = round2(t.budgetHours - t.actualHours);
   return t;
 }
 
@@ -711,7 +726,7 @@ export function progressByPeriod(snapshot, period = 'week') {
   };
 
   const map = new Map();
-  for (const p of snapshot.progressLog || []) {
+  for (const p of (snapshot.execution || []).filter((r) => !r.superseded)) {
     const k = keyOf(p.date);
     const cur = map.get(k) || { key: k, hours: 0, cost: 0, count: 0 };
     cur.hours += num(p.hours);

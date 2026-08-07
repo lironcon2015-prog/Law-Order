@@ -1157,7 +1157,7 @@ function exportProgressCSV() {
   const lineLabel = new Map();
   for (const t of snap.teams) for (const l of t.lines) lineLabel.set(l.id, l.person ? `${l.person} · ${l.roleName}` : l.roleName);
   const rows = [['תאריך', 'צוות', 'שורה', 'עורך דין', 'שעות', 'מקור', 'קובץ', 'הערה']];
-  for (const p of [...snap.progressLog].sort((a, b) => (a.date || '').localeCompare(b.date || ''))) {
+  for (const p of [...snap.execution].filter((r) => !r.superseded).sort((a, b) => (a.date || '').localeCompare(b.date || ''))) {
     rows.push([p.date, teamName.get(p.teamId) || '', lineLabel.get(p.lineId) || '', p.person,
       p.hours, p.source === 'import' ? 'יובא' : 'ידני', p.fileName, p.note]);
   }
@@ -1294,26 +1294,22 @@ function exportDealCSV() {
   rows.push([`תקציב עסקה: ${snap.deal.name}`, snap.deal.client, '', '', '', '', '']);
   rows.push([]);
   rows.push(['צוות', 'דרגה', 'חבר צוות', 'שעות מוערכות', 'שעות תקציב', 'תעריף', 'תקציב ₪',
-    'ידני: שעות', 'ידני: ₪', 'ידני: יתרה ₪', 'ידני: ניצול',
-    'חשבונות: שעות', 'חשבונות: ₪', 'חשבונות: יתרה ₪', 'חשבונות: ניצול']);
+    'שעות בפועל', 'עלות בפועל ₪', 'יתרת שעות', 'יתרה ₪', 'ניצול']);
   for (const t of snap.teams) {
     for (const l of t.lines) {
       rows.push([t.name, l.roleName, l.person, l.estHours, l.budgetHours, l.rate, l.budgetCost,
-        l.manualHoursValue, l.manualCost, l.manualRemainingCost, fmtPct(l.manualUtil),
-        l.actualHours, l.actualCost, l.remainingCost, fmtPct(l.util)]);
+        l.actualHours, l.actualCost, l.remainingHours, l.remainingCost, fmtPct(l.util)]);
     }
     rows.push([`${t.name} — סה"כ`, '', '', t.estHours, t.budgetHours, '', t.budgetCost,
-      t.manualHours, t.manualCost, t.manualRemainingCost, fmtPct(t.manualUtil),
-      t.actualHours, t.actualCost, t.remainingCost, fmtPct(t.util)]);
+      t.actualHours, t.actualCost, t.remainingHours, t.remainingCost, fmtPct(t.util)]);
   }
   rows.push([]);
   rows.push(['סה"כ עסקה', '', '', snap.estHours, snap.budgetHours, '', snap.budgetCost,
-    snap.manualHours, snap.manualCost, snap.manualRemainingCost, fmtPct(snap.manualUtil),
-    snap.actualHours, snap.actualCost, snap.remainingCost, fmtPct(snap.util)]);
+    snap.actualHours, snap.actualCost, snap.remainingHours, snap.remainingCost, fmtPct(snap.util)]);
   rows.push(['תעריף בלנדד (ללא ג\'וניור)', snap.blendedRate]);
   rows.push(['תעריף ממוצע כולל', snap.blendedAll]);
-  rows.push(['תעריף אפקטיבי בפועל (חשבונות)', snap.effectiveRate]);
-  rows.push(['תעריף ממוצע לפי המעקב הידני', snap.manualEffectiveRate]);
+  rows.push(['בלנדד בפועל', snap.blendedActual]);
+  rows.push(['תעריף ממוצע בפועל', snap.effectiveRate]);
   if (snap.capBudget.applies) {
     rows.push([]);
     rows.push(['תקרת שכ"ט', snap.agreedFee, 'הנחה אפקטיבית', fmtPct(snap.capBudget.discountPct, 1)]);
