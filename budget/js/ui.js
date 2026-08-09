@@ -4,7 +4,7 @@
 import {
   fmtMoney, fmtHours, fmtPct, STATUS_LABEL, DEAL_STATUSES, FEE_MODELS,
   ENTRY_KINDS, ENTRY_STATUSES, TEAM_COLORS, num, round2, computePortfolio, burnSeries,
-  aggregateTeams, progressByPeriod, sourceLabel,
+  aggregateTeams, progressByPeriod, sourceLabel, dealReview,
 } from './model.js';
 import { barCompare, donut, burnLine, gauge, miniBar } from './charts.js';
 
@@ -264,6 +264,7 @@ export function renderDealHeader(root, { snap, tab }) {
       subtab('progress', 'דיווח ומעקב', 'clock', tab),
       subtab('actuals', 'חשבונות ומסמכים', 'receipt', tab),
       subtab('control', 'בקרה', 'trending', tab),
+      subtab('review', 'תחקיר', 'flag', tab),
       subtab('settings', 'הגדרות', 'settings', tab),
     ]),
   ]);
@@ -822,6 +823,150 @@ export function renderProgressForm(record, { snap }) {
     ]), 'העלות נגזרת מהתעריף של השורה שנבחרה.'),
     field('הערה', el('input', { class: 'input', name: 'note', value: p.note || '', placeholder: 'לדוגמה: דוח שעות 12–18 במאי' })),
   ]);
+}
+
+/* ============================================================
+   טאב תחקיר — איפה חרגנו, ומה זה אומר לתמחור הבא
+   ============================================================ */
+
+export function renderReviewTab(root, { snap }) {
+  const d = snap.deal;
+  const r = dealReview(snap);
+  const sign = (n) => (n > 0 ? '+' : '');
+  const tone = (n) => (n > 0 ? 'neg' : n < 0 ? 'pos' : '');
+
+  if (!r.actualHours) {
+    root.append(el('div', { class: 'empty' }, [
+      el('h2', { text: 'אין עדיין ביצוע לתחקר' }),
+      el('p', { text: 'התחקיר משווה את הביצוע לתכנון. דווח שעות (ידנית או מייבוא דוח) והוא ייבנה מעצמו.' }),
+    ]));
+    return;
+  }
+
+  /* --- 1. שלוש נקודות הייחוס --- */
+  root.append(el('section', { class: 'panel panel--total' }, [
+    el('h2', { class: 'panel__title' }, [icon('flag'), 'הערכה → תקציב → ביצוע']),
+    el('div', { class: 'totals' }, [
+      totalItem('שעות שהוערכו', fmtHours(r.estHours), null, 'ההערכה המקורית, לפני מקדם החריגה.'),
+      totalItem('שעות תקציב', fmtHours(r.budgetHours), null, 'ההערכה בתוספת מקדם החריגה, מעוגלת כלפי מעלה.'),
+      totalItem('שעות בפועל', fmtHours(r.actualHours), null, 'כל השעות שדווחו, מכל מקורות הדיווח.'),
+      totalItem('חריגה מהתקציב', `${sign(r.deltaHours)}${fmtHours(r.deltaHours)} שעות`, null),
+      totalItem('שווי ההערכה', money(r.estCost, d), null, 'שעות ההערכה × תעריפי התכנון — כמה היה צריך להיות אילו נצמדנו להערכה.'),
+      totalItem('שווי התקציב', money(r.budgetCost, d)),
+      totalItem('שווי הביצוע', money(r.actualCost, d)),
+      totalItem('חריגה בכסף', `${sign(r.deltaCost)}${money(r.deltaCost, d)}`),
+    ]),
+  ]));
+
+  /* --- 2. פירוק החריגה: כמות מול תמהיל --- */
+  const totalEffect = Math.abs(r.volumeEffect) + Math.abs(r.mixEffect);
+  const pct = (v) => (totalEffect > 0 ? Math.round((Math.abs(v) / totalEffect) * 100) : 0);
+  root.append(el('section', { class: 'panel' }, [
+    el('h2', { class: 'panel__title' }, [icon('layers'), 'ממה נובעת החריגה']),
+    el('p', { class: 'panel__hint', text: 'הפער בכסף מול התקציב מפוצל לשניים: כמה נובע מעוד שעות, וכמה מכך שהשעות היו יקרות יותר מהמתוכנן (תמהיל דרגות שונה).' }),
+    el('div', { class: 'facts facts--lg' }, [
+      fact(`עוד שעות (${pct(r.volumeEffect)}%)`, `${sign(r.volumeEffect)}${money(r.volumeEffect, d)}`, tone(r.volumeEffect)),
+      fact(`תמהיל יקר יותר (${pct(r.mixEffect)}%)`, `${sign(r.mixEffect)}${money(r.mixEffect, d)}`, tone(r.mixEffect)),
+      fact('בלנדד מתוכנן', money(r.blendedPlanned, d)),
+      fact('בלנדד בפועל', money(r.blendedActual, d), r.blendedActual < r.blendedPlanned ? 'neg' : 'pos'),
+    ]),
+  ]));
+
+  /* --- 3. מוקדי החריגה --- */
+  root.append(el('section', { class: 'panel' }, [
+    el('h2', { class: 'panel__title' }, [icon('alert'), 'מוקדי החריגה']),
+    el('p', { class: 'panel__hint', text: 'כל שורות התקציב, ממוינות לפי גודל הסטייה בכסף. "מקדם שנדרש" = כמה היה צריך להוסיף להערכה כדי שהתקציב יכסה את הביצוע.' }),
+    el('div', { class: 'btable-wrap' }, el('table', { class: 'btable' }, [
+      el('thead', {}, el('tr', {}, [
+        el('th', { text: 'צוות' }), el('th', { text: 'דרגה / אדם' }),
+        el('th', { text: 'הוערך' }), el('th', { text: 'תוקצב' }), el('th', { text: 'בפועל' }),
+        el('th', { text: 'Δ שעות' }), el('th', { text: 'Δ ₪' }), el('th', { text: 'ניצול' }), el('th', { text: 'מקדם שנדרש' }),
+      ])),
+      el('tbody', {}, r.hotspots.map((l) => el('tr', {}, [
+        el('td', {}, [el('span', { class: 'legend__dot', style: `background:${l.teamColor}` }), el('span', { text: ` ${l.teamName}` })]),
+        el('td', { text: l.person ? `${l.person} · ${l.roleName}` : l.roleName }),
+        el('td', { class: 'num', text: fmtHours(l.estHours) }),
+        el('td', { class: 'num', text: fmtHours(l.budgetHours) }),
+        el('td', { class: 'num td-strong', text: fmtHours(l.actualHours) }),
+        el('td', { class: `num ${tone(l.deltaHours)}`, text: `${sign(l.deltaHours)}${fmtHours(l.deltaHours)}` }),
+        el('td', { class: `num ${tone(l.deltaCost)}`, text: `${sign(l.deltaCost)}${money(l.deltaCost, d)}` }),
+        el('td', { class: `num pct pct--${statusOfUtil(l.util)}`, text: fmtPct(l.util) }),
+        el('td', { class: 'num', text: l.vsEstimate === null ? '—' : fmtPct(l.vsEstimate) }),
+      ]))),
+    ])),
+  ]));
+
+  /* --- 4. תמהיל הדרגות --- */
+  if (r.byRole.length) {
+    root.append(el('section', { class: 'panel' }, [
+      el('h2', { class: 'panel__title' }, [icon('users'), 'תמהיל הדרגות — מתוכנן מול בפועל']),
+      el('div', { class: 'btable-wrap' }, el('table', { class: 'btable' }, [
+        el('thead', {}, el('tr', {}, [
+          el('th', { text: 'דרגה' }), el('th', { text: 'תעריף' }),
+          el('th', { text: 'שעות מתוכננות' }), el('th', { text: '% מהתכנון' }),
+          el('th', { text: 'שעות בפועל' }), el('th', { text: '% מהביצוע' }),
+          el('th', { text: 'Δ שעות' }), el('th', { text: 'Δ ₪' }),
+        ])),
+        el('tbody', {}, r.byRole.map((x) => el('tr', {}, [
+          el('td', { text: x.name + (x.junior ? ' (ג\'וניור)' : '') }),
+          el('td', { class: 'num', text: money(x.rate, d) }),
+          el('td', { class: 'num', text: fmtHours(x.budgetHours) }),
+          el('td', { class: 'num', text: fmtPct(x.plannedShare) }),
+          el('td', { class: 'num td-strong', text: fmtHours(x.actualHours) }),
+          el('td', { class: `num ${x.actualShare > x.plannedShare && !x.junior ? 'neg' : ''}`, text: fmtPct(x.actualShare) }),
+          el('td', { class: `num ${tone(x.deltaHours)}`, text: `${sign(x.deltaHours)}${fmtHours(x.deltaHours)}` }),
+          el('td', { class: `num ${tone(x.deltaCost)}`, text: `${sign(x.deltaCost)}${money(x.deltaCost, d)}` }),
+        ]))),
+      ])),
+    ]));
+  }
+
+  /* --- 5. לפי אדם --- */
+  if (r.people.length) {
+    root.append(el('section', { class: 'panel' }, [
+      el('h2', { class: 'panel__title' }, [icon('users'), 'לפי אדם']),
+      el('div', { class: 'btable-wrap' }, el('table', { class: 'btable' }, [
+        el('thead', {}, el('tr', {}, [
+          el('th', { text: 'עורך דין' }), el('th', { text: 'צוותים' }),
+          el('th', { text: 'תוקצב' }), el('th', { text: 'בפועל' }), el('th', { text: 'Δ שעות' }), el('th', { text: 'Δ ₪' }), el('th', { text: 'ניצול' }),
+        ])),
+        el('tbody', {}, r.people.map((x) => el('tr', {}, [
+          el('td', { text: x.name }),
+          el('td', { class: 'muted', text: x.teams.join(' · ') }),
+          el('td', { class: 'num', text: fmtHours(x.budgetHours) }),
+          el('td', { class: 'num td-strong', text: fmtHours(x.actualHours) }),
+          el('td', { class: `num ${tone(x.deltaHours)}`, text: `${sign(x.deltaHours)}${fmtHours(x.deltaHours)}` }),
+          el('td', { class: `num ${tone(x.deltaCost)}`, text: `${sign(x.deltaCost)}${money(x.deltaCost, d)}` }),
+          el('td', { class: `num pct pct--${statusOfUtil(x.util)}`, text: fmtPct(x.util) }),
+        ]))),
+      ])),
+    ]));
+  }
+
+  /* --- 6. מסקנות לתמחור הבא --- */
+  root.append(el('section', { class: 'panel panel--cap panel--cap-on' }, [
+    el('h2', { class: 'panel__title' }, [icon('trending'), 'מסקנות לתמחור הבא']),
+    el('div', { class: 'facts facts--lg' }, [
+      fact('מקדם החריגה שהיה בשימוש', fmtPct(r.usedFactor)),
+      fact('המקדם שהיה נדרש בפועל', r.requiredFactor === null ? '—' : fmtPct(r.requiredFactor), r.requiredFactor > r.usedFactor ? 'neg' : 'pos'),
+      fact('מקדם מוצע לעסקה דומה', r.suggestedFactor === null ? '—' : fmtPct(r.suggestedFactor)),
+      fact('שכ"ט שהיה מכסה את הביצוע', money(r.actualCost, d)),
+      r.hasFee ? fact('מול שכ"ט מוסכם', money(r.agreedFee, d)) : null,
+      r.hasFee ? fact('פער', `${sign(r.feeGap)}${money(r.feeGap, d)}`, tone(r.feeGap)) : null,
+      r.capActual?.applies ? fact('התקבל בפועל לשעה', money(r.realizedRate, d), 'neg') : null,
+    ]),
+    el('p', { class: 'panel__hint', text: r.requiredFactor === null
+      ? 'אין שעות מוערכות להשוואה — הזן הערכות בגיליון כדי לקבל המלצת מקדם.'
+      : r.requiredFactor > r.usedFactor
+        ? `ההערכה הייתה נמוכה ב-${fmtPct(r.requiredFactor)} מהביצוע. בעסקה דומה כדאי מקדם ${fmtPct(r.suggestedFactor)} — או הערכת שעות גבוהה יותר מלכתחילה.`
+        : 'התקציב כיסה את הביצוע. אפשר לשקול מקדם נמוך יותר בהצעה הבאה כדי להיות תחרותי יותר.' }),
+    el('div', { class: 'form-actions form-actions--wrap' }, [
+      el('button', { class: 'btn btn--primary btn--sm', type: 'button', dataset: { action: 'clone-from-actual' } },
+        [icon('copy'), 'צור עסקה חדשה לפי הביצוע בפועל']),
+      el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'export-review' } },
+        [icon('download'), 'ייצוא התחקיר (CSV)']),
+    ]),
+  ]));
 }
 
 /** גישה לסיכום התקופתי מחוץ למודול (לייצוא CSV) */

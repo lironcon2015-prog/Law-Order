@@ -4,7 +4,7 @@
 import * as store from './store.js';
 import * as db from './db.js';
 import {
-  computeDeal, uid, num, round2, fmtPct, roundUpHours,
+  computeDeal, dealReview, uid, num, round2, fmtPct, roundUpHours,
   DEFAULT_TEAM_NAMES, ENTRY_KINDS, ENTRY_STATUSES,
 } from './model.js';
 import * as ui from './ui.js';
@@ -125,6 +125,7 @@ function render() {
     else if (state.tab === 'progress') ui.renderProgressTab(body, { snap, period: state.progressPeriod });
     else if (state.tab === 'actuals') ui.renderActualsTab(body, { snap, filters: state.filters });
     else if (state.tab === 'control') ui.renderControlTab(body, { snap });
+    else if (state.tab === 'review') ui.renderReviewTab(body, { snap });
     else { ui.renderDealSettings(body, { snap, rateCards: store.cache.rateCards }); refreshFolderState(); }
     return;
   }
@@ -374,6 +375,18 @@ async function onClick(e) {
 
     case 'export-progress':
       return exportProgressCSV();
+
+    case 'export-review':
+      return exportReviewCSV();
+
+    case 'clone-from-actual': {
+      const deal = store.getDeal(state.dealId);
+      return confirmModal('עסקה חדשה לפי הביצוע', `תיווצר עסקה חדשה עם אותם צוותים ושורות, כשהשעות המוערכות בה הן השעות שבוצעו בפועל ב"${deal.name}". הדיווחים לא מועתקים.`, async () => {
+        const copy = await store.duplicateDealFromActual(state.dealId, `${deal.name} — תבנית לפי ביצוע`);
+        ui.toast('העסקה נוצרה מהביצוע בפועל');
+        goDeal(copy.id, 'budget');
+      }, 'צור עסקה');
+    }
 
     case 'split-by-person':
       return openSplitModal(target.dataset.teamId);
@@ -1180,6 +1193,47 @@ function renderProgressImportModal() {
   const cancel = btn('ביטול');
   cancel.addEventListener('click', closeModal);
   openModal({ title: `ייבוא דוח שעות · ${importCtx.file.name}`, body, actions: [save, cancel], wide: true });
+}
+
+function exportReviewCSV() {
+  const snap = currentSnapshot();
+  if (!snap) return;
+  const r = dealReview(snap);
+  const rows = [[`תחקיר עסקה: ${snap.deal.name}`, snap.deal.client]];
+  rows.push([]);
+  rows.push(['מדד', 'שעות', 'כסף']);
+  rows.push(['הערכה', r.estHours, r.estCost]);
+  rows.push(['תקציב', r.budgetHours, r.budgetCost]);
+  rows.push(['בפועל', r.actualHours, r.actualCost]);
+  rows.push(['חריגה מהתקציב', r.deltaHours, r.deltaCost]);
+  rows.push(['חריגה מההערכה', r.deltaVsEstimateHours, r.deltaVsEstimateCost]);
+  rows.push([]);
+  rows.push(['פירוק החריגה', 'כסף']);
+  rows.push(['עוד שעות (כמות)', r.volumeEffect]);
+  rows.push(['תמהיל יקר יותר', r.mixEffect]);
+  rows.push(['בלנדד מתוכנן', r.blendedPlanned]);
+  rows.push(['בלנדד בפועל', r.blendedActual]);
+  rows.push([]);
+  rows.push(['מקדם בשימוש', fmtPct(r.usedFactor)], ['מקדם שנדרש', r.requiredFactor === null ? '' : fmtPct(r.requiredFactor)],
+    ['מקדם מוצע', r.suggestedFactor === null ? '' : fmtPct(r.suggestedFactor)]);
+  rows.push([]);
+  rows.push(['צוות', 'דרגה / אדם', 'הוערך', 'תוקצב', 'בפועל', 'Δ שעות', 'Δ ₪', 'ניצול', 'מקדם שנדרש']);
+  for (const l of r.hotspots) {
+    rows.push([l.teamName, l.person ? `${l.person} · ${l.roleName}` : l.roleName,
+      l.estHours, l.budgetHours, l.actualHours, l.deltaHours, l.deltaCost, fmtPct(l.util),
+      l.vsEstimate === null ? '' : fmtPct(l.vsEstimate)]);
+  }
+  rows.push([]);
+  rows.push(['דרגה', 'תעריף', 'שעות מתוכננות', '% מהתכנון', 'שעות בפועל', '% מהביצוע', 'Δ שעות', 'Δ ₪']);
+  for (const x of r.byRole) {
+    rows.push([x.name, x.rate, x.budgetHours, fmtPct(x.plannedShare), x.actualHours, fmtPct(x.actualShare), x.deltaHours, x.deltaCost]);
+  }
+  if (r.people.length) {
+    rows.push([]);
+    rows.push(['עורך דין', 'צוותים', 'תוקצב', 'בפועל', 'Δ שעות', 'Δ ₪']);
+    for (const x of r.people) rows.push([x.name, x.teams.join(' · '), x.budgetHours, x.actualHours, x.deltaHours, x.deltaCost]);
+  }
+  downloadFile(`תחקיר-${snap.deal.name}-${stamp()}.csv`, toCSV(rows));
 }
 
 function exportProgressCSV() {

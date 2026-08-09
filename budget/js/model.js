@@ -646,6 +646,127 @@ function buildAlerts({ deal, teamRows, util, actualHours, budgetHours, actualCos
  * חישוב מצרפי לקבוצת צוותים מסומנים בתוך עסקה.
  * אותה מתודולוגיה כמו סיכום העסקה, רק על תת-קבוצה.
  */
+/* ============================================================
+   תחקיר עסקה — תכנון מול ביצוע, ומה זה אומר לתמחור הבא
+   ============================================================ */
+
+/** המקדם שהיה נדרש כדי שהתקציב יכסה בדיוק את הביצוע: בפועל ÷ מוערך − 1 */
+export function requiredFactor(estHours, actualHours) {
+  const est = num(estHours);
+  if (est <= 0) return null;
+  return round2(num(actualHours) / est - 1);
+}
+
+/**
+ * תחקיר מלא של עסקה. הכל נגזר מהסנאפשוט — פונקציה טהורה, בלי DOM/DB.
+ * המתודולוגיה:
+ *  - שלוש נקודות ייחוס לכל רמה: **הערכה** (estHours) → **תקציב** (est×(1+מקדם), מעוגל) → **בפועל**.
+ *  - פירוק החריגה בכסף לשני גורמים: *כמות* (עוד שעות) ו*תמהיל* (שעות יקרות יותר).
+ *  - "המקדם שהיה נדרש" = בפועל ÷ מוערך − 1, ברמת העסקה, הצוות והשורה.
+ */
+export function dealReview(snapshot) {
+  const d = snapshot.deal;
+  const estHours = snapshot.estHours;
+  const budgetHours = snapshot.budgetHours;
+  const actualHours = snapshot.actualHours;
+
+  // עלות ההערכה המקורית (לפני מקדם החריגה) — "כמה היה צריך להיות אילו נצמדנו להערכה"
+  let estCost = 0;
+  for (const t of snapshot.teams) for (const l of t.lines) estCost += num(l.estHours) * l.rate;
+  estCost = round2(estCost);
+
+  // פירוק החריגה בכסף מול התקציב: כמות מול תמהיל
+  const plannedAvgRate = budgetHours > 0 ? snapshot.budgetCost / budgetHours : 0;
+  const volumeEffect = round2((actualHours - budgetHours) * plannedAvgRate);
+  const mixEffect = round2((snapshot.actualCost - snapshot.budgetCost) - volumeEffect);
+
+  // שורות: כל שורת תקציב עם הסטייה שלה
+  const lines = [];
+  for (const t of snapshot.teams) {
+    for (const l of t.lines) {
+      if (!num(l.estHours) && !l.actualHours) continue;
+      lines.push({
+        teamId: t.id, teamName: t.name, teamColor: t.color, lineId: l.id,
+        roleId: l.roleId, roleName: l.roleName, person: l.person, junior: l.junior, rate: l.rate,
+        estHours: round2(num(l.estHours)), budgetHours: l.budgetHours, actualHours: l.actualHours,
+        budgetCost: l.budgetCost, actualCost: l.actualCost,
+        deltaHours: round2(l.actualHours - l.budgetHours),
+        deltaCost: round2(l.actualCost - l.budgetCost),
+        vsEstimate: requiredFactor(l.estHours, l.actualHours),
+        util: l.util,
+      });
+    }
+  }
+  const hotspots = [...lines].sort((a, b) => Math.abs(b.deltaCost) - Math.abs(a.deltaCost));
+
+  // צוותים
+  const teams = snapshot.teams.map((t) => ({
+    id: t.id, name: t.name, color: t.color, factor: t.factor,
+    estHours: t.estHours, budgetHours: t.budgetHours, actualHours: t.actualHours,
+    budgetCost: t.budgetCost, actualCost: t.actualCost,
+    deltaHours: round2(t.actualHours - t.budgetHours),
+    deltaCost: round2(t.actualCost - t.budgetCost),
+    requiredFactor: requiredFactor(t.estHours, t.actualHours),
+    share: snapshot.actualCost > 0 ? t.actualCost / snapshot.actualCost : 0,
+    util: t.util,
+  })).sort((a, b) => b.deltaCost - a.deltaCost);
+
+  // תמהיל לפי דרגה: אחוז השעות המתוכנן מול בפועל
+  const byRole = snapshot.byRole.map((r) => ({
+    ...r,
+    plannedShare: budgetHours > 0 ? r.budgetHours / budgetHours : 0,
+    actualShare: actualHours > 0 ? r.actualHours / actualHours : 0,
+    deltaHours: round2(r.actualHours - r.budgetHours),
+    deltaCost: round2(r.actualCost - r.budgetCost),
+  }));
+
+  // לפי אדם (חוצה צוותים) — רק כשיש שמות על השורות
+  const peopleMap = new Map();
+  for (const l of lines) {
+    const name = String(l.person || '').trim();
+    if (!name) continue;
+    const cur = peopleMap.get(name) || { name, budgetHours: 0, actualHours: 0, budgetCost: 0, actualCost: 0, teams: new Set() };
+    cur.budgetHours += l.budgetHours; cur.actualHours += l.actualHours;
+    cur.budgetCost += l.budgetCost; cur.actualCost += l.actualCost;
+    cur.teams.add(l.teamName);
+    peopleMap.set(name, cur);
+  }
+  const people = [...peopleMap.values()].map((p) => ({
+    name: p.name, teams: [...p.teams],
+    budgetHours: round2(p.budgetHours), actualHours: round2(p.actualHours),
+    budgetCost: round2(p.budgetCost), actualCost: round2(p.actualCost),
+    deltaHours: round2(p.actualHours - p.budgetHours),
+    deltaCost: round2(p.actualCost - p.budgetCost),
+    util: p.budgetHours > 0 ? p.actualHours / p.budgetHours : (p.actualHours > 0 ? Infinity : 0),
+  })).sort((a, b) => b.actualHours - a.actualHours);
+
+  const needed = requiredFactor(estHours, actualHours);
+  // המלצה למקדם הבא — עיגול כלפי מעלה ל-5%, עם רצפה של המקדם הנוכחי כשלא חרגנו
+  const suggestedFactor = needed === null ? null : Math.max(0, Math.ceil(needed * 20) / 20);
+
+  return {
+    deal: d,
+    estHours, budgetHours, actualHours,
+    estCost, budgetCost: snapshot.budgetCost, actualCost: snapshot.actualCost,
+    deltaHours: round2(actualHours - budgetHours),
+    deltaCost: round2(snapshot.actualCost - snapshot.budgetCost),
+    deltaVsEstimateHours: round2(actualHours - estHours),
+    deltaVsEstimateCost: round2(snapshot.actualCost - estCost),
+    util: snapshot.util,
+    volumeEffect, mixEffect,
+    usedFactor: d.overrunFactor, requiredFactor: needed, suggestedFactor,
+    blendedPlanned: snapshot.blendedRate, blendedActual: snapshot.blendedActual,
+    effectiveRate: snapshot.effectiveRate,
+    hasFee: snapshot.hasFee, agreedFee: snapshot.agreedFee,
+    capActual: snapshot.capActual, realizedRate: snapshot.realizedRate,
+    // כמה שכ"ט היה נדרש כדי לכסות את מה שבוצע בפועל
+    feeGap: snapshot.hasFee ? round2(snapshot.actualCost - snapshot.agreedFee) : null,
+    teams, hotspots, byRole, people,
+    hoursBySource: snapshot.hoursBySource,
+    lastReportAt: snapshot.lastReportAt,
+  };
+}
+
 export function aggregateTeams(snapshot, teamIds) {
   const ids = new Set(teamIds || []);
   const teams = snapshot.teams.filter((t) => ids.has(t.id));

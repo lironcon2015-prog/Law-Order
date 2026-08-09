@@ -531,6 +531,35 @@ export async function duplicateDeal(dealId, newName) {
   return deal;
 }
 
+/**
+ * עסקה חדשה שבה **השעות המוערכות הן השעות שבוצעו בפועל** — סגירת המעגל של התחקיר:
+ * ההערכה הבאה מתחילה מהמציאות ולא מהניחוש הקודם. דיווחי הביצוע אינם מועתקים.
+ */
+export async function duplicateDealFromActual(dealId, newName) {
+  const src = getDeal(dealId);
+  if (!src) throw new Error('עסקה לא נמצאה');
+  const snap = snapshotOf(dealId);
+  const actualByLine = new Map();
+  for (const t of snap.teams) for (const l of t.lines) actualByLine.set(l.id, l.actualHours);
+
+  const deal = await saveDeal({
+    ...src, id: undefined, name: newName || `${src.name} — לפי ביצוע`,
+    baseline: null, progressPct: 0, createdAt: new Date().toISOString(),
+  });
+  const clones = teamsOf(dealId).map((t, i) => normalizeTeam({
+    ...t, id: undefined, dealId: deal.id, order: i,
+    lines: t.lines.map((l) => ({
+      ...l, id: undefined,
+      estHours: round2(actualByLine.get(l.id) ?? num(l.estHours)),
+      hoursOverride: null, manualHours: null, manualUpdatedAt: '',
+    })),
+  }, i));
+  cache.teams.push(...clones);
+  await db.putMany('teams', clones);
+  notify('deal');
+  return deal;
+}
+
 export async function deleteDeal(dealId) {
   const teamIds = teamsOf(dealId).map((t) => t.id);
   const entryIds = entriesOf(dealId).map((e) => e.id);
