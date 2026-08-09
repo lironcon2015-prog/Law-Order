@@ -13,7 +13,7 @@ import { readTabularFile } from './xlsx.js';
 import { pdfToSheets, isPdf } from './pdf-table.js';
 import {
   detectHeaderRow, guessMapping, rowsToEntries, markDuplicates, parseBudgetSheet, collectPeople,
-  rowsToProgress,
+  rowsToProgress, sheetBody, personKey, fuzzyPersonMatch,
 } from './importer.js';
 
 /* ============================================================
@@ -123,7 +123,7 @@ function render() {
     const body = ui.el('div', { class: 'tab-body' });
     els.main.append(body);
     if (state.tab === 'budget') ui.renderBudgetTab(body, { snap, rateCard: store.rateCardFor(snap.deal), selected: state.selectedTeams });
-    else if (state.tab === 'progress') ui.renderProgressTab(body, { snap, period: state.progressPeriod });
+    else if (state.tab === 'progress') ui.renderProgressTab(body, { snap, period: state.progressPeriod, sources: store.dataSourcesOf(snap.deal.id) });
     else if (state.tab === 'actuals') ui.renderActualsTab(body, { snap, filters: state.filters });
     else if (state.tab === 'control') ui.renderControlTab(body, { snap });
     else if (state.tab === 'review') ui.renderReviewTab(body, { snap });
@@ -296,7 +296,10 @@ function bindEvents() {
     e.preventDefault();
     document.body.classList.remove('dragging-file');
     if (state.view !== 'deal') { ui.toast('בחר עסקה לפני העלאת קובץ', 'error'); return; }
-    await startEntryImport(e.dataTransfer.files[0]);
+    // הקובץ נכנס למסלול של הטאב שבו נמצאים: דוח שעות במעקב, חשבון בחשבונות
+    const file = e.dataTransfer.files[0];
+    if (state.tab === 'progress') await startProgressImport(file);
+    else await startEntryImport(file);
   });
 
   window.addEventListener('keydown', (e) => {
@@ -378,6 +381,20 @@ async function onClick(e) {
         ui.toast('העדכון נמחק');
         render();
       }, 'מחק');
+
+    case 'delete-source': {
+      const key = target.dataset.sourceKey;
+      const src = store.dataSourcesOf(state.dealId).find((s) => s.key === key);
+      if (!src) return;
+      return confirmModal('מחיקת מקור מידע',
+        `"${src.label}" — ${src.count} רשומות · ${src.hours} שעות יימחקו מהמעקב, יחד עם הקובץ השמור.`,
+        async () => {
+          for (const id of src.fileIds || []) await fileStore.deleteDocument(id).catch(() => {});
+          const res = await store.deleteDataSource(key, state.dealId);
+          ui.toast(`המקור נמחק · ${res.records} רשומות ירדו מהמעקב`);
+          render();
+        }, 'מחק');
+    }
 
     case 'import-progress':
       return pickFile((file) => startProgressImport(file));
@@ -918,21 +935,23 @@ async function startEntryImport(file) {
 /** מרענן את רשימת האנשים בקובץ ואת השיוך שלהם — מהזיכרון השמור, בלי לדרוס בחירה ידנית */
 function syncImportPeople() {
   const { sheets, sheetIndex, headerRow, mapping } = importCtx;
-  const rows = sheets[sheetIndex].rows.slice(headerRow + 1);
+  const rows = sheetBody(sheets[sheetIndex].rows, headerRow);
   importCtx.people = collectPeople(rows, mapping);
 
   const remembered = store.peopleTeamIdsFor(state.dealId);
   const teams = store.teamsOf(state.dealId);
   const teamByName = new Map(teams.map((t) => [String(t.name).trim().toLowerCase(), t.id]));
+  const rememberedKeys = Object.keys(remembered);
   const next = {};
   for (const p of importCtx.people) {
+    const memKey = fuzzyPersonMatch(p.key, rememberedKeys)?.key || (remembered[p.legacyKey] ? p.legacyKey : p.key);
     // 1) בחירה ידנית בהצגה הנוכחית  2) זיכרון קודם  3) הצוות שכתוב בשורה עצמה
     next[p.key] = importCtx.peopleTeams[p.key]
-      ?? remembered[p.key]
+      ?? remembered[memKey]
       ?? (p.teamHint ? (teamByName.get(p.teamHint.toLowerCase()) || '') : '')
       ?? '';
     importCtx.peopleRemembered = importCtx.peopleRemembered || {};
-    importCtx.peopleRemembered[p.key] = !!remembered[p.key];
+    importCtx.peopleRemembered[p.key] = !!remembered[memKey];
   }
   importCtx.peopleTeams = next;
 }
@@ -940,7 +959,7 @@ function syncImportPeople() {
 function computeImportPreview() {
   const { sheets, sheetIndex, headerRow, mapping, defaultTeam, peopleTeams } = importCtx;
   const snap = currentSnapshot();
-  const rows = sheets[sheetIndex].rows.slice(headerRow + 1).filter((r) => r && r.some((c) => c !== null && c !== undefined && c !== ''));
+  const rows = sheetBody(sheets[sheetIndex].rows, headerRow);
   const { entries, warnings, skipped } = rowsToEntries(rows, mapping, {
     dealId: state.dealId,
     teams: snap.teams,
@@ -1089,7 +1108,7 @@ async function startProgressImport(file) {
 /** מזהה את האנשים בדוח ומשייך כל אחד לשורת תקציב (לפי הזיכרון, שם השורה או הדרגה) */
 function syncProgressPeople() {
   const { sheets, sheetIndex, headerRow, mapping } = importCtx;
-  const rows = sheets[sheetIndex].rows.slice(headerRow + 1);
+  const rows = sheetBody(sheets[sheetIndex].rows, headerRow);
   importCtx.people = collectPeople(rows, mapping);
 
   const snap = currentSnapshot();
@@ -1100,20 +1119,39 @@ function syncProgressPeople() {
   const lines = [];
   for (const t of snap.teams) for (const l of t.lines) lines.push({ teamId: t.id, lineId: l.id, roleId: l.roleId, person: l.person, roleName: l.roleName });
 
+  // מועמדים לזיהוי מקורב: אנשים שיש להם שורת תקציב, ואנשים שכבר מוכרים מהזיכרון
+  const lineKeys = new Map();          // personKey → שורה
+  for (const l of lines) { const k = personKey(l.person); if (k && !lineKeys.has(k)) lineKeys.set(k, l); }
+  const memoryKeys = Object.keys(memory);
+
   const next = {};
+  const matches = {};
   for (const p of importCtx.people) {
     if (importCtx.peopleLines[p.key]) { next[p.key] = importCtx.peopleLines[p.key]; continue; }
-    const teamId = remembered[p.key] || '';
-    const roleName = memory[p.key]?.roleName || '';
-    // 1) שורה על שם האדם  2) שורה של הדרגה הזכורה בצוות שלו  3) ריק
-    const byPerson = lines.find((l) => norm(l.person) && norm(l.person) === norm(p.name));
-    const byRole = teamId && roleName
-      ? lines.find((l) => l.teamId === teamId && norm(l.roleName) === norm(roleName))
+
+    // 1) שורה שנושאת את שמו — כולל וריאציות כתיב ("עו"ד דנה כהן" / "כהן, דנה" / "ד. כהן")
+    const byName = fuzzyPersonMatch(p.key, [...lineKeys.keys()]);
+    // 2) הזיכרון: הצוות שאליו שויך בעבר + הדרגה שנרשמה לו
+    const memHit = fuzzyPersonMatch(p.key, memoryKeys);
+    const memKey = memHit?.key || (memory[p.legacyKey] ? p.legacyKey : '');
+    const teamId = remembered[memKey] || remembered[p.key] || '';
+    const roleName = memory[memKey]?.roleName || '';
+    // 3) הדרגה שכתובה בדוח עצמו, בתוך הצוות הזכור
+    const wantRole = roleName || p.roleHint || '';
+    const byRole = teamId && wantRole
+      ? lines.find((l) => l.teamId === teamId && norm(l.roleName) === norm(wantRole))
       : null;
-    const hit = byPerson || byRole || null;
+
+    const hit = (byName ? lineKeys.get(byName.key) : null) || byRole || null;
     next[p.key] = hit ? `${hit.teamId}|${hit.lineId}` : '';
+    if (hit) {
+      matches[p.key] = byName && !byName.exact
+        ? `זוהה כ"${lineKeys.get(byName.key).person}"`
+        : byName ? '' : (byRole ? `לפי הדרגה "${wantRole}"${memKey ? ' והצוות הזכור' : ''}` : '');
+    }
   }
   importCtx.peopleLines = next;
+  importCtx.peopleMatch = matches;
 }
 
 /** שיוך מהיר של כל האנשים בדוח לצוות אחד: לפי שורה על שמם, ואם אין — לפי הדרגה שבדוח */
@@ -1122,8 +1160,10 @@ function assignPeopleToTeam(teamId) {
   const team = store.getTeam(teamId);
   if (!team) return;
   const norm = (s) => String(s || '').trim().toLowerCase();
+  const keys = team.lines.map((l) => personKey(l.person)).filter(Boolean);
   for (const p of importCtx.people || []) {
-    const byPerson = team.lines.find((l) => norm(l.person) && norm(l.person) === norm(p.name));
+    const hitKey = fuzzyPersonMatch(p.key, keys)?.key || '';
+    const byPerson = hitKey ? team.lines.find((l) => personKey(l.person) === hitKey) : null;
     const byRole = p.roleHint ? team.lines.find((l) => norm(l.roleName) === norm(p.roleHint)) : null;
     const hit = byPerson || byRole || team.lines[0];
     if (hit) importCtx.peopleLines[p.key] = `${team.id}|${hit.id}`;
@@ -1132,14 +1172,14 @@ function assignPeopleToTeam(teamId) {
 
 function progressPreview() {
   const { sheets, sheetIndex, headerRow, mapping, cumulative, peopleLines, file } = importCtx;
-  const rows = sheets[sheetIndex].rows.slice(headerRow + 1).filter((r) => r && r.some((c) => c !== null && c !== undefined && c !== ''));
+  const rows = sheetBody(sheets[sheetIndex].rows, headerRow);
   const currentByLine = new Map();
   for (const [, target] of Object.entries(peopleLines)) {
     const lineId = String(target || '').split('|')[1];
     if (lineId && !currentByLine.has(lineId)) currentByLine.set(lineId, store.manualHoursOfLine(lineId));
   }
   const resolve = (person) => {
-    const target = peopleLines[importerNormPerson(person)];
+    const target = peopleLines[personKey(person)];
     if (!target) return null;
     const [teamId, lineId] = target.split('|');
     const line = lineId ? store.findLine(lineId) : null;
@@ -1156,7 +1196,6 @@ function progressPreview() {
   return res;
 }
 
-const importerNormPerson = (s) => String(s ?? '').trim().toLowerCase().replace(/["'׳״]/g, '').replace(/\s+/g, ' ');
 
 function renderProgressImportModal() {
   const snap = currentSnapshot();
@@ -1169,6 +1208,7 @@ function renderProgressImportModal() {
     dateRange: res.dateRange, overlap: importCtx.overlap || 'skip',
     billPeriods: res.billPeriods || [],
     knownPeriods: store.billPeriodsOf(state.dealId),
+    peopleMatch: importCtx.peopleMatch || {},
   });
 
   const save = btn('הוסף למעקב', { primary: true, iconName: 'check' });

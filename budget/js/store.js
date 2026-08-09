@@ -229,6 +229,81 @@ export async function deleteProgressBatch(batchId) {
   return ids.length;
 }
 
+/* ============================================================
+   מקורות המידע של הביצוע
+   ============================================================ */
+
+/**
+ * כל מקורות הדיווח של העסקה — דוח שעות שיובא, חשבון שיובא, והזנה ידנית —
+ * עם ההיקף שנגזר מכל אחד. משמש למחיקת מקור על כל מה שנלקח ממנו.
+ * @returns {Array<{key,kind,label,fileName,fileId,count,hours,periods,from,to,deletable}>}
+ */
+export function dataSourcesOf(dealId) {
+  const out = new Map();
+  const touch = (key, base) => {
+    if (!out.has(key)) out.set(key, { key, count: 0, hours: 0, periods: new Set(), from: '', to: '', files: new Set(), ...base });
+    return out.get(key);
+  };
+  const add = (g, { hours, date, period, fileId }) => {
+    g.count += 1;
+    g.hours = round2(g.hours + num(hours));
+    if (period) g.periods.add(period);
+    if (date) { if (!g.from || date < g.from) g.from = date; if (!g.to || date > g.to) g.to = date; }
+    if (fileId) g.files.add(fileId);
+  };
+
+  for (const p of progressOf(dealId)) {
+    const isImport = p.source === 'import';
+    const key = isImport ? `progress:${p.batchId || p.fileName || 'ללא שם'}` : 'manual';
+    const g = touch(key, isImport
+      ? { kind: 'import', label: p.fileName || 'דוח שעות', fileName: p.fileName || '', batchId: p.batchId || '', deletable: true }
+      : { kind: 'manual', label: 'הזנה ידנית', fileName: '', deletable: false });
+    add(g, { hours: p.hours, date: p.date, period: p.billPeriod, fileId: p.fileId });
+  }
+
+  for (const e of entriesOf(dealId)) {
+    if (!num(e.hours)) continue;
+    const imported = e.source === 'import';
+    const key = imported ? `entry:${e.fileId || e.fileName || 'ללא שם'}` : 'entry:manual';
+    const g = touch(key, imported
+      ? { kind: 'invoice', label: e.fileName || 'חשבון שיובא', fileName: e.fileName || '', deletable: true }
+      : { kind: 'invoice', label: 'חשבונות שנרשמו ידנית', fileName: '', deletable: false });
+    add(g, { hours: e.hours, date: e.date, period: '', fileId: e.fileId });
+  }
+
+  return [...out.values()]
+    .map((g) => ({ ...g, periods: [...g.periods].sort(), fileIds: [...g.files], fileId: [...g.files][0] || '' }))
+    .sort((a, b) => (b.to || '').localeCompare(a.to || '') || b.hours - a.hours);
+}
+
+/**
+ * מוחק מקור מידע ואת כל מה שנגזר ממנו (דיווחים / רישומי חשבון).
+ * @returns {{records:number, fileIds:string[]}}
+ */
+export async function deleteDataSource(key, dealId) {
+  const fileIds = new Set();
+  if (key.startsWith('progress:')) {
+    const id = key.slice('progress:'.length);
+    const doomed = progressOf(dealId).filter((p) => p.source === 'import' && (p.batchId || p.fileName || 'ללא שם') === id);
+    if (!doomed.length) return { records: 0, fileIds: [] };
+    const ids = new Set(doomed.map((p) => p.id));
+    for (const p of doomed) if (p.fileId) fileIds.add(p.fileId);
+    cache.progress = cache.progress.filter((p) => !ids.has(p.id));
+    await db.removeMany('progress', [...ids]);
+    notify('progress');
+    return { records: ids.size, fileIds: [...fileIds] };
+  }
+  if (key.startsWith('entry:')) {
+    const id = key.slice('entry:'.length);
+    const doomed = entriesOf(dealId).filter((e) => num(e.hours) && e.source === 'import' && (e.fileId || e.fileName || 'ללא שם') === id);
+    if (!doomed.length) return { records: 0, fileIds: [] };
+    for (const e of doomed) if (e.fileId) fileIds.add(e.fileId);
+    await deleteEntries(doomed.map((e) => e.id));
+    return { records: doomed.length, fileIds: [...fileIds] };
+  }
+  return { records: 0, fileIds: [] };
+}
+
 /**
  * קובע את הסך המצטבר של שורה: רושם עדכון-התאמה בהפרש מול מה שכבר דווח.
  * כך אפשר להקליד "כמה שעות בוצעו עד היום" בלי לאבד את ההיסטוריה.

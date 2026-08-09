@@ -627,11 +627,11 @@ export function renderActualsTab(root, { snap, filters }) {
 
   root.append(el('p', { class: 'panel__hint', text: 'חשבונות ומסמכים שהתקבלו. מהם נלקחות **שעות** בלבד — הן נכנסות לביצוע יחד עם שאר מקורות הדיווח. סכום החיוב בפועל, הנחות ותיקונים מול הלקוח אינם חלק מהניתוח.' }));
 
-  root.append(el('div', { class: 'dropzone', dataset: { action: 'dropzone' } }, [
+  root.append(el('div', { class: 'dropzone', dataset: { action: 'import-entries' } }, [
     icon('upload'),
     el('div', {}, [
       el('strong', { text: 'גרור לכאן קובץ חשבונות' }),
-      el('span', { text: ' — XLSX או CSV. אפשר גם PDF/תמונה כצירוף לרישום.' }),
+      el('span', { text: ' — XLSX, CSV או PDF. אפשר גם תמונה כצירוף לרישום.' }),
     ]),
   ]));
 
@@ -710,7 +710,7 @@ export function renderActualsList(root, { snap, filters }) {
 
 const PERIODS = [['day', 'יומי'], ['week', 'שבועי'], ['month', 'חודשי']];
 
-export function renderProgressTab(root, { snap, period = 'week' }) {
+export function renderProgressTab(root, { snap, period = 'week', sources = [] }) {
   const d = snap.deal;
   const teamName = new Map(snap.teams.map((t) => [t.id, t.name]));
   const lineLabel = new Map();
@@ -729,11 +729,19 @@ export function renderProgressTab(root, { snap, period = 'week' }) {
     el('button', { class: 'btn btn--primary btn--sm', type: 'button', dataset: { action: 'import-progress' } }, [icon('upload'), 'ייבוא דוח שעות']),
   ]));
 
+  root.append(el('div', { class: 'dropzone', dataset: { action: 'import-progress' } }, [
+    icon('upload'),
+    el('div', {}, [
+      el('strong', { text: 'גרור לכאן דוח שעות או חשבון' }),
+      el('span', { text: ' — XLSX, CSV או PDF. המערכת תחלץ את השורות ותציג אותן לאישור לפני הכנסה למעקב.' }),
+    ]),
+  ]));
+
   const rows = progressByPeriod(snap, period);
   if (!rows.length) {
     root.append(el('div', { class: 'empty' }, [
       el('h2', { text: 'טרם דווח ביצוע' }),
-      el('p', { text: 'אפשר להזין שעות ישירות בגיליון התקציב, להוסיף עדכון ידני, או לייבא דוח שעות מהמערכת (XLSX/CSV).' }),
+      el('p', { text: 'אפשר להזין שעות ישירות בגיליון התקציב, להוסיף עדכון ידני, או לגרור לכאן דוח שעות (XLSX / CSV / PDF).' }),
       el('div', { class: 'form-actions form-actions--wrap' }, [
         el('button', { class: 'btn btn--primary btn--sm', type: 'button', dataset: { action: 'import-progress' } }, [icon('upload'), 'ייבוא דוח שעות']),
         el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'add-progress' } }, [icon('plus'), 'עדכון ידני']),
@@ -761,6 +769,41 @@ export function renderProgressTab(root, { snap, period = 'week' }) {
     ])),
     svgBox(burnLine(rows.map((r) => ({ month: periodLabel(r.key, period), cumulative: r.cumulativeCost })), snap.budgetCost)),
   ]));
+
+  // מקורות המידע — מאיפה הגיעו השעות, ואפשרות למחוק מקור על כל מה שנגזר ממנו
+  if (sources.length) {
+    const kindPill = { import: ['watch', 'דוח שעות'], invoice: ['info', 'חשבון'], manual: ['ok', 'ידני'] };
+    root.append(el('section', { class: 'panel' }, [
+      el('h2', { class: 'panel__title' }, [icon('file'), `מקורות המידע · ${sources.length}`]),
+      el('p', { class: 'panel__hint', text: 'כל מקור והשעות שנגזרו ממנו. מחיקת מקור מוחקת את כל הדיווחים שהגיעו ממנו ואת הקובץ השמור.' }),
+      el('div', { class: 'btable-wrap' }, el('table', { class: 'etable' }, [
+        el('thead', {}, el('tr', {}, [
+          el('th', { text: 'מקור' }), el('th', { text: 'סוג' }), el('th', { text: 'תקופת חיוב' }),
+          el('th', { text: 'טווח תאריכים' }), el('th', { text: 'רשומות' }), el('th', { text: 'שעות' }), el('th', { class: 'th-tools' }),
+        ])),
+        el('tbody', {}, sources.map((s) => el('tr', {}, [
+          el('td', {}, [
+            s.fileId
+              ? el('button', { class: 'linkbtn', type: 'button', dataset: { action: 'open-file', fileId: s.fileId } }, [icon('file'), s.label])
+              : el('span', { text: s.label }),
+          ]),
+          el('td', {}, [el('span', { class: `pill pill--${kindPill[s.kind]?.[0] || 'info'}`, text: kindPill[s.kind]?.[1] || s.kind })]),
+          el('td', { class: 'muted', text: s.periods.length ? s.periods.join(', ') : '—' }),
+          el('td', { class: 'num muted', text: s.from ? (s.from === s.to ? s.from : `${s.from} – ${s.to}`) : '—' }),
+          el('td', { class: 'num', text: String(s.count) }),
+          el('td', { class: 'num td-strong', text: fmtHours(s.hours) }),
+          el('td', { class: 'td-tools' }, [
+            s.deletable
+              ? el('button', {
+                class: 'iconbtn iconbtn--danger', type: 'button', title: 'מחיקת המקור וכל מה שנלקח ממנו',
+                dataset: { action: 'delete-source', sourceKey: s.key }, html: ICONS.trash,
+              })
+              : el('span', { class: 'muted', text: '—' }),
+          ]),
+        ]))),
+      ])),
+    ]));
+  }
 
   // היסטוריית העדכונים
   const list = [...(snap.execution || [])].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
@@ -976,9 +1019,17 @@ export const progressPeriods = (snap, period) => progressByPeriod(snap, period);
 export function renderProgressImportPreview({
   sheets, sheetIndex, headerRow, mapping, people, peopleLines, cumulative, teams, records,
   unmatched, skipped, duplicates = 0, dateRange = null, overlap = 'skip',
-  billPeriods = [], knownPeriods = [],
+  billPeriods = [], knownPeriods = [], peopleMatch = {},
 }) {
   const wrap = el('div', { class: 'import' });
+
+  const pages = sheets[sheetIndex]?.pages || 0;
+  if (pages > 1) {
+    wrap.append(el('div', { class: 'alert alert--watch' }, [
+      icon('info'),
+      el('span', { text: `הדוח כולל ${pages} עמודים — כולם נקראו לרשת עמודות אחת, וההגדרות כאן חלות על כולם.` }),
+    ]));
+  }
 
   if (sheets.length > 1) {
     wrap.append(field('גיליון', el('select', { class: 'select', dataset: { imp: 'sheet' } },
@@ -1069,7 +1120,11 @@ export function renderProgressImportPreview({
           el('th', { text: 'עורך דין / עובד' }), el('th', { text: 'שורות' }), el('th', { text: 'שעות' }), el('th', { text: 'שורת תקציב' }),
         ])),
         el('tbody', {}, people.map((p) => el('tr', { class: peopleLines[p.key] ? '' : 'row--dupe' }, [
-          el('td', { text: p.name }),
+          el('td', {}, [
+            el('span', { text: p.name }),
+            peopleMatch[p.key] ? el('span', { class: 'sub', text: peopleMatch[p.key] }) : null,
+            (p.variants || []).length > 1 ? el('span', { class: 'sub', text: `בדוח: ${p.variants.join(' · ')}` }) : null,
+          ]),
           el('td', { class: 'num', text: String(p.rows) }),
           el('td', { class: 'num', text: fmtHours(p.hours) }),
           el('td', {}, [el('select', { class: 'select select--sm', dataset: { imp: 'personLine', personKey: p.key } }, lineOptions(peopleLines[p.key]))]),

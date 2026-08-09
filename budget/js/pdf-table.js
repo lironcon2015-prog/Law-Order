@@ -1,9 +1,16 @@
-// pdf-table.js — קריאת טבלה מקובץ PDF, כדי שדוח שעות בפורמט PDF ייכנס
-// לאותו מסך ייבוא כמו XLSX/CSV. משתמש ב-pdf.js המקומי (ללא רשת).
+// pdf-table.js — חילוץ טבלה מקובץ PDF, כדי שדוח שעות ב-PDF ייכנס לאותו מסך ייבוא
+// כמו XLSX/CSV. משתמש ב-pdf.js המקומי (ללא רשת).
 //
-// השיטה: pdf.js מחזיר פריטי טקסט עם קואורדינטות. אנחנו מקבצים אותם לשורות
-// לפי Y, ואז מזהים **עמודות** לפי אשכולות של קואורדינטת X לאורך כל העמוד —
-// כך מתקבלת מטריצה שורות×עמודות שנראית כמו גיליון.
+// השיטה (שלושה שלבים, כל אחד פותר כשל אמיתי שנצפה בדוחות):
+// 1. **תא ולא פריט** — pdf.js מפרק טקסט לפריטים שרירותיים (מקף, שינוי גופן).
+//    פריטים סמוכים באותה שורה עם רווח קטן מאוחדים לתא אחד; אחרת תיאור אחד
+//    נשבר לשתי "עמודות" והכותרת לא יושבת מעל הערכים.
+// 2. **מרזבים ולא אשכולות** — העמודות נגזרות מרצועות ה-X שאף תא לא חוצה
+//    (whitespace gutters). זה עמיד ליישור שונה בין כותרת לערכים, בניגוד לאשכול
+//    לפי מרכז התא.
+// 3. **רשת אחת לכל המסמך** — המרזבים מחושבים מכל העמודים יחד, ולכן עמוד 2
+//    מקבל בדיוק את אותם אינדקסים כמו עמוד 1. כך המיפוי שהמשתמש מאשר חל על
+//    כל הדוח, ולא רק על העמוד הראשון.
 
 const vendorUrl = (file) => (window.__OFFLINE_VENDOR__ && window.__OFFLINE_VENDOR__[file]) || `./vendor/${file}`;
 
@@ -21,106 +28,150 @@ function loadPdfLib() {
   return scriptPromise;
 }
 
-/** אשכול קואורדינטות X לעמודות: ערכים קרובים (עד `tol`) מתמזגים לעמודה אחת */
-function clusterColumns(xs, tol = 20) {
-  const sorted = [...xs].sort((a, b) => a - b);
-  const cols = [];
-  for (const x of sorted) {
-    const last = cols[cols.length - 1];
-    if (last !== undefined && x - last <= tol) continue;
-    cols.push(x);
+/* ---------- שלב 1: פריטים → שורות → תאים ---------- */
+
+/** מקבץ פריטי טקסט לשורות לפי קו הבסיס (Y), עם סבילות יחסית לגובה הגופן */
+function toLines(items) {
+  const list = [];
+  for (const item of items) {
+    const str = String(item.str ?? '');
+    if (!str.trim()) continue;
+    const t = item.transform || [];
+    const h = Math.abs(Number(t[3])) || Math.abs(Number(item.height)) || 10;
+    const xs = Number(t[4]) || 0;
+    list.push({ xs, xe: xs + (Number(item.width) || 0), y: Number(t[5]) || 0, h, str: str.trim() });
   }
-  return cols;
+  list.sort((a, b) => b.y - a.y || a.xs - b.xs);
+
+  const lines = [];
+  for (const it of list) {
+    const cur = lines[lines.length - 1];
+    if (cur && Math.abs(cur.y - it.y) <= Math.max(1.5, it.h * 0.5)) cur.items.push(it);
+    else lines.push({ y: it.y, items: [it] });
+  }
+  return lines;
 }
 
-/**
- * מיזוג עמודות שמעולם לא מופיעות יחד באותה שורה — סימן מובהק שזו עמודה לוגית
- * אחת שנשברה בגלל יישור שונה (כותרת ממורכזת מול ערכים מיושרים).
- */
-function mergeExclusiveColumns(rows, colCount) {
-  let cols = Array.from({ length: colCount }, (_, i) => i);
-  let merged = true;
-  while (merged && cols.length > 1) {
-    merged = false;
-    for (let i = 0; i < cols.length - 1; i++) {
-      const a = cols[i], bIdx = cols[i + 1];
-      const together = rows.some((r) => r[a] !== '' && r[a] != null && r[bIdx] !== '' && r[bIdx] != null);
-      if (!together) {
-        for (const r of rows) {
-          const va = r[a], vb = r[bIdx];
-          r[a] = (va !== '' && va != null) ? va : vb;
-          r[bIdx] = '';
-        }
-        cols.splice(i + 1, 1);
-        merged = true;
-        break;
-      }
+/** מאחד פריטים סמוכים לתא לוגי אחד: רווח קטן מ-`gap` = אותו תא */
+function toCells(line, gap) {
+  const sorted = [...line.items].sort((a, b) => a.xs - b.xs);
+  const cells = [];
+  for (const it of sorted) {
+    const cur = cells[cells.length - 1];
+    if (cur && it.xs - cur.xe < gap) {
+      cur.xe = Math.max(cur.xe, it.xe);
+      cur.str = `${cur.str}${it.xs - cur.xe > -0.5 ? ' ' : ''}${it.str}`.replace(/\s+/g, ' ').trim();
+    } else {
+      cells.push({ xs: it.xs, xe: it.xe, str: it.str });
     }
   }
-  return rows.map((r) => cols.map((i) => r[i]));
+  return cells;
 }
 
-const nearestCol = (x, cols) => {
+/* ---------- שלב 2: מרזבים → גבולות עמודות ---------- */
+
+/**
+ * מוצא את גבולות העמודות לפי רצועות X שאף תא לא חוצה.
+ * נלקחים בחשבון רק תאים משורות שנראות כמו שורות טבלה (3 תאים ומעלה) ושאינם
+ * רחבים חריגה — כותרת עמוד או שורת "סה"כ" משתרעת על כל הרוחב ומוחקת כל מרזב.
+ */
+function columnBands(allCells, width, minGutter = 3.5) {
+  const w = Math.max(10, Math.ceil(width));
+  const occ = new Uint8Array(w + 2);
+  const maxCell = width * 0.45;
+  let used = 0;
+  for (const c of allCells) {
+    if (c.xe - c.xs > maxCell) continue;
+    const a = Math.max(0, Math.floor(c.xs)), b = Math.min(w, Math.ceil(c.xe));
+    for (let x = a; x <= b; x++) occ[x] = 1;
+    used++;
+  }
+  if (!used) return null;
+
+  const bands = [];
+  let start = -1, gapRun = 0;
+  for (let x = 0; x <= w + 1; x++) {
+    if (occ[x]) {
+      if (start < 0) start = x;
+      else if (gapRun && gapRun < minGutter) { /* מרזב צר מדי — אותה עמודה */ }
+      gapRun = 0;
+    } else {
+      if (start < 0) continue;
+      gapRun++;
+      if (gapRun >= minGutter) { bands.push([start, x - gapRun]); start = -1; gapRun = 0; }
+    }
+  }
+  if (start >= 0) bands.push([start, w]);
+  return bands.length ? bands : null;
+}
+
+const bandOf = (cx, bands) => {
+  for (let i = 0; i < bands.length; i++) if (cx >= bands[i][0] - 0.5 && cx <= bands[i][1] + 0.5) return i;
   let best = 0, dist = Infinity;
-  cols.forEach((c, i) => { const d = Math.abs(c - x); if (d < dist) { dist = d; best = i; } });
+  bands.forEach((b, i) => {
+    const d = cx < b[0] ? b[0] - cx : cx - b[1];
+    if (d < dist) { dist = d; best = i; }
+  });
   return best;
 };
 
+/** תא שהוא מספר טהור מומר למספר, כדי שהמיפוי יזהה שעות/סכומים */
+function castCell(v) {
+  const t = String(v ?? '').trim();
+  if (!t) return '';
+  if (!/^[\d.,\-+₪%\s]+$/.test(t)) return t;
+  const n = Number(t.replace(/[,₪\s]/g, ''));
+  return Number.isFinite(n) && /\d/.test(t) ? n : t;
+}
+
+/* ---------- שלב 3: המסמך כולו כגיליון אחד ---------- */
+
 /**
- * קורא PDF ומחזיר גיליונות בפורמט של xlsx.js: `[{ name, rows }]` — עמוד = גיליון.
- * שורה = מערך תאים לפי העמודות שזוהו.
+ * קורא PDF ומחזיר גיליון יחיד בפורמט של xlsx.js: `[{ name, rows, pages }]`.
+ * כל עמודי המסמך נכנסים לאותה רשת עמודות, לפי סדר העמודים.
  */
 export async function pdfToSheets(file) {
   const pdfjsLib = await loadPdfLib();
   try { pdfjsLib.GlobalWorkerOptions.workerSrc = vendorUrl('pdf.worker.min.js'); } catch { /* noop */ }
 
   const doc = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
-  const sheets = [];
+  const pageLines = [];      // [{ page, cells:[] }]
+  let width = 0;
+  let heights = 0, heightN = 0;
 
   for (let p = 1; p <= doc.numPages; p++) {
     const page = await doc.getPage(p);
+    width = Math.max(width, page.getViewport({ scale: 1 }).width || 595);
     const content = await page.getTextContent();
-
-    // קיבוץ פריטים לשורות לפי Y (עיגול לסבילות של 2 נקודות)
-    const byY = new Map();
-    const xs = [];
-    for (const item of content.items) {
-      const str = String(item.str || '').trim();
-      if (!str) continue;
-      const x = item.transform[4] + (Number(item.width) || 0) / 2;
-      const y = Math.round(item.transform[5] / 2) * 2;
-      if (!byY.has(y)) byY.set(y, []);
-      byY.get(y).push({ x, str });
-      xs.push(x);
+    for (const line of toLines(content.items)) {
+      for (const it of line.items) { heights += it.h; heightN++; }
+      pageLines.push({ page: p, line });
     }
-    if (!byY.size) continue;
+  }
+  if (!pageLines.length) throw new Error('לא נמצא טקסט ב-PDF (ייתכן שזה קובץ סרוק — נדרש OCR)');
 
-    // מרכז התא ולא הקצה — יישור שונה בין כותרת לערכים לא ישבור את העמודה
-    const cols = clusterColumns(xs);
-    let rows = [...byY.entries()]
-      .sort((a, b) => b[0] - a[0])                       // מלמעלה למטה
-      .map(([, items]) => {
-        const cells = new Array(cols.length).fill('');
-        for (const it of items.sort((a, b) => a.x - b.x)) {
-          const i = nearestCol(it.x, cols);
-          cells[i] = cells[i] ? `${cells[i]} ${it.str}` : it.str;
-        }
-        // תא שהוא מספר טהור מומר למספר, כדי שהמיפוי יזהה שעות/סכומים
-        return cells.map((c) => {
-          const t = c.trim();
-          if (!t) return '';
-          const n = Number(t.replace(/,/g, ''));
-          return t !== '' && Number.isFinite(n) && /^[\d.,\-]+$/.test(t) ? n : t;
-        });
-      })
-      .filter((r) => r.some((c) => c !== '' && c !== null));
+  const avgH = heightN ? heights / heightN : 10;
+  const gap = Math.max(2.5, avgH * 0.5);
+  const rowsCells = pageLines.map(({ page, line }) => ({ page, cells: toCells(line, gap) }));
 
-    rows = mergeExclusiveColumns(rows, cols.length);
-    sheets.push({ name: `עמוד ${p}`, rows });
+  // המרזבים נלמדים משורות הטבלה בלבד (3 תאים ומעלה), על פני כל העמודים
+  const tableCells = rowsCells.filter((r) => r.cells.length >= 3).flatMap((r) => r.cells);
+  const bands = columnBands(tableCells.length ? tableCells : rowsCells.flatMap((r) => r.cells), width);
+  if (!bands) throw new Error('לא זוהתה טבלה ב-PDF');
+
+  const rows = [];
+  for (const { cells } of rowsCells) {
+    const out = new Array(bands.length).fill('');
+    for (const c of cells) {
+      const i = bandOf((c.xs + c.xe) / 2, bands);
+      out[i] = out[i] ? `${out[i]} ${c.str}` : c.str;
+    }
+    const cast = out.map(castCell);
+    if (cast.some((v) => v !== '')) rows.push(cast);
   }
 
-  if (!sheets.length) throw new Error('לא נמצא טקסט ב-PDF (ייתכן שזה קובץ סרוק — נדרש OCR)');
-  return sheets;
+  const name = doc.numPages > 1 ? `PDF · ${doc.numPages} עמודים` : 'PDF';
+  return [{ name, rows, pages: doc.numPages }];
 }
 
 export const isPdf = (file) => /\.pdf$/i.test(file?.name || '') || file?.type === 'application/pdf';

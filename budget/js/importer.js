@@ -62,13 +62,83 @@ export function guessMapping(headerCells) {
   return mapping;
 }
 
-/** נרמול שם אדם להשוואה בין קבצים (גרשיים, רווחים, סדר לא משתנה) */
-export const normPerson = (s) => norm(s);
+/* ---------- זהות של אדם ---------- */
+
+/** תארים שמופיעים לפני השם ואינם חלק ממנו (אחרי norm הגרשיים כבר הוסרו) */
+const TITLE_RE = /^(עוד|עוהד|עורך דין|עורכת דין|דר|פרופ|מר|גב|adv|advocate|mr|mrs|ms|dr|prof)\.?\s+/;
+
+/**
+ * מפתח זהות של אדם — כדי ש"עו"ד דנה כהן", "דנה כהן" ו-"כהן, דנה" יהיו אותו אדם.
+ * מסיר תארים, הופך "משפחה, פרטי" ל-"פרטי משפחה", ומנקה פיסוק.
+ */
+export function personKey(name) {
+  let s = norm(name);
+  if (!s) return '';
+  for (let i = 0; i < 2 && TITLE_RE.test(s); i++) s = s.replace(TITLE_RE, '');
+  if (s.includes(',')) s = s.split(',').map((t) => t.trim()).filter(Boolean).reverse().join(' ');
+  return s.replace(/[.,;:|]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/** נרמול שם אדם להשוואה בין קבצים */
+export const normPerson = (s) => personKey(s);
+
+/** שם לתצוגה — בלי תואר ובלי היפוך "משפחה, פרטי" */
+export function personDisplay(name) {
+  let s = String(name ?? '').trim().replace(/\s+/g, ' ');
+  const t = new RegExp(TITLE_RE.source.replace('עוד', 'עו["\'׳״]?ד').replace('עוהד', 'עוה["\'׳״]?ד'), 'i');
+  for (let i = 0; i < 2 && t.test(s); i++) s = s.replace(t, '');
+  if (s.includes(',')) s = s.split(',').map((x) => x.trim()).filter(Boolean).reverse().join(' ');
+  return s.trim();
+}
+
+const HEADER_WORDS = new Set(TARGET_FIELDS.flatMap((f) => [norm(f.label), ...f.keys.map(norm)]));
+
+/**
+ * מסנן ערכים שאינם שם של אדם: כותרת שחזרה בעמוד הבא, שורת "סה"כ", מספר או תאריך.
+ * בלי זה כל עמוד נוסף בדוח מייצר "אדם" מדומה בשם "שם עורך דין".
+ */
+export function looksLikePerson(name) {
+  const s = norm(name);
+  if (!s || s.length < 2) return false;
+  if (HEADER_WORDS.has(s)) return false;
+  if (/^(סהכ|סה כ|סיכום|total|subtotal|עמוד|page|המשך)\b/.test(s)) return false;
+  if (/^[\d\s./,+-]+$/.test(s)) return false;
+  return true;
+}
+
+const tokens = (key) => key.split(' ').filter(Boolean);
+
+/**
+ * התאמה מקורבת בין שם בדוח לשם מוכר: זהות מלאה, אותן מילים בסדר אחר,
+ * או ראשי תיבות ("מ. אברהמי" ↔ "משה אברהמי").
+ * @returns {{key:string, exact:boolean}|null}
+ */
+export function fuzzyPersonMatch(key, candidateKeys) {
+  if (!key) return null;
+  const list = [...new Set(candidateKeys || [])].filter(Boolean);
+  if (list.includes(key)) return { key, exact: true };
+  const a = tokens(key);
+  if (!a.length) return null;
+  const setEq = (x, y) => x.length === y.length && [...x].sort().join(' ') === [...y].sort().join(' ');
+  const initialsEq = (x, y) => x.length === y.length
+    && x.every((t, i) => t === y[i] || ((t.length === 1 || y[i].length === 1) && t[0] === y[i][0]));
+
+  for (const cand of list) {
+    const b = tokens(cand);
+    if (setEq(a, b)) return { key: cand, exact: false };
+  }
+  for (const cand of list) {
+    const b = tokens(cand);
+    if (initialsEq(a, b)) return { key: cand, exact: false };
+    if (initialsEq([...a].reverse(), b)) return { key: cand, exact: false };
+  }
+  return null;
+}
 
 /**
  * מוציא את רשימת האנשים (עורכי דין / עובדים) שמופיעים בקובץ, עם היקף העבודה שלהם.
- * משמש למסך שיוך אנשים לצוותים.
- * @returns {Array<{name, key, rows, hours, amount, teamHint}>}
+ * שמות שנכתבו בווריאציות שונות מתאחדים לרשומה אחת.
+ * @returns {Array<{name, key, legacyKey, variants, rows, hours, amount, teamHint, roleHint}>}
  */
 export function collectPeople(rows, mapping) {
   if (mapping.personName === undefined) return [];
@@ -76,9 +146,13 @@ export function collectPeople(rows, mapping) {
   for (const row of rows || []) {
     const raw = row?.[mapping.personName];
     const name = String(raw ?? '').trim();
-    if (!name) continue;
-    const key = normPerson(name);
-    const cur = map.get(key) || { name, key, rows: 0, hours: 0, amount: 0, teamHint: '', roleHint: '' };
+    if (!name || !looksLikePerson(name)) continue;
+    const key = personKey(name);
+    if (!key) continue;
+    const display = personDisplay(name);
+    const cur = map.get(key) || { name: display, key, legacyKey: norm(name), variants: [], rows: 0, hours: 0, amount: 0, teamHint: '', roleHint: '' };
+    if (display.length > cur.name.length) cur.name = display;
+    if (!cur.variants.includes(name)) cur.variants.push(name);
     cur.rows += 1;
     cur.hours += num(mapping.hours === undefined ? 0 : row[mapping.hours]);
     cur.amount += num(mapping.amount === undefined ? 0 : row[mapping.amount]);
@@ -89,6 +163,20 @@ export function collectPeople(rows, mapping) {
   return [...map.values()]
     .map((p) => ({ ...p, hours: round2(p.hours), amount: round2(p.amount) }))
     .sort((a, b) => b.hours - a.hours || b.rows - a.rows);
+}
+
+/**
+ * גוף הגיליון: כל מה שאחרי שורת הכותרות, בלי שורות ריקות ובלי **כותרות שחוזרות**
+ * בראש כל עמוד (בדוח PDF רב-עמודי הן חוזרות כשורת נתונים).
+ */
+export function sheetBody(rows, headerRow) {
+  const header = rows[headerRow] || [];
+  const sig = (r) => (r || []).map((c) => norm(c)).join('|');
+  const headerSig = sig(header);
+  return (rows || []).slice(headerRow + 1).filter((r) => {
+    if (!r || !r.some((c) => c !== null && c !== undefined && c !== '')) return false;
+    return sig(r) !== headerSig;
+  });
 }
 
 /** ממיר ערך תא לתאריך ISO (yyyy-mm-dd) — תומך בפורמט ישראלי dd/mm/yyyy */

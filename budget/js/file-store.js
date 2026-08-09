@@ -194,6 +194,28 @@ export async function readDocument(id) {
   }
 }
 
+/**
+ * מוחק את רשומת הקובץ, ואם הוא נשמר בתיקייה — גם את הקובץ עצמו מהדיסק.
+ * לא זורק: מחיקה שנכשלת (תיקייה מנותקת, קובץ הוזז) מוחקת לפחות את הרשומה.
+ * @returns {{removedFile:boolean, reason?:string}}
+ */
+export async function deleteDocument(id) {
+  const rec = await db.get('files', id).catch(() => null);
+  if (!rec) return { removedFile: false, reason: 'הרשומה לא נמצאה' };
+  let removedFile = false, reason = '';
+  if (rec.storage === 'folder') {
+    try {
+      const root = await storedHandle();
+      if (!root || !(await ensurePermission(root))) throw new Error('התיקייה אינה מחוברת');
+      const dir = rec.subdir ? await root.getDirectoryHandle(rec.subdir) : root;
+      await dir.removeEntry(rec.name);
+      removedFile = true;
+    } catch (err) { reason = err?.message || 'מחיקת הקובץ מהתיקייה נכשלה'; }
+  }
+  await db.remove('files', id);
+  return { removedFile, reason };
+}
+
 /** פותח את הקובץ בלשונית חדשה (חייב להיקרא מתוך לחיצת משתמש) */
 export async function openDocument(id) {
   const blob = await readDocument(id);
