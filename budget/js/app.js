@@ -13,7 +13,7 @@ import { readTabularFile } from './xlsx.js';
 import { pdfToSheets, isPdf } from './pdf-table.js';
 import {
   detectHeaderRow, guessMapping, rowsToEntries, markDuplicates, parseBudgetSheet, collectPeople,
-  rowsToProgress, sheetBody, personKey, fuzzyPersonMatch,
+  rowsToProgress, sheetBody, personKey, fuzzyPersonMatch, pickBestSheet,
 } from './importer.js';
 
 /* ============================================================
@@ -919,7 +919,7 @@ async function startEntryImport(file) {
     return ui.toast(err.message || 'קריאת הקובץ נכשלה', 'error');
   }
 
-  const sheetIndex = 0;
+  const sheetIndex = pickBestSheet(sheets, { need: ['amount'] });
   const headerRow = detectHeaderRow(sheets[sheetIndex].rows);
   importCtx = {
     mode: 'entries', file, sheets, sheetIndex,
@@ -1092,11 +1092,13 @@ async function startProgressImport(file) {
   try { sheets = await readAnyTable(file); }
   catch (err) { return ui.toast(err.message || 'קריאת הקובץ נכשלה', 'error'); }
 
-  const headerRow = detectHeaderRow(sheets[0].rows);
+  // בקובץ עם כמה טבלאות (שער חשבון, נספח הוצאות) נבחרת זו שנראית כמו דוח שעות
+  const sheetIndex = pickBestSheet(sheets);
+  const headerRow = detectHeaderRow(sheets[sheetIndex].rows);
   importCtx = {
-    mode: 'progress', file, sheets, sheetIndex: 0,
+    mode: 'progress', file, sheets, sheetIndex,
     headerRow: headerRow < 0 ? 0 : headerRow,
-    mapping: guessMapping(sheets[0].rows[headerRow < 0 ? 0 : headerRow] || []),
+    mapping: guessMapping(sheets[sheetIndex].rows[headerRow < 0 ? 0 : headerRow] || []),
     cumulative: false,
     overlap: 'skip',        // חפיפה עם דיווחים קודמים: skip | replace | add
     peopleTeams: {}, peopleLines: {},

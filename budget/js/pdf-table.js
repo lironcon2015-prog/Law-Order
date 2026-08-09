@@ -132,16 +132,19 @@ function castCell(v) {
 
 const tableCellsOf = (lines) => lines.filter((l) => l.cells.length >= 3).flatMap((l) => l.cells);
 
-/** שתי רשתות תואמות אם יש להן אותו מספר עמודות וכל עמודה חופפת את מקבילתה */
-function compatibleBands(a, b) {
-  if (!a || !b || a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    const lo = Math.max(a[i][0], b[i][0]), hi = Math.min(a[i][1], b[i][1]);
-    const overlap = hi - lo;
-    const smaller = Math.min(a[i][1] - a[i][0], b[i][1] - b[i][0]);
-    if (overlap <= 0 || overlap < smaller * 0.6) return false;
+/**
+ * עד כמה תאי העמוד "מתיישבים" על רשת עמודות נתונה: השיעור מהם שנופלים בתוך
+ * עמודה אחת ולא חוצים שתיים. מבחן זה סלחני להבדלים בין עמודים (עמוד אחרון קצר,
+ * עמודה שבמקרה ריקה בעמוד מסוים) אבל דוחה טבלה שבנויה אחרת לגמרי.
+ */
+function fitScore(cells, bands) {
+  if (!cells.length || !bands?.length) return 0;
+  let ok = 0;
+  for (const c of cells) {
+    const b = bands[bandOf((c.xs + c.xe) / 2, bands)];
+    if (c.xs >= b[0] - 2 && c.xe <= b[1] + 2) ok++;
   }
-  return true;
+  return ok / cells.length;
 }
 
 const mostCommon = (list) => {
@@ -156,37 +159,52 @@ const mostCommon = (list) => {
  * בונה את שורות העמוד על רשת העמודות, כולל מיזוג **שורות המשך**: שורה חלקית
  * (תיאור שנשבר, כותרת שנפרסה לשתי שורות) נספחת לשורה המלאה הקרובה אליה.
  */
+const isNumeric = (v) => /\d/.test(v) && /^[\d.,₪%\s+-]+$/.test(String(v).trim());
+const isTotalsLabel = (v) => /^(סהכ|סיכום|total|subtotal|grand total)$/
+  .test(String(v ?? '').trim().toLowerCase().replace(/["'׳״]/g, '').replace(/\s+/g, ' '));
+
 function buildRows(lines, bands, avgH) {
   if (!lines.length) return [];
-  const counts = lines.map((l) => l.cells.length).filter((c) => c >= 3);
-  const anchorMin = Math.max(3, Math.ceil((mostCommon(counts) || 3) * 0.6));
-  const isAnchor = lines.map((l) => l.cells.length >= anchorMin);
-  const maxGap = Math.max(6, avgH * 1.6);
 
-  const owner = lines.map((l, i) => {
-    if (isAnchor[i]) return i;
-    let best = -1, dist = Infinity;
-    lines.forEach((o, j) => {
-      if (!isAnchor[j]) return;
-      const d = Math.abs(o.y - l.y);
-      if (d < dist) { dist = d; best = j; }
-    });
-    return best >= 0 && dist <= maxGap ? best : i;
-  });
-
-  const buf = new Map();
-  const order = [];
-  lines.forEach((line, i) => {                     // כבר ממוינות מלמעלה למטה
-    const o = owner[i];
-    if (!buf.has(o)) { buf.set(o, new Array(bands.length).fill('')); order.push(o); }
-    const cells = buf.get(o);
-    for (const c of line.cells) {
+  // כל שורה פיזית על רשת העמודות
+  const placed = lines.map((l) => {
+    const cells = new Array(bands.length).fill('');
+    for (const c of l.cells) {
       const b = bandOf((c.xs + c.xe) / 2, bands);
       cells[b] = cells[b] ? `${cells[b]} ${c.str}` : c.str;
     }
+    return { y: l.y, n: l.cells.length, cells };
   });
 
-  return order.map((o) => buf.get(o).map(castCell)).filter((r) => r.some((v) => v !== ''));
+  const counts = lines.map((l) => l.cells.length).filter((c) => c >= 3);
+  const anchorMin = Math.max(3, Math.ceil((mostCommon(counts) || 3) * 0.6));
+  const isAnchor = placed.map((p) => p.n >= anchorMin);
+  const maxGap = Math.max(6, avgH * 1.6);
+
+  const out = placed.map((p) => [...p.cells]);     // תוכן מצטבר לכל שורה
+  const owner = placed.map((_, i) => i);
+
+  placed.forEach((p, i) => {
+    if (isAnchor[i]) return;
+    // שורת "סה"כ" אינה המשך של שורת נתונים — היא סיכום, וספיחה שלה מכפילה מספרים
+    if (p.cells.some(isTotalsLabel)) return;
+    let best = -1, dist = Infinity;
+    placed.forEach((o, j) => {
+      if (!isAnchor[j]) return;
+      const d = Math.abs(o.y - p.y);
+      if (d < dist) { dist = d; best = j; }
+    });
+    if (best < 0 || dist > maxGap) return;
+    // התנגשות מספרית = לא המשך טקסט אלא שורה אחרת שנצמדה
+    const clash = p.cells.some((v, b) => v && isNumeric(v) && out[best][b] !== '');
+    if (clash) return;
+    owner[i] = best;
+    p.cells.forEach((v, b) => { if (v) out[best][b] = out[best][b] ? `${out[best][b]} ${v}` : v; });
+  });
+
+  return placed
+    .map((_, i) => (owner[i] === i ? out[i].map(castCell) : null))
+    .filter((r) => r && r.some((v) => v !== ''));
 }
 
 /**
@@ -222,8 +240,20 @@ export async function pdfToSheets(file) {
   // עמודים בעלי מבנה תואם = אותה טבלה. שער החשבון ונספח ההוצאות נשארים בנפרד.
   const groups = [];
   for (const pg of pages) {
-    const g = groups.find((x) => compatibleBands(x.bands, pg.bands));
-    if (g) g.pages.push(pg); else groups.push({ bands: pg.bands, pages: [pg] });
+    const cells = tableCellsOf(pg.lines);
+    let best = null, bestFit = 0;
+    for (const g of groups) {
+      const fit = Math.max(fitScore(cells, g.bands), fitScore(tableCellsOf(g.pages[0].lines), pg.bands));
+      if (fit > bestFit) { bestFit = fit; best = g; }
+    }
+    if (best && bestFit >= 0.9) {
+      best.pages.push(pg);
+      // הרשת המשותפת נלמדת מחדש מכל עמודי הקבוצה, כך שעמוד עשיר יותר מרחיב אותה
+      const all = best.pages.flatMap((p) => tableCellsOf(p.lines));
+      best.bands = columnBands(all, width) || best.bands;
+    } else {
+      groups.push({ bands: pg.bands, pages: [pg] });
+    }
   }
 
   const sheets = groups.map((g) => {

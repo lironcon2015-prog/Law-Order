@@ -78,6 +78,32 @@ export function guessMapping(headerCells) {
   return mapping;
 }
 
+/**
+ * בוחר את הגיליון/טבלה שהכי נראית כמו דוח שעות — ולא את הגדולה ביותר.
+ * בקובץ אמיתי יש גם שער חשבון וגם נספח הוצאות; מספר השורות אינו מעיד מי מהם
+ * הטבלה הרלוונטית, אבל צירוף העמודות (שעות + שם + תאריך) כן.
+ * @returns {number} אינדקס הגיליון
+ */
+export function pickBestSheet(sheets, { need = ['hours', 'personName'] } = {}) {
+  let bestIdx = 0, bestScore = -Infinity;
+  (sheets || []).forEach((sheet, i) => {
+    const rows = sheet.rows || [];
+    const hr = detectHeaderRow(rows);
+    const map = guessMapping(rows[hr < 0 ? 0 : hr] || []);
+    const weight = { hours: 5, personName: 4, date: 2, rate: 1, amount: 1, roleName: 1, billDate: 1 };
+    let score = 0;
+    for (const [field, w] of Object.entries(weight)) if (map[field] !== undefined) score += w;
+    for (const field of need) if (map[field] === undefined) score -= 4;
+    // שורות עם ערך מספרי בעמודת השעות — טבלה עם המון שורות ובלי שעות אינה דוח שעות
+    if (map.hours !== undefined) {
+      const withHours = sheetBody(rows, hr < 0 ? 0 : hr).filter((r) => num(r[map.hours]) > 0).length;
+      score += Math.min(withHours, 100) / 100 * 3;
+    }
+    if (score > bestScore) { bestScore = score; bestIdx = i; }
+  });
+  return bestIdx;
+}
+
 /* ---------- זהות של אדם ---------- */
 
 /** תארים שמופיעים לפני השם ואינם חלק ממנו (אחרי norm הגרשיים כבר הוסרו) */
