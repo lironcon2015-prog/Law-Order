@@ -9,7 +9,8 @@ import { num, uid, round2 } from './model.js';
 
 /** שדות היעד + מילות מפתח לזיהוי עמודות (עברית + אנגלית) */
 export const TARGET_FIELDS = [
-  { id: 'date',        label: 'תאריך',        keys: ['תאריך', 'date', 'יום', 'invoice date', 'תאריך חשבונית'] },
+  { id: 'date',        label: 'תאריך ביצוע',  keys: ['תאריך ביצוע', 'תאריך עבודה', 'תאריך', 'date', 'יום'] },
+  { id: 'billDate',    label: 'תאריך חיוב',   keys: ['תאריך חיוב', 'חודש חיוב', 'תקופת חיוב', 'תאריך חשבונית', 'billing date', 'bill date', 'invoice date', 'period'] },
   { id: 'description', label: 'תיאור',        keys: ['תיאור', 'פירוט', 'נושא', 'description', 'details', 'עבודה', 'משימה', 'narrative'] },
   { id: 'teamName',    label: 'צוות',         keys: ['צוות', 'team', 'מחלקה', 'תחום', 'practice', 'department'] },
   { id: 'personName',  label: 'עורך דין / עובד', keys: ['שם עורך דין', 'עורך דין', 'עו"ד מטפל', 'עובד', 'שם עובד', 'מבצע', 'ביצע', 'איש צוות', 'timekeeper', 'lawyer', 'attorney', 'employee', 'user', 'שם'] },
@@ -204,7 +205,8 @@ export function rowsToProgress(rows, mapping, opts) {
     const roleName = String(pick(row, 'roleName') ?? '').trim();
     const target = resolve ? resolve(person, roleName) : null;
     if (!target) unmatched.add(person || roleName || '(ללא שם)');
-    const date = toISODate(pick(row, 'date')) || defaultDate || new Date().toISOString().slice(0, 10);
+    const billPeriod = billPeriodOf(pick(row, 'billDate'));
+    const date = toISODate(pick(row, 'date')) || (billPeriod ? `${billPeriod}-01` : '') || defaultDate || new Date().toISOString().slice(0, 10);
 
     if (cumulative) {
       const key = target?.lineId || `~${person}`;
@@ -216,7 +218,10 @@ export function rowsToProgress(rows, mapping, opts) {
     }
     const rec = {
       dealId, teamId: target?.teamId || '', lineId: target?.lineId || '', roleId: target?.roleId || '',
-      person, date, hours, source: 'import', fileName, batchId,
+      person, date, hours, source: 'import', fileName, batchId, billPeriod,
+      // תקופת החיוב היא גם התקופה שהרשומה "מכסה" — כך דיווח ידני באותו חודש מוחלף
+      periodFrom: billPeriod ? `${billPeriod}-01` : date,
+      periodTo: billPeriod ? monthEnd(billPeriod) : date,
       note: roleName && !target?.lineId ? `דרגה בדוח: ${roleName}` : '',
     };
     // חפיפה: אותה שורת תקציב, אותו תאריך ואותו אדם כבר דווחו בעבר
@@ -240,8 +245,9 @@ export function rowsToProgress(rows, mapping, opts) {
       void key;
     }
   }
+  const periods = [...new Set(out.map((r) => r.billPeriod).filter(Boolean))].sort();
   return {
-    records: out, skipped, unmatched: [...unmatched],
+    records: out, skipped, unmatched: [...unmatched], billPeriods: periods,
     duplicates: out.filter((r) => r.duplicate).length,
     dateRange: out.length
       ? { from: out.reduce((m, r) => (r.date < m ? r.date : m), out[0].date), to: out.reduce((m, r) => (r.date > m ? r.date : m), out[0].date) }
@@ -249,8 +255,23 @@ export function rowsToProgress(rows, mapping, opts) {
   };
 }
 
-/** מפתח זהות של דיווח: שורת תקציב + תאריך + שם האדם */
-export const progressKey = (p) => `${p.lineId || ''}|${p.date || ''}|${normPerson(p.person)}`;
+/**
+ * מפתח זהות של דיווח. כשיש **תקופת חיוב** היא הזהות (כך שדוחות שונים לאותה תקופת
+ * חיוב לא ייספרו פעמיים גם אם תאריכי הביצוע שונים); אחרת — תאריך הביצוע.
+ */
+export const progressKey = (p) => `${p.lineId || ''}|${p.billPeriod || p.date || ''}|${normPerson(p.person)}`;
+
+/** תקופת חיוב מנורמלת: תאריך מלא → חודש (YYYY-MM), כי חיוב הוא חודשי בדרך כלל */
+export const billPeriodOf = (v) => {
+  const iso = toISODate(v);
+  return iso ? iso.slice(0, 7) : '';
+};
+
+/** היום האחרון בחודש YYYY-MM */
+function monthEnd(ym) {
+  const [y, m] = ym.split('-').map(Number);
+  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+}
 
 /** מסמן רישומים שכנראה כבר קיימים (אותו תאריך+סכום+מסמך) */
 export function markDuplicates(candidates, existing) {

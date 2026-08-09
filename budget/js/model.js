@@ -227,6 +227,10 @@ export function normalizeProgress(p) {
     roleId: p?.roleId || '',
     person: String(p?.person ?? ''),
     date: p?.date || new Date().toISOString().slice(0, 10),
+    // תקופת החיוב שאליה הדוח מתייחס (YYYY-MM) — זהות הדיווח כשהיא קיימת
+    billPeriod: p?.billPeriod || '',
+    periodFrom: p?.periodFrom || '',
+    periodTo: p?.periodTo || '',
     hours: num(p?.hours),
     note: String(p?.note ?? ''),
     source: p?.source === 'import' ? 'import' : 'manual',

@@ -160,6 +160,11 @@ export function progressOfLine(lineId) {
   return cache.progress.filter((p) => p.lineId === lineId);
 }
 
+/** תקופות החיוב שכבר יובאו לעסקה (YYYY-MM) */
+export function billPeriodsOf(dealId) {
+  return [...new Set(progressOf(dealId).map((p) => p.billPeriod).filter(Boolean))].sort();
+}
+
 /** סך השעות שדווחו לשורה */
 export function manualHoursOfLine(lineId) {
   return round2(progressOfLine(lineId).reduce((s, p) => s + num(p.hours), 0));

@@ -976,6 +976,7 @@ export const progressPeriods = (snap, period) => progressByPeriod(snap, period);
 export function renderProgressImportPreview({
   sheets, sheetIndex, headerRow, mapping, people, peopleLines, cumulative, teams, records,
   unmatched, skipped, duplicates = 0, dateRange = null, overlap = 'skip',
+  billPeriods = [], knownPeriods = [],
 }) {
   const wrap = el('div', { class: 'import' });
 
@@ -994,6 +995,17 @@ export function renderProgressImportPreview({
       : 'כל שורה בדוח נוספת לשעות שכבר דווחו.'),
   ]));
 
+  // תקופת החיוב שזוהתה בדוח — זו הזהות שמונעת כפילות בין דוחות
+  if (billPeriods.length) {
+    const already = billPeriods.filter((b) => knownPeriods.includes(b));
+    wrap.append(el('div', { class: `alert alert--${already.length ? 'over' : 'watch'}` }, [
+      icon(already.length ? 'alert' : 'info'),
+      el('span', { text: already.length
+        ? `תקופת חיוב ${already.join(', ')} כבר יובאה לעסקה — השורות המשויכות אליה יזוהו ככפילות.`
+        : `זוהתה תקופת חיוב: ${billPeriods.join(', ')}. הזיהוי מול דוחות אחרים ייעשה לפיה.` }),
+    ]));
+  }
+
   // חפיפה בין דוחות — רלוונטי רק בדוח לתקופה
   if (!cumulative) {
     wrap.append(field('שורות שכבר דווחו בעבר', el('select', { class: 'select', dataset: { imp: 'overlap' } }, [
@@ -1001,7 +1013,7 @@ export function renderProgressImportPreview({
       el('option', { value: 'replace', text: 'החלף את מה שיובא בטווח התאריכים של הדוח', selected: overlap === 'replace' ? 'selected' : null }),
       el('option', { value: 'add', text: 'הוסף בכל זאת (ייספר פעמיים)', selected: overlap === 'add' ? 'selected' : null }),
     ]),
-    `זיהוי לפי שורת תקציב + תאריך + שם. ${duplicates ? `זוהו ${duplicates} שורות שכבר דווחו.` : 'לא זוהתה חפיפה עם דיווחים קיימים.'}${
+    `זיהוי לפי שורת תקציב + ${billPeriods.length ? 'תקופת חיוב' : 'תאריך'} + שם. ${duplicates ? `זוהו ${duplicates} שורות שכבר דווחו.` : 'לא זוהתה חפיפה עם דיווחים קיימים.'}${
       dateRange ? ` הדוח מכסה ${dateRange.from} עד ${dateRange.to}.` : ''}`));
 
     if (overlap === 'replace' && dateRange) {
@@ -1331,10 +1343,11 @@ export function renderDealSettings(root, { snap, rateCards }) {
   // תיקיית המסמכים — מקומית למכשיר, לא חלק מנתוני העסקה
   root.append(el('section', { class: 'panel', id: 'docs-folder-panel' }, [
     el('h2', { class: 'panel__title' }, [icon('file'), 'תיקיית המסמכים']),
-    el('p', { class: 'panel__hint', text: 'כל דוח שעות, חשבון או מסמך שמועלים למערכת נשמרים כקובץ בתיקייה שתבחר, בתת-תיקייה נפרדת לכל עסקה שנפתחת אוטומטית. בלי תיקייה מחוברת הקבצים נשמרים בתוך המערכת בלבד.' }),
+    el('p', { class: 'panel__hint', text: 'כל דוח שעות, חשבון או מסמך שמועלים למערכת נשמרים כקובץ בתיקייה שתבחר, בתת-תיקייה נפרדת לכל עסקה — נוצרת אוטומטית בעת החיבור. אין צורך ליצור אותה ידנית. בלי תיקייה מחוברת הקבצים נשמרים בתוך המערכת בלבד.' }),
     el('div', { class: 'facts', id: 'docs-folder-state' }, [fact('סטטוס', 'נטען…')]),
     el('div', { class: 'form-actions form-actions--wrap' }, [
       el('button', { class: 'btn btn--primary btn--sm', type: 'button', dataset: { action: 'pick-folder' } }, [icon('upload'), 'בחר תיקייה']),
+      el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'test-folder' } }, [icon('check'), 'בדוק כתיבה']),
       el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'reconnect-folder' } }, [icon('refresh'), 'חדש הרשאה']),
       el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'forget-folder' } }, [icon('close'), 'נתק תיקייה']),
     ]),

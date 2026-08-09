@@ -83,6 +83,41 @@ async function dealDirectory(root, deal) {
   return root.getDirectoryHandle(dealFolderName(deal), { create: true });
 }
 
+/**
+ * יוצר עכשיו את תת-התיקייה של העסקה (בלי לחכות לקובץ ראשון).
+ * @returns {{ok:boolean, name?:string, error?:string}}
+ */
+export async function ensureDealFolder(deal) {
+  const root = await storedHandle();
+  if (!root) return { ok: false, error: 'לא מחוברת תיקייה' };
+  if (!(await ensurePermission(root))) return { ok: false, error: 'אין הרשאת כתיבה לתיקייה' };
+  try {
+    await dealDirectory(root, deal);
+    return { ok: true, name: dealFolderName(deal) };
+  } catch (err) {
+    return { ok: false, error: err?.message || 'יצירת תת-התיקייה נכשלה' };
+  }
+}
+
+/** בדיקת כתיבה אמיתית: יוצר קובץ זמני בתת-התיקייה של העסקה ומוחק אותו */
+export async function testWrite(deal) {
+  const root = await storedHandle();
+  if (!root) return { ok: false, error: 'לא מחוברת תיקייה' };
+  if (!(await ensurePermission(root))) return { ok: false, error: 'אין הרשאת כתיבה — לחץ "חדש הרשאה"' };
+  try {
+    const dir = await dealDirectory(root, deal);
+    const name = `.lexbudget-test-${Date.now()}.txt`;
+    const fh = await dir.getFileHandle(name, { create: true });
+    const w = await fh.createWritable();
+    await w.write('LexBudget write test');
+    await w.close();
+    await dir.removeEntry(name).catch(() => {});
+    return { ok: true, name: `${root.name}/${dealFolderName(deal)}` };
+  } catch (err) {
+    return { ok: false, error: err?.message || 'הכתיבה נכשלה' };
+  }
+}
+
 /** שם פנוי בתיקייה: "דוח.xlsx" → "דוח (2).xlsx" אם תפוס */
 async function freeName(dir, name) {
   const dot = name.lastIndexOf('.');
@@ -109,6 +144,7 @@ export async function saveDocument(file, deal, { kind = 'doc' } = {}) {
     dealId: deal?.id || '', kind, createdAt: new Date().toISOString(),
   };
   const root = await storedHandle();
+  let fallbackReason = '';
 
   if (root && (await ensurePermission(root))) {
     try {
@@ -123,12 +159,15 @@ export async function saveDocument(file, deal, { kind = 'doc' } = {}) {
       return rec;
     } catch (err) {
       console.warn('כתיבה לתיקייה נכשלה — הקובץ נשמר בתוך המערכת', err);
+      fallbackReason = err?.message || 'כתיבה לתיקייה נכשלה';
     }
+  } else if (root) {
+    fallbackReason = 'אין הרשאת כתיבה לתיקייה';
   }
 
   const rec = { ...base, storage: 'db', blob: file };
   await db.put('files', rec);
-  return rec;
+  return { ...rec, fallbackReason };
 }
 
 /* ---------- קריאה / פתיחה ---------- */

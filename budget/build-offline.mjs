@@ -13,9 +13,15 @@ const rd = (p) => readFileSync(join(BUDGET, p), 'utf8');
 const b64 = (p) => readFileSync(join(BUDGET, p)).toString('base64');
 
 /* ---------- 1) מודולי JS בסדר תלויות ---------- */
-const ORDER = ['model.js', 'db.js', 'xlsx.js', 'charts.js', 'importer.js', 'store.js', 'file-store.js', 'ui.js', 'app.js'];
+const ORDER = ['model.js', 'db.js', 'xlsx.js', 'pdf-table.js', 'charts.js', 'importer.js', 'store.js', 'file-store.js', 'ui.js', 'app.js'];
 const SRC = {};
 for (const name of ORDER) SRC[name] = Buffer.from(rd('js/' + name), 'utf8').toString('base64');
+
+/* ---------- 1ב) ספריות vendor (pdf.js) — נחשפות כ-blob URLs דרך __OFFLINE_VENDOR__ ---------- */
+const VENDOR = {
+  'pdf.min.js': b64('vendor/pdf.min.js'),
+  'pdf.worker.min.js': b64('vendor/pdf.worker.min.js'),
+};
 
 /* ---------- 2) CSS + פונטים מוטבעים ---------- */
 const FONTS = {
@@ -35,7 +41,13 @@ const bootstrap = `<script type="module">
 /* Offline bundle — כל המודולים מוטבעים כ-base64, נטענים כ-blob URLs (עובד מ-file://). */
 const SRC = ${JSON.stringify(SRC)};
 const ORDER = ${JSON.stringify(ORDER)};
+const VENDOR = ${JSON.stringify(VENDOR)};
 const dec = new TextDecoder();
+const toBytes = (b) => Uint8Array.from(atob(b), c => c.charCodeAt(0));
+window.__OFFLINE_VENDOR__ = {};
+for (const [name, data] of Object.entries(VENDOR)) {
+  window.__OFFLINE_VENDOR__[name] = URL.createObjectURL(new Blob([toBytes(data)], { type: 'text/javascript' }));
+}
 const urls = {};
 for (const name of ORDER) {
   let src = dec.decode(Uint8Array.from(atob(SRC[name]), c => c.charCodeAt(0)));

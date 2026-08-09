@@ -10,6 +10,7 @@ import {
 import * as ui from './ui.js';
 import * as fileStore from './file-store.js';
 import { readTabularFile } from './xlsx.js';
+import { pdfToSheets, isPdf } from './pdf-table.js';
 import {
   detectHeaderRow, guessMapping, rowsToEntries, markDuplicates, parseBudgetSheet, collectPeople,
   rowsToProgress,
@@ -336,9 +337,17 @@ async function onClick(e) {
     case 'pick-folder':
       try {
         const name = await fileStore.pickFolder();
-        ui.toast(`הקבצים יישמרו בתיקייה "${name}"`);
+        // יוצרים מיד את תת-התיקייה של העסקה, כדי שיהיה ברור שהחיבור עובד
+        const res = await fileStore.ensureDealFolder(store.getDeal(state.dealId));
+        ui.toast(res.ok ? `מחובר ל-"${name}" · נוצרה התיקייה "${res.name}"` : `מחובר ל-"${name}" · ${res.error}`, res.ok ? '' : 'error');
       } catch (err) { ui.toast(err.message || 'בחירת התיקייה בוטלה', 'error'); }
       return refreshFolderState();
+
+    case 'test-folder': {
+      const res = await fileStore.testWrite(store.getDeal(state.dealId));
+      ui.toast(res.ok ? `הכתיבה עובדת · ${res.name}` : `הכתיבה נכשלה: ${res.error}`, res.ok ? '' : 'error');
+      return refreshFolderState();
+    }
 
     case 'reconnect-folder':
       ui.toast(await fileStore.reconnectFolder() ? 'ההרשאה חודשה' : 'לא ניתנה הרשאה', await fileStore.folderReady() ? '' : 'error');
@@ -762,6 +771,7 @@ function openEntryModal(entry) {
     if (fileEl?.files?.length) {
       const rec = await fileStore.saveDocument(fileEl.files[0], store.getDeal(state.dealId), { kind: 'invoice' });
       fileId = rec.id; fileName = rec.name;
+      if (rec.fallbackReason) ui.toast(`הקובץ נשמר בתוך המערכת — ${rec.fallbackReason}`, 'error');
     }
     const hours = num(f.hours), rate = num(f.rate);
     await store.saveEntry({
@@ -850,7 +860,7 @@ async function openAttachment(fileId) {
    ============================================================ */
 
 let filePickCallback = null;
-function pickFile(cb, accept = '.xlsx,.xlsm,.csv,.tsv,.txt') {
+function pickFile(cb, accept = '.xlsx,.xlsm,.csv,.tsv,.txt,.pdf') {
   filePickCallback = cb;
   els.fileInput.value = '';
   els.fileInput.accept = accept;
@@ -861,21 +871,36 @@ function pickFile(cb, accept = '.xlsx,.xlsm,.csv,.tsv,.txt') {
    ייבוא רישומי ביצוע
    ============================================================ */
 
+/** קריאת קובץ לטבלה: XLSX/CSV דרך xlsx.js, PDF דרך pdf-table.js */
+async function readAnyTable(file) {
+  if (isPdf(file)) return pdfToSheets(file);
+  return readTabularFile(file);
+}
+
 async function startEntryImport(file) {
   const snap = currentSnapshot();
   if (!snap) return ui.toast('בחר עסקה תחילה', 'error');
 
-  // קובץ שאינו טבלה — מצרפים אותו כרישום חדש
+  // קובץ שאינו טבלה ואינו PDF — מצרפים אותו כרישום חדש
   const ext = (file.name.split('.').pop() || '').toLowerCase();
-  if (!['xlsx', 'xlsm', 'csv', 'tsv', 'txt'].includes(ext)) {
+  if (!['xlsx', 'xlsm', 'csv', 'tsv', 'txt', 'pdf'].includes(ext)) {
     const rec = await fileStore.saveDocument(file, snap.deal, { kind: 'invoice' });
+    if (rec.fallbackReason) ui.toast(`הקובץ נשמר בתוך המערכת — ${rec.fallbackReason}`, 'error');
     openEntryModal({ fileId: rec.id, fileName: rec.name, description: file.name.replace(/\.[^.]+$/, ''), kind: 'invoice' });
     return;
   }
 
   let sheets;
-  try { sheets = await readTabularFile(file); }
-  catch (err) { return ui.toast(err.message || 'קריאת הקובץ נכשלה', 'error'); }
+  try { sheets = await readAnyTable(file); }
+  catch (err) {
+    // PDF שלא ניתן לקריאה — נשמר כמסמך מצורף במקום להיכשל
+    if (isPdf(file)) {
+      const rec = await fileStore.saveDocument(file, snap.deal, { kind: 'invoice' });
+      openEntryModal({ fileId: rec.id, fileName: rec.name, description: file.name.replace(/\.[^.]+$/, ''), kind: 'invoice' });
+      return ui.toast(err.message || 'לא ניתן לקרוא את ה-PDF — הקובץ צורף כמסמך', 'error');
+    }
+    return ui.toast(err.message || 'קריאת הקובץ נכשלה', 'error');
+  }
 
   const sheetIndex = 0;
   const headerRow = detectHeaderRow(sheets[sheetIndex].rows);
@@ -1045,7 +1070,7 @@ async function startProgressImport(file) {
   if (!snap.teams.length) return ui.toast('צור צוותים בתקציב לפני ייבוא דוח', 'error');
 
   let sheets;
-  try { sheets = await readTabularFile(file); }
+  try { sheets = await readAnyTable(file); }
   catch (err) { return ui.toast(err.message || 'קריאת הקובץ נכשלה', 'error'); }
 
   const headerRow = detectHeaderRow(sheets[0].rows);
@@ -1127,6 +1152,7 @@ function progressPreview() {
   });
   importCtx.records = res.records;
   importCtx.dateRange = res.dateRange;
+  importCtx.billPeriods = res.billPeriods || [];
   return res;
 }
 
@@ -1141,6 +1167,8 @@ function renderProgressImportModal() {
     cumulative: importCtx.cumulative, teams: snap.teams, records: res.records,
     unmatched: res.unmatched, skipped: res.skipped, duplicates: res.duplicates,
     dateRange: res.dateRange, overlap: importCtx.overlap || 'skip',
+    billPeriods: res.billPeriods || [],
+    knownPeriods: store.billPeriodsOf(state.dealId),
   });
 
   const save = btn('הוסף למעקב', { primary: true, iconName: 'check' });
@@ -1176,8 +1204,10 @@ function renderProgressImportModal() {
     }
     // שמירת קובץ הדוח עצמו בתיקיית העסקה (או בתוך המערכת אם אין תיקייה)
     let doc = null;
-    try { doc = await fileStore.saveDocument(importCtx.file, store.getDeal(state.dealId), { kind: 'report' }); }
-    catch { /* אחסון הקובץ אינו קריטי לייבוא עצמו */ }
+    try {
+      doc = await fileStore.saveDocument(importCtx.file, store.getDeal(state.dealId), { kind: 'report' });
+      if (doc.fallbackReason) ui.toast(`קובץ הדוח נשמר בתוך המערכת — ${doc.fallbackReason}`, 'error');
+    } catch { /* אחסון הקובץ אינו קריטי לייבוא עצמו */ }
     if (doc) for (const r of list) r.fileId = doc.id;
     await store.addProgressMany(list);
     closeModal();
