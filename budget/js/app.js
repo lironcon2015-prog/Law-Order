@@ -8,6 +8,7 @@ import {
   DEFAULT_TEAM_NAMES, ENTRY_KINDS, ENTRY_STATUSES,
 } from './model.js';
 import * as ui from './ui.js';
+import * as fileStore from './file-store.js';
 import { readTabularFile } from './xlsx.js';
 import {
   detectHeaderRow, guessMapping, rowsToEntries, markDuplicates, parseBudgetSheet, collectPeople,
@@ -124,7 +125,7 @@ function render() {
     else if (state.tab === 'progress') ui.renderProgressTab(body, { snap, period: state.progressPeriod });
     else if (state.tab === 'actuals') ui.renderActualsTab(body, { snap, filters: state.filters });
     else if (state.tab === 'control') ui.renderControlTab(body, { snap });
-    else ui.renderDealSettings(body, { snap, rateCards: store.cache.rateCards });
+    else { ui.renderDealSettings(body, { snap, rateCards: store.cache.rateCards }); refreshFolderState(); }
     return;
   }
 
@@ -141,6 +142,19 @@ function refreshLive() {
   });
   state.snapshots.set(deal.id, snap);
   ui.refreshComputed(snap, state.selectedTeams);
+}
+
+/** מציג את מצב תיקיית המסמכים במסך ההגדרות */
+async function refreshFolderState() {
+  const box = document.getElementById('docs-folder-state');
+  if (!box) return;
+  const deal = store.getDeal(state.dealId);
+  ui.renderFolderState(box, {
+    supported: fileStore.supportsFolder(),
+    name: await fileStore.folderName(),
+    ready: await fileStore.folderReady(),
+    dealFolder: deal ? fileStore.dealFolderName(deal) : '',
+  });
 }
 
 /** מרענן את כותרת העסקה (תגיות + סרגל) בלי לרנדר מחדש את הטופס שבו המשתמש עובד */
@@ -317,6 +331,22 @@ async function onClick(e) {
 
     case 'add-team':
       return openTeamModal();
+
+    case 'pick-folder':
+      try {
+        const name = await fileStore.pickFolder();
+        ui.toast(`הקבצים יישמרו בתיקייה "${name}"`);
+      } catch (err) { ui.toast(err.message || 'בחירת התיקייה בוטלה', 'error'); }
+      return refreshFolderState();
+
+    case 'reconnect-folder':
+      ui.toast(await fileStore.reconnectFolder() ? 'ההרשאה חודשה' : 'לא ניתנה הרשאה', await fileStore.folderReady() ? '' : 'error');
+      return refreshFolderState();
+
+    case 'forget-folder':
+      await fileStore.forgetFolder();
+      ui.toast('התיקייה נותקה — קבצים חדשים יישמרו בתוך המערכת');
+      return refreshFolderState();
 
     case 'clear-picks':
       state.selectedTeams.clear();
@@ -717,7 +747,7 @@ function openEntryModal(entry) {
     const fileEl = body.querySelector('input[name="file"]');
     let fileId = entry?.fileId || '', fileName = entry?.fileName || '';
     if (fileEl?.files?.length) {
-      const rec = await store.saveFile(fileEl.files[0]);
+      const rec = await fileStore.saveDocument(fileEl.files[0], store.getDeal(state.dealId), { kind: 'invoice' });
       fileId = rec.id; fileName = rec.name;
     }
     const hours = num(f.hours), rate = num(f.rate);
@@ -798,11 +828,8 @@ function openSplitModal(teamId) {
 }
 
 async function openAttachment(fileId) {
-  const rec = await store.getFile(fileId);
-  if (!rec) return ui.toast('הקובץ לא נמצא', 'error');
-  const url = URL.createObjectURL(rec.blob);
-  window.open(url, '_blank', 'noopener');
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  try { await fileStore.openDocument(fileId); }
+  catch (err) { ui.toast(err.message || 'הקובץ לא נמצא', 'error'); }
 }
 
 /* ============================================================
@@ -828,7 +855,7 @@ async function startEntryImport(file) {
   // קובץ שאינו טבלה — מצרפים אותו כרישום חדש
   const ext = (file.name.split('.').pop() || '').toLowerCase();
   if (!['xlsx', 'xlsm', 'csv', 'tsv', 'txt'].includes(ext)) {
-    const rec = await store.saveFile(file);
+    const rec = await fileStore.saveDocument(file, snap.deal, { kind: 'invoice' });
     openEntryModal({ fileId: rec.id, fileName: rec.name, description: file.name.replace(/\.[^.]+$/, ''), kind: 'invoice' });
     return;
   }
@@ -1134,6 +1161,11 @@ function renderProgressImportModal() {
         return { key: p.key, name: p.name, teamName: teamName.get(teamId) || '', roleName: line?.line.roleName || '' };
       }));
     }
+    // שמירת קובץ הדוח עצמו בתיקיית העסקה (או בתוך המערכת אם אין תיקייה)
+    let doc = null;
+    try { doc = await fileStore.saveDocument(importCtx.file, store.getDeal(state.dealId), { kind: 'report' }); }
+    catch { /* אחסון הקובץ אינו קריטי לייבוא עצמו */ }
+    if (doc) for (const r of list) r.fileId = doc.id;
     await store.addProgressMany(list);
     closeModal();
     const extra = [

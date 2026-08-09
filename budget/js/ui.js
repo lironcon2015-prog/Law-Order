@@ -975,6 +975,21 @@ export function renderSplitForm({ team, roles, people }) {
   return form;
 }
 
+/** מצב תיקיית המסמכים במסך ההגדרות */
+export function renderFolderState(root, { supported, name, ready, dealFolder }) {
+  if (!root) return;
+  root.replaceChildren();
+  if (!supported) {
+    root.append(fact('סטטוס', 'הדפדפן אינו תומך — הקבצים נשמרים בתוך המערכת', 'neg'));
+    return;
+  }
+  root.append(
+    fact('תיקייה מחוברת', name || 'לא נבחרה', name ? '' : 'neg'),
+    fact('הרשאת כתיבה', name ? (ready ? 'בתוקף' : 'נדרשת חידוש בלחיצה') : '—', name && !ready ? 'neg' : 'pos'),
+    fact('תת-התיקייה של העסקה', dealFolder || '—'),
+  );
+}
+
 export function filterEntries(entries, filters = {}) {
   const q = (filters.q || '').trim().toLowerCase();
   return entries.filter((e) => {
@@ -1165,6 +1180,18 @@ export function renderDealSettings(root, { snap, rateCards }) {
     el('div', { class: 'form-actions' }, [
       el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'capture-baseline' } }, [icon('flag'), d.baseline ? 'עדכן בסיס לתקציב הנוכחי' : 'קבע תקציב בסיס']),
       d.baseline ? el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'clear-baseline' } }, 'בטל בסיס') : null,
+    ]),
+  ]));
+
+  // תיקיית המסמכים — מקומית למכשיר, לא חלק מנתוני העסקה
+  root.append(el('section', { class: 'panel', id: 'docs-folder-panel' }, [
+    el('h2', { class: 'panel__title' }, [icon('file'), 'תיקיית המסמכים']),
+    el('p', { class: 'panel__hint', text: 'כל דוח שעות, חשבון או מסמך שמועלים למערכת נשמרים כקובץ בתיקייה שתבחר, בתת-תיקייה נפרדת לכל עסקה שנפתחת אוטומטית. בלי תיקייה מחוברת הקבצים נשמרים בתוך המערכת בלבד.' }),
+    el('div', { class: 'facts', id: 'docs-folder-state' }, [fact('סטטוס', 'נטען…')]),
+    el('div', { class: 'form-actions form-actions--wrap' }, [
+      el('button', { class: 'btn btn--primary btn--sm', type: 'button', dataset: { action: 'pick-folder' } }, [icon('upload'), 'בחר תיקייה']),
+      el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'reconnect-folder' } }, [icon('refresh'), 'חדש הרשאה']),
+      el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'forget-folder' } }, [icon('close'), 'נתק תיקייה']),
     ]),
   ]));
 

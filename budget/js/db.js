@@ -1,9 +1,9 @@
 // db.js — עטיפת IndexedDB ל-LexBudget. מסד נפרד לחלוטין מה-CRM (maCrmDB).
 
 const DB_NAME = 'lexBudgetDB';
-const DB_VERSION = 2;   // v2: הוספת store‏ progress (עדכוני ביצוע במעקב הידני)
+const DB_VERSION = 3;   // v3: localPrefs — handle לתיקיית המסמכים (מקומי למכשיר)
 
-export const STORES = ['deals', 'teams', 'entries', 'files', 'rateCards', 'settings', 'progress'];
+export const STORES = ['deals', 'teams', 'entries', 'files', 'rateCards', 'settings', 'progress', 'localPrefs'];
 
 let dbPromise = null;
 
@@ -58,6 +58,10 @@ export function openDB() {
       }
       if (!db.objectStoreNames.contains('settings')) {
         db.createObjectStore('settings', { keyPath: 'key' });
+      }
+      // העדפות מקומיות למכשיר (handle של תיקיית המסמכים) — לא נכלל בגיבוי
+      if (!db.objectStoreNames.contains('localPrefs')) {
+        db.createObjectStore('localPrefs', { keyPath: 'key' });
       }
       // עדכוני ביצוע (מעקב ידני): כל רשומה = שעות שדווחו לתאריך מסוים, ידנית או מדוח שיובא
       if (!db.objectStoreNames.contains('progress')) {
