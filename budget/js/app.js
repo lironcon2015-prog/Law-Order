@@ -1117,7 +1117,7 @@ function syncProgressPeople() {
   const norm = (s) => String(s || '').trim().toLowerCase();
 
   const lines = [];
-  for (const t of snap.teams) for (const l of t.lines) lines.push({ teamId: t.id, lineId: l.id, roleId: l.roleId, person: l.person, roleName: l.roleName });
+  for (const t of snap.teams) for (const l of t.lines) lines.push({ teamId: t.id, lineId: l.id, roleId: l.roleId, person: l.person, roleName: l.roleName, rate: num(l.rate) });
 
   // מועמדים לזיהוי מקורב: אנשים שיש להם שורת תקציב, ואנשים שכבר מוכרים מהזיכרון
   const lineKeys = new Map();          // personKey → שורה
@@ -1138,16 +1138,25 @@ function syncProgressPeople() {
     const roleName = memory[memKey]?.roleName || '';
     // 3) הדרגה שכתובה בדוח עצמו, בתוך הצוות הזכור
     const wantRole = roleName || p.roleHint || '';
-    const byRole = teamId && wantRole
-      ? lines.find((l) => l.teamId === teamId && norm(l.roleName) === norm(wantRole))
+    const pool = teamId ? lines.filter((l) => l.teamId === teamId) : lines;
+    const byRole = wantRole && teamId
+      ? pool.find((l) => norm(l.roleName) === norm(wantRole))
       : null;
+    // 4) התעריף שבדוח — מזהה את הדרגה גם בדוח שאין בו עמודת "דרגה"
+    let byRate = null;
+    if (!byRole && p.rateHint > 0) {
+      const near = pool.filter((l) => l.rate > 0 && Math.abs(l.rate - p.rateHint) <= Math.max(1, l.rate * 0.02));
+      if (near.length === 1) byRate = near[0];
+    }
 
-    const hit = (byName ? lineKeys.get(byName.key) : null) || byRole || null;
+    const hit = (byName ? lineKeys.get(byName.key) : null) || byRole || byRate || null;
     next[p.key] = hit ? `${hit.teamId}|${hit.lineId}` : '';
     if (hit) {
       matches[p.key] = byName && !byName.exact
         ? `זוהה כ"${lineKeys.get(byName.key).person}"`
-        : byName ? '' : (byRole ? `לפי הדרגה "${wantRole}"${memKey ? ' והצוות הזכור' : ''}` : '');
+        : byName ? ''
+          : byRole ? `לפי הדרגה "${wantRole}"${memKey ? ' והצוות הזכור' : ''}`
+            : byRate ? `לפי התעריף בדוח (${p.rateHint.toLocaleString('he-IL')} ₪)` : '';
     }
   }
   importCtx.peopleLines = next;
@@ -1157,7 +1166,8 @@ function syncProgressPeople() {
 /** שיוך מהיר של כל האנשים בדוח לצוות אחד: לפי שורה על שמם, ואם אין — לפי הדרגה שבדוח */
 function assignPeopleToTeam(teamId) {
   if (!teamId) return;
-  const team = store.getTeam(teamId);
+  // דרך ה-snapshot ולא ה-store: רק שם לשורה יש `rate` אפקטיבי (תעריפון + דריסה)
+  const team = currentSnapshot()?.teams.find((t) => t.id === teamId);
   if (!team) return;
   const norm = (s) => String(s || '').trim().toLowerCase();
   const keys = team.lines.map((l) => personKey(l.person)).filter(Boolean);
@@ -1165,7 +1175,12 @@ function assignPeopleToTeam(teamId) {
     const hitKey = fuzzyPersonMatch(p.key, keys)?.key || '';
     const byPerson = hitKey ? team.lines.find((l) => personKey(l.person) === hitKey) : null;
     const byRole = p.roleHint ? team.lines.find((l) => norm(l.roleName) === norm(p.roleHint)) : null;
-    const hit = byPerson || byRole || team.lines[0];
+    // אין דרגה בדוח? התעריף מזהה אותה. תעריף שלא קיים בתעריפון → הדרגה הקרובה ביותר.
+    const rated = p.rateHint > 0 ? team.lines.filter((l) => num(l.rate) > 0) : [];
+    const byRate = rated.length
+      ? rated.reduce((best, l) => (Math.abs(num(l.rate) - p.rateHint) < Math.abs(num(best.rate) - p.rateHint) ? l : best))
+      : null;
+    const hit = byPerson || byRole || byRate || team.lines[0];
     if (hit) importCtx.peopleLines[p.key] = `${team.id}|${hit.id}`;
   }
 }

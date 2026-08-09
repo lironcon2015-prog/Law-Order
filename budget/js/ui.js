@@ -7,6 +7,7 @@ import {
   aggregateTeams, progressByPeriod, sourceLabel, dealReview,
 } from './model.js';
 import { barCompare, donut, burnLine, gauge, miniBar } from './charts.js';
+import { TARGET_FIELDS } from './importer.js';
 
 /* ---------- אייקונים (Lucide-style, סטטי) ---------- */
 export const ICONS = {
@@ -1023,17 +1024,25 @@ export function renderProgressImportPreview({
 }) {
   const wrap = el('div', { class: 'import' });
 
-  const pages = sheets[sheetIndex]?.pages || 0;
-  if (pages > 1) {
+  const sheet = sheets[sheetIndex] || {};
+  const nums = sheet.pageNumbers || [];
+  if (sheet.pages > 1 || sheets.length > 1) {
+    const spread = nums.length > 1 ? ` (עמודים ${nums[0]}–${nums[nums.length - 1]})` : nums.length ? ` (עמוד ${nums[0]})` : '';
     wrap.append(el('div', { class: 'alert alert--watch' }, [
       icon('info'),
-      el('span', { text: `הדוח כולל ${pages} עמודים — כולם נקראו לרשת עמודות אחת, וההגדרות כאן חלות על כולם.` }),
+      el('span', { text: sheet.pages > 1
+        ? `הטבלה משתרעת על ${sheet.pages} עמודים${spread} — כולם נקראו לרשת עמודות אחת וההגדרות כאן חלות על כולם.${sheets.length > 1 ? ' בקובץ יש טבלאות נוספות במבנה אחר — אפשר לעבור אליהן בבורר הטבלה.' : ''}`
+        : `בקובץ זוהו ${sheets.length} טבלאות במבנה שונה. נבחרה הגדולה ביותר${spread}; אפשר להחליף בבורר הטבלה.` }),
     ]));
   }
 
   if (sheets.length > 1) {
-    wrap.append(field('גיליון', el('select', { class: 'select', dataset: { imp: 'sheet' } },
-      sheets.map((s, i) => el('option', { value: String(i), text: s.name, selected: i === sheetIndex ? 'selected' : null })))));
+    wrap.append(field('טבלה / גיליון', el('select', { class: 'select', dataset: { imp: 'sheet' } },
+      sheets.map((s, i) => el('option', {
+        value: String(i),
+        text: s.rows ? `${s.name} · ${s.rows.length} שורות` : s.name,
+        selected: i === sheetIndex ? 'selected' : null,
+      })))));
   }
 
   wrap.append(el('div', { class: 'grid-2' }, [
@@ -1117,7 +1126,8 @@ export function renderProgressImportPreview({
       ]),
       el('div', { class: 'btable-wrap' }, el('table', { class: 'btable btable--people' }, [
         el('thead', {}, el('tr', {}, [
-          el('th', { text: 'עורך דין / עובד' }), el('th', { text: 'שורות' }), el('th', { text: 'שעות' }), el('th', { text: 'שורת תקציב' }),
+          el('th', { text: 'עורך דין / עובד' }), el('th', { text: 'שורות' }), el('th', { text: 'שעות' }),
+          el('th', { text: 'תעריף בדוח' }), el('th', { text: 'שורת תקציב' }),
         ])),
         el('tbody', {}, people.map((p) => el('tr', { class: peopleLines[p.key] ? '' : 'row--dupe' }, [
           el('td', {}, [
@@ -1127,6 +1137,7 @@ export function renderProgressImportPreview({
           ]),
           el('td', { class: 'num', text: String(p.rows) }),
           el('td', { class: 'num', text: fmtHours(p.hours) }),
+          el('td', { class: 'num muted', text: p.rateHint ? `${p.rateHint.toLocaleString('he-IL')} ₪` : '—' }),
           el('td', {}, [el('select', { class: 'select select--sm', dataset: { imp: 'personLine', personKey: p.key } }, lineOptions(peopleLines[p.key]))]),
         ]))),
       ])),
@@ -1556,8 +1567,12 @@ export function renderImportPreview({
   const wrap = el('div', { class: 'import' });
 
   if (sheets.length > 1) {
-    wrap.append(field('גיליון', el('select', { class: 'select', dataset: { imp: 'sheet' } },
-      sheets.map((s, i) => el('option', { value: String(i), text: s.name, selected: i === sheetIndex ? 'selected' : null })))));
+    wrap.append(field('טבלה / גיליון', el('select', { class: 'select', dataset: { imp: 'sheet' } },
+      sheets.map((s, i) => el('option', {
+        value: String(i),
+        text: s.rows ? `${s.name} · ${s.rows.length} שורות` : s.name,
+        selected: i === sheetIndex ? 'selected' : null,
+      })))));
   }
 
   if (mode === 'entries') {
@@ -1668,13 +1683,9 @@ export function renderImportPreview({
   return wrap;
 }
 
-const TARGET_FIELD_OPTIONS = [
-  { id: 'date', label: 'תאריך' }, { id: 'description', label: 'תיאור' },
-  { id: 'teamName', label: 'צוות' }, { id: 'roleName', label: 'דרגה' },
-  { id: 'hours', label: 'שעות' }, { id: 'rate', label: 'תעריף' },
-  { id: 'amount', label: 'סכום' }, { id: 'supplier', label: 'ספק' },
-  { id: 'docNumber', label: 'מס\' מסמך' },
-];
+// מקור אמת יחיד עם importer.js — רשימה כפולה כאן גרמה לכך שעמודת "עובד"
+// הוצגה כ"התעלם" ולא ניתן היה לתקן מיפוי שגוי של עמודת האדם.
+const TARGET_FIELD_OPTIONS = TARGET_FIELDS.map((f) => ({ id: f.id, label: f.label }));
 
 export function renderBudgetImportPreview(parsed, { roles }) {
   const wrap = el('div', { class: 'import' });

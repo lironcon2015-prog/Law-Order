@@ -15,7 +15,9 @@ export const TARGET_FIELDS = [
   { id: 'teamName',    label: 'צוות',         keys: ['צוות', 'team', 'מחלקה', 'תחום', 'practice', 'department'] },
   { id: 'personName',  label: 'עורך דין / עובד', keys: ['שם עורך דין', 'עורך דין', 'עו"ד מטפל', 'עובד', 'שם עובד', 'מבצע', 'ביצע', 'איש צוות', 'timekeeper', 'lawyer', 'attorney', 'employee', 'user', 'שם'] },
   { id: 'roleName',    label: 'דרגה',         keys: ['דרגה', 'תפקיד', 'role', 'level', 'seniority', 'רמה'] },
-  { id: 'hours',       label: 'שעות',         keys: ['שעות', 'hours', 'זמן', 'units', 'כמות שעות'] },
+  // "שעות לחיוב" קודמת ל"שעות עבודה": המדד של המערכת הוא מה שנכנס לחשבון
+  { id: 'hours',       label: 'שעות',         keys: ['שעות לחיוב', 'שעות מחויבות', 'billable hours', 'שעות', 'hours', 'זמן', 'units', 'כמות שעות'] },
+  { id: 'workHours',   label: 'שעות עבודה (לידיעה)', keys: ['שעות עבודה', 'שעות שבוצעו', 'worked hours'] },
   { id: 'rate',        label: 'תעריף',        keys: ['תעריף', 'rate', 'מחיר לשעה', 'שכר שעתי'] },
   { id: 'amount',      label: 'סכום',         keys: ['סכום', 'סה"כ', 'סך הכל', 'עלות', 'amount', 'total', 'value', 'לתשלום', 'חיוב'] },
   { id: 'supplier',    label: 'ספק / גורם',   keys: ['ספק', 'גורם', 'משרד', 'supplier', 'vendor', 'שם ספק'] },
@@ -40,24 +42,38 @@ export function detectHeaderRow(rows, limit = 12) {
   return best.score >= 2 ? best.index : (rows.length ? 0 : -1);
 }
 
-/** מנחש מיפוי עמודה→שדה. מחזיר { fieldId: columnIndex } */
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * מנחש מיפוי עמודה→שדה. מחזיר { fieldId: columnIndex }.
+ * הניקוד מעדיף התאמה מדויקת על מילה שלמה על הכלה — אחרת כותרת כמו "שעות עבודה"
+ * חוטפת את שדה ה"תיאור" (בגלל מילת המפתח "עבודה") ומשאירה את התיאור ריק.
+ */
 export function guessMapping(headerCells) {
-  const mapping = {};
-  const used = new Set();
-  for (const f of TARGET_FIELDS) {
-    let bestIdx = -1, bestLen = 0;
-    (headerCells || []).forEach((cell, idx) => {
-      if (used.has(idx)) return;
-      const v = norm(cell);
-      if (!v) return;
+  const cands = [];
+  (headerCells || []).forEach((cell, idx) => {
+    const v = norm(cell);
+    if (!v) return;
+    for (const f of TARGET_FIELDS) {
       for (const k of f.keys) {
         const nk = norm(k);
-        if (v === nk || v.includes(nk)) {
-          if (nk.length > bestLen) { bestLen = nk.length; bestIdx = idx; }
-        }
+        if (!nk) continue;
+        let score = 0;
+        if (v === nk) score = 100 + nk.length;
+        else if (new RegExp(`(^| )${escapeRe(nk)}( |$)`).test(v)) score = 60 + nk.length;
+        else if (v.includes(nk)) score = 30 + nk.length;
+        if (score) cands.push({ field: f.id, idx, score });
       }
-    });
-    if (bestIdx >= 0) { mapping[f.id] = bestIdx; used.add(bestIdx); }
+    }
+  });
+  cands.sort((a, b) => b.score - a.score);
+
+  const mapping = {};
+  const used = new Set();
+  for (const c of cands) {
+    if (mapping[c.field] !== undefined || used.has(c.idx)) continue;
+    mapping[c.field] = c.idx;
+    used.add(c.idx);
   }
   return mapping;
 }
@@ -101,7 +117,7 @@ export function looksLikePerson(name) {
   const s = norm(name);
   if (!s || s.length < 2) return false;
   if (HEADER_WORDS.has(s)) return false;
-  if (/^(סהכ|סה כ|סיכום|total|subtotal|עמוד|page|המשך)\b/.test(s)) return false;
+  if (/^(סהכ|סה כ|סיכום|total|subtotal|עמוד|page|המשך)(\s|$)/.test(s)) return false;
   if (/^[\d\s./,+-]+$/.test(s)) return false;
   return true;
 }
@@ -150,18 +166,27 @@ export function collectPeople(rows, mapping) {
     const key = personKey(name);
     if (!key) continue;
     const display = personDisplay(name);
-    const cur = map.get(key) || { name: display, key, legacyKey: norm(name), variants: [], rows: 0, hours: 0, amount: 0, teamHint: '', roleHint: '' };
+    const cur = map.get(key) || { name: display, key, legacyKey: norm(name), variants: [], rows: 0, hours: 0, amount: 0, teamHint: '', roleHint: '', rates: new Map() };
     if (display.length > cur.name.length) cur.name = display;
     if (!cur.variants.includes(name)) cur.variants.push(name);
     cur.rows += 1;
-    cur.hours += num(mapping.hours === undefined ? 0 : row[mapping.hours]);
-    cur.amount += num(mapping.amount === undefined ? 0 : row[mapping.amount]);
+    const rowHours = num(mapping.hours === undefined ? 0 : row[mapping.hours]);
+    const rowAmount = num(mapping.amount === undefined ? 0 : row[mapping.amount]);
+    cur.hours += rowHours;
+    cur.amount += rowAmount;
+    // התעריף שבדוח מזהה את הדרגה גם כשאין עמודת "דרגה" — נשמר הנפוץ ביותר
+    const rowRate = mapping.rate !== undefined ? num(row[mapping.rate]) : (rowHours ? rowAmount / rowHours : 0);
+    if (rowRate > 0) cur.rates.set(Math.round(rowRate), (cur.rates.get(Math.round(rowRate)) || 0) + 1);
     if (!cur.teamHint && mapping.teamName !== undefined) cur.teamHint = String(row[mapping.teamName] ?? '').trim();
     if (!cur.roleHint && mapping.roleName !== undefined) cur.roleHint = String(row[mapping.roleName] ?? '').trim();
     map.set(key, cur);
   }
   return [...map.values()]
-    .map((p) => ({ ...p, hours: round2(p.hours), amount: round2(p.amount) }))
+    .map(({ rates, ...p }) => {
+      let rateHint = 0, best = 0;
+      for (const [r, n] of rates) if (n > best) { best = n; rateHint = r; }
+      return { ...p, hours: round2(p.hours), amount: round2(p.amount), rateHint };
+    })
     .sort((a, b) => b.hours - a.hours || b.rows - a.rows);
 }
 
@@ -175,8 +200,19 @@ export function sheetBody(rows, headerRow) {
   const headerSig = sig(header);
   return (rows || []).slice(headerRow + 1).filter((r) => {
     if (!r || !r.some((c) => c !== null && c !== undefined && c !== '')) return false;
-    return sig(r) !== headerSig;
+    if (sig(r) === headerSig) return false;
+    return !isTotalsRow(r);
   });
+}
+
+/**
+ * שורת סיכום ("סה"כ 115.86") — המספרים בה זהים לסכום כל השורות, ולכן קליטה שלה
+ * מכפילה את הדוח. מזוהה לפי כך שכל הטקסט בשורה הוא מילת סיכום.
+ */
+export function isTotalsRow(row) {
+  const texts = (row || []).filter((c) => typeof c === 'string' && c.trim());
+  if (!texts.length || texts.length > 2) return false;
+  return texts.every((c) => /^(סהכ|סה כ|סיכום|total|subtotal|grand total)(\s|$)/.test(norm(c)));
 }
 
 /** ממיר ערך תא לתאריך ISO (yyyy-mm-dd) — תומך בפורמט ישראלי dd/mm/yyyy */

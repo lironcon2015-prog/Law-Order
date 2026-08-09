@@ -8,9 +8,13 @@
 // 2. **מרזבים ולא אשכולות** — העמודות נגזרות מרצועות ה-X שאף תא לא חוצה
 //    (whitespace gutters). זה עמיד ליישור שונה בין כותרת לערכים, בניגוד לאשכול
 //    לפי מרכז התא.
-// 3. **רשת אחת לכל המסמך** — המרזבים מחושבים מכל העמודים יחד, ולכן עמוד 2
-//    מקבל בדיוק את אותם אינדקסים כמו עמוד 1. כך המיפוי שהמשתמש מאשר חל על
-//    כל הדוח, ולא רק על העמוד הראשון.
+// 3. **רשת אחת לכל טבלה** — עמודים בעלי מבנה עמודות תואם מאוחדים לגיליון אחד,
+//    כך שהמיפוי שהמשתמש מאשר חל על כל הדוח ולא רק על העמוד הראשון. חשבון אמיתי
+//    מכיל גם עמוד שער וגם נספח הוצאות במבנה אחר — הם נשארים גיליונות נפרדים
+//    ואינם הורסים את רשת העמודות של טבלת השעות.
+// 4. **שורות המשך** — בדוח אמיתי התיאור נשבר לשתיים-שלוש שורות פיזיות סביב שורת
+//    הנתונים, והכותרת עצמה נפרסת על שלוש שורות ("שעות"/"לחיוב"). שורה חלקית
+//    מתמזגת לשורה המלאה הקרובה אליה, לפי עמודה.
 
 const vendorUrl = (file) => (window.__OFFLINE_VENDOR__ && window.__OFFLINE_VENDOR__[file]) || `./vendor/${file}`;
 
@@ -124,54 +128,117 @@ function castCell(v) {
   return Number.isFinite(n) && /\d/.test(t) ? n : t;
 }
 
-/* ---------- שלב 3: המסמך כולו כגיליון אחד ---------- */
+/* ---------- שלב 3: קיבוץ עמודים לטבלאות ---------- */
+
+const tableCellsOf = (lines) => lines.filter((l) => l.cells.length >= 3).flatMap((l) => l.cells);
+
+/** שתי רשתות תואמות אם יש להן אותו מספר עמודות וכל עמודה חופפת את מקבילתה */
+function compatibleBands(a, b) {
+  if (!a || !b || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const lo = Math.max(a[i][0], b[i][0]), hi = Math.min(a[i][1], b[i][1]);
+    const overlap = hi - lo;
+    const smaller = Math.min(a[i][1] - a[i][0], b[i][1] - b[i][0]);
+    if (overlap <= 0 || overlap < smaller * 0.6) return false;
+  }
+  return true;
+}
+
+const mostCommon = (list) => {
+  const c = new Map();
+  for (const v of list) c.set(v, (c.get(v) || 0) + 1);
+  let best = 0, n = 0;
+  for (const [v, k] of c) if (k > n || (k === n && v > best)) { best = v; n = k; }
+  return best;
+};
 
 /**
- * קורא PDF ומחזיר גיליון יחיד בפורמט של xlsx.js: `[{ name, rows, pages }]`.
- * כל עמודי המסמך נכנסים לאותה רשת עמודות, לפי סדר העמודים.
+ * בונה את שורות העמוד על רשת העמודות, כולל מיזוג **שורות המשך**: שורה חלקית
+ * (תיאור שנשבר, כותרת שנפרסה לשתי שורות) נספחת לשורה המלאה הקרובה אליה.
+ */
+function buildRows(lines, bands, avgH) {
+  if (!lines.length) return [];
+  const counts = lines.map((l) => l.cells.length).filter((c) => c >= 3);
+  const anchorMin = Math.max(3, Math.ceil((mostCommon(counts) || 3) * 0.6));
+  const isAnchor = lines.map((l) => l.cells.length >= anchorMin);
+  const maxGap = Math.max(6, avgH * 1.6);
+
+  const owner = lines.map((l, i) => {
+    if (isAnchor[i]) return i;
+    let best = -1, dist = Infinity;
+    lines.forEach((o, j) => {
+      if (!isAnchor[j]) return;
+      const d = Math.abs(o.y - l.y);
+      if (d < dist) { dist = d; best = j; }
+    });
+    return best >= 0 && dist <= maxGap ? best : i;
+  });
+
+  const buf = new Map();
+  const order = [];
+  lines.forEach((line, i) => {                     // כבר ממוינות מלמעלה למטה
+    const o = owner[i];
+    if (!buf.has(o)) { buf.set(o, new Array(bands.length).fill('')); order.push(o); }
+    const cells = buf.get(o);
+    for (const c of line.cells) {
+      const b = bandOf((c.xs + c.xe) / 2, bands);
+      cells[b] = cells[b] ? `${cells[b]} ${c.str}` : c.str;
+    }
+  });
+
+  return order.map((o) => buf.get(o).map(castCell)).filter((r) => r.some((v) => v !== ''));
+}
+
+/**
+ * קורא PDF ומחזיר גיליונות בפורמט של xlsx.js: `[{ name, rows, pages, pageNumbers }]`.
+ * עמודים בעלי מבנה עמודות תואם מתאחדים לגיליון אחד; הגיליון הגדול ביותר ראשון.
  */
 export async function pdfToSheets(file) {
   const pdfjsLib = await loadPdfLib();
   try { pdfjsLib.GlobalWorkerOptions.workerSrc = vendorUrl('pdf.worker.min.js'); } catch { /* noop */ }
 
   const doc = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
-  const pageLines = [];      // [{ page, cells:[] }]
-  let width = 0;
-  let heights = 0, heightN = 0;
+  const raw = [];
+  let width = 0, heights = 0, heightN = 0;
 
   for (let p = 1; p <= doc.numPages; p++) {
     const page = await doc.getPage(p);
     width = Math.max(width, page.getViewport({ scale: 1 }).width || 595);
-    const content = await page.getTextContent();
-    for (const line of toLines(content.items)) {
-      for (const it of line.items) { heights += it.h; heightN++; }
-      pageLines.push({ page: p, line });
-    }
+    const lines = toLines((await page.getTextContent()).items);
+    for (const line of lines) for (const it of line.items) { heights += it.h; heightN++; }
+    raw.push({ n: p, lines });
   }
-  if (!pageLines.length) throw new Error('לא נמצא טקסט ב-PDF (ייתכן שזה קובץ סרוק — נדרש OCR)');
+  if (!heightN) throw new Error('לא נמצא טקסט ב-PDF (ייתכן שזה קובץ סרוק — נדרש OCR)');
 
-  const avgH = heightN ? heights / heightN : 10;
+  const avgH = heights / heightN;
   const gap = Math.max(2.5, avgH * 0.5);
-  const rowsCells = pageLines.map(({ page, line }) => ({ page, cells: toCells(line, gap) }));
+  const pages = raw.map(({ n, lines }) => {
+    const withCells = lines.map((l) => ({ y: l.y, cells: toCells(l, gap) }));
+    const cells = tableCellsOf(withCells);
+    return { n, lines: withCells, bands: columnBands(cells.length ? cells : withCells.flatMap((l) => l.cells), width) };
+  }).filter((p) => p.bands);
+  if (!pages.length) throw new Error('לא זוהתה טבלה ב-PDF');
 
-  // המרזבים נלמדים משורות הטבלה בלבד (3 תאים ומעלה), על פני כל העמודים
-  const tableCells = rowsCells.filter((r) => r.cells.length >= 3).flatMap((r) => r.cells);
-  const bands = columnBands(tableCells.length ? tableCells : rowsCells.flatMap((r) => r.cells), width);
-  if (!bands) throw new Error('לא זוהתה טבלה ב-PDF');
-
-  const rows = [];
-  for (const { cells } of rowsCells) {
-    const out = new Array(bands.length).fill('');
-    for (const c of cells) {
-      const i = bandOf((c.xs + c.xe) / 2, bands);
-      out[i] = out[i] ? `${out[i]} ${c.str}` : c.str;
-    }
-    const cast = out.map(castCell);
-    if (cast.some((v) => v !== '')) rows.push(cast);
+  // עמודים בעלי מבנה תואם = אותה טבלה. שער החשבון ונספח ההוצאות נשארים בנפרד.
+  const groups = [];
+  for (const pg of pages) {
+    const g = groups.find((x) => compatibleBands(x.bands, pg.bands));
+    if (g) g.pages.push(pg); else groups.push({ bands: pg.bands, pages: [pg] });
   }
 
-  const name = doc.numPages > 1 ? `PDF · ${doc.numPages} עמודים` : 'PDF';
-  return [{ name, rows, pages: doc.numPages }];
+  const sheets = groups.map((g) => {
+    const cells = g.pages.flatMap((p) => tableCellsOf(p.lines));
+    const bands = columnBands(cells.length ? cells : g.pages.flatMap((p) => p.lines.flatMap((l) => l.cells)), width) || g.bands;
+    const rows = g.pages.flatMap((p) => buildRows(p.lines, bands, avgH));
+    const nums = g.pages.map((p) => p.n);
+    return { rows, pages: g.pages.length, pageNumbers: nums, first: nums[0] };
+  }).filter((s) => s.rows.length);
+
+  if (!sheets.length) throw new Error('לא זוהתה טבלה ב-PDF');
+  sheets.sort((a, b) => b.rows.length - a.rows.length);
+
+  const label = (s) => (s.pageNumbers.length === 1 ? `עמוד ${s.pageNumbers[0]}` : `עמודים ${s.pageNumbers[0]}–${s.pageNumbers[s.pageNumbers.length - 1]}`);
+  return sheets.map((s, i) => ({ ...s, name: sheets.length === 1 ? 'PDF' : `טבלה ${i + 1} · ${label(s)}` }));
 }
 
 export const isPdf = (file) => /\.pdf$/i.test(file?.name || '') || file?.type === 'application/pdf';
