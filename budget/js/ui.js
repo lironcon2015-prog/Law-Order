@@ -445,6 +445,15 @@ function renderCapPanel(snap) {
     el('p', { class: 'panel__hint', text: cap.applies
       ? `התקציב ${fmtMoney(cap.cost)} מול תקרה ${fmtMoney(cap.collected)} — פער של ${fmtMoney(cap.discount)}. כל תעריף נגבה בפועל לפי ${fmtPct(cap.factor, 1)} מערכו.`
       : `התקציב ${fmtMoney(cap.cost)} אינו עובר את התקרה ${fmtMoney(snap.agreedFee)} — התעריפים נגבים במלואם.` }),
+    // התעריף שהתקבל בפועל: התקרה חלקי השעות שכבר דווחו (ולא חלקי שעות התקציב)
+    snap.realized?.applies ? el('div', { class: 'facts facts--lg' }, [
+      fact('תקרת שכ"ט', money(snap.agreedFee, d)),
+      fact('שעות שדווחו בפועל', fmtHours(snap.realized.hours)),
+      fact('תעריף בפועל (תקרה ÷ שעות)', money(snap.realized.blendedAll, d),
+        snap.realized.blendedAll < snap.blendedAll ? 'neg' : 'pos'),
+      fact('תעריף בפועל ללא ג\'וניורים', money(snap.realized.blendedSenior, d),
+        snap.realized.blendedSenior < snap.blendedRate ? 'neg' : 'pos'),
+    ]) : null,
     el('div', { class: 'btable-wrap' }, el('table', { class: 'btable btable--rates' }, [
       el('thead', {}, el('tr', {}, [
         el('th', { text: 'דרגה' }), el('th', { text: 'תעריף' }), el('th', { text: 'תעריף אפקטיבי' }), el('th', { text: 'הפרש' }),

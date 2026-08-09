@@ -577,8 +577,13 @@ table { border-collapse: collapse; }
 .btable-wrap--map { max-height: 320px; overflow-y: auto; }
 
 .btable, .etable { width: 100%; font-size: .88rem; min-width: 720px; }
+/*
+ * יישור פיזי לימין ולא `start`: לתא מספרי יש `direction: ltr` (כדי שהמטבע והסימן
+ * יופיעו נכון), ולכן `start` שלו הוא **שמאל** בעוד הכותרת בעברית מיושרת לימין —
+ * והמספרים לא יושבים מתחת לכותרת. ראה CLAUDE.md, סעיף יישור מספרים.
+ */
 .btable th, .etable th {
-  text-align: start;
+  text-align: right;
   font-size: .64rem; text-transform: uppercase; letter-spacing: .08em; font-weight: 700;
   color: var(--text-faint);
   padding: 9px 10px;
@@ -586,6 +591,7 @@ table { border-collapse: collapse; }
   white-space: nowrap;
 }
 .btable td, .etable td {
+  text-align: right;
   padding: 6px 10px;
   border-bottom: 1px solid var(--line-soft);
   color: var(--text-secondary);
@@ -606,7 +612,8 @@ table { border-collapse: collapse; }
 .td-tools .iconbtn + .iconbtn { margin-inline-start: 4px; }
 .th-tools { width: 42px; }
 .td-desc { min-width: 200px; }
-.td-desc .sub { display: block; font-size: .72rem; color: var(--text-faint); }
+/* שורת משנה מתחת לערך הראשי — תמיד בשורה נפרדת, בכל תא ולא רק ב-.td-desc */
+.sub { display: block; font-size: .72rem; color: var(--text-faint); }
 .bline--over td { background: rgba(248,113,113,.05); }
 .bline--risk td { background: rgba(251,146,60,.04); }
 
