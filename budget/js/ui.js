@@ -166,7 +166,7 @@ export function renderOverview(root, { snapshots }) {
       el('p', { class: 'page-sub', text: `${p.deals} עסקאות · ${p.over} בחריגה · ${p.risk} בסיכון` }),
     ]),
     el('div', { class: 'page-actions' }, [
-      el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'export-portfolio' } }, [icon('download'), 'ייצוא סקירה']),
+      el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'export-portfolio' } }, [icon('download'), 'ייצוא סקירה לאקסל']),
       el('button', { class: 'btn btn--primary btn--sm', type: 'button', dataset: { action: 'new-deal' } }, [icon('plus'), 'עסקה חדשה']),
     ]),
   ]));
@@ -386,6 +386,49 @@ export function renderBudgetTab(root, { snap, rateCard, selected = new Set() }) 
  * תקרת שכ"ט: כשהעלות עוברת את התקרה, מה שנגבה בפועל נמוך מהעלות —
  * ולכן כל תעריף (כולל הבלנדד והממוצע) מקבל את אותו מקדם הנחה.
  */
+/**
+ * מה באמת התקבל לשעה: שכ"ט שייגבה (תקרה/פיקס) חלקי השעות שדווחו בפועל.
+ * זה המספר שמתדרדר עם כל שעה נוספת — ולכן הוא המדד האמיתי של רווחיות העסקה.
+ */
+function renderRealizedPanel(snap) {
+  const d = snap.deal;
+  const r = snap.realized;
+  if (!r?.applies) return null;
+  const gap = r.blendedSenior - snap.blendedRate;
+
+  const row = (label, planned, actual, hint) => el('tr', {}, [
+    el('td', {}, [el('span', { text: label }), hint ? el('span', { class: 'sub', text: hint }) : null]),
+    el('td', { class: 'num', text: money(planned, d) }),
+    el('td', { class: 'num td-strong', text: money(actual, d) }),
+    el('td', { class: `num ${actual < planned ? 'neg' : 'pos'}`, text: `${actual > planned ? '+' : ''}${money(actual - planned, d)}` }),
+    el('td', { class: `num ${actual < planned ? 'neg' : 'pos'}`, text: planned > 0 ? fmtPct(actual / planned - 1, 1) : '—' }),
+  ]);
+
+  return el('section', { class: `panel panel--cap${gap < 0 ? ' panel--cap-on' : ''}` }, [
+    el('h2', { class: 'panel__title' }, [
+      icon('wallet'), 'תעריף בלנדד שהתקבל בפועל',
+      el('span', { class: `pill pill--${gap < 0 ? 'over' : 'ok'}`, text: gap < 0 ? `${fmtPct(Math.abs(gap / (snap.blendedRate || 1)), 1)} מתחת למתוכנן` : 'מעל המתוכנן' }),
+    ]),
+    el('p', { class: 'panel__hint', text: `${fmtMoney(r.collected)} שנגבים על העסקה, מחולקים לשעות שדווחו בפועל. כל שעה נוספת מדללת את התעריף — בלי קשר לתעריפון.` }),
+    el('div', { class: 'facts facts--lg' }, [
+      fact('שכ"ט שייגבה', money(r.collected, d)),
+      fact('שעות בפועל', fmtHours(r.hours)),
+      fact('מהן ללא ג\'וניורים', fmtHours(r.seniorHours)),
+      fact('שעות ג\'וניורים', fmtHours(r.juniorHours)),
+    ]),
+    el('div', { class: 'btable-wrap' }, el('table', { class: 'btable btable--rates' }, [
+      el('thead', {}, el('tr', {}, [
+        el('th', { text: 'תעריף בלנדד' }), el('th', { text: 'מתוכנן' }), el('th', { text: 'בפועל' }),
+        el('th', { text: 'הפרש' }), el('th', { text: 'שינוי' }),
+      ])),
+      el('tbody', {}, [
+        row('ללא ג\'וניורים', snap.blendedRate, r.blendedSenior, 'השכ"ט חלקי שעות הדרגות הבכירות — עבודת הג\'וניורים כלולה במחיר'),
+        row('כולל כל השעות', snap.blendedAll, r.blendedAll, 'השכ"ט חלקי כל השעות שדווחו'),
+      ]),
+    ])),
+  ]);
+}
+
 function renderCapPanel(snap) {
   const d = snap.deal;
   const cap = snap.capBudget;
@@ -621,7 +664,7 @@ export function renderActualsTab(root, { snap, filters }) {
       ...ENTRY_STATUSES.map((s) => el('option', { value: s.id, text: s.label, selected: filters.status === s.id ? 'selected' : null })),
     ]),
     el('div', { class: 'toolbar__spacer' }),
-    el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'export-entries' } }, [icon('download'), 'ייצוא CSV']),
+    el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'export-entries' } }, [icon('download'), 'ייצוא לאקסל']),
     el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'add-entry' } }, [icon('plus'), 'רישום ידני']),
     el('button', { class: 'btn btn--primary btn--sm', type: 'button', dataset: { action: 'import-entries' } }, [icon('upload'), 'העלאת קובץ']),
   ]));
@@ -725,7 +768,7 @@ export function renderProgressTab(root, { snap, period = 'week', sources = [] })
       dataset: { action: 'set-period', period: id },
     }, label))),
     el('div', { class: 'toolbar__spacer' }),
-    el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'export-progress' } }, [icon('download'), 'ייצוא CSV']),
+    el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'export-progress' } }, [icon('download'), 'ייצוא לאקסל']),
     el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'add-progress' } }, [icon('plus'), 'עדכון ידני']),
     el('button', { class: 'btn btn--primary btn--sm', type: 'button', dataset: { action: 'import-progress' } }, [icon('upload'), 'ייבוא דוח שעות']),
   ]));
@@ -997,7 +1040,10 @@ export function renderReviewTab(root, { snap }) {
       fact('שכ"ט שהיה מכסה את הביצוע', money(r.actualCost, d)),
       r.hasFee ? fact('מול שכ"ט מוסכם', money(r.agreedFee, d)) : null,
       r.hasFee ? fact('פער', `${sign(r.feeGap)}${money(r.feeGap, d)}`, tone(r.feeGap)) : null,
-      r.capActual?.applies ? fact('התקבל בפועל לשעה', money(r.realizedRate, d), 'neg') : null,
+      snap.realized?.applies ? fact('בלנדד שהתקבל (ללא ג\'וניור)', money(snap.realized.blendedSenior, d),
+        snap.realized.blendedSenior < r.blendedPlanned ? 'neg' : 'pos') : null,
+      snap.realized?.applies ? fact('בלנדד שהתקבל (כל השעות)', money(snap.realized.blendedAll, d),
+        snap.realized.blendedAll < snap.blendedAll ? 'neg' : 'pos') : null,
     ]),
     el('p', { class: 'panel__hint', text: r.requiredFactor === null
       ? 'אין שעות מוערכות להשוואה — הזן הערכות בגיליון כדי לקבל המלצת מקדם.'
@@ -1008,12 +1054,12 @@ export function renderReviewTab(root, { snap }) {
       el('button', { class: 'btn btn--primary btn--sm', type: 'button', dataset: { action: 'clone-from-actual' } },
         [icon('copy'), 'צור עסקה חדשה לפי הביצוע בפועל']),
       el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'export-review' } },
-        [icon('download'), 'ייצוא התחקיר (CSV)']),
+        [icon('download'), 'ייצוא התחקיר לאקסל']),
     ]),
   ]));
 }
 
-/** גישה לסיכום התקופתי מחוץ למודול (לייצוא CSV) */
+/** גישה לסיכום התקופתי מחוץ למודול (לייצוא) */
 export const progressPeriods = (snap, period) => progressByPeriod(snap, period);
 
 /** מסך ייבוא דוח שעות: מיפוי עמודות + שיוך כל אדם לשורת תקציב */
@@ -1293,6 +1339,8 @@ export function renderControlTab(root, { snap }) {
 
   const capPanel = renderCapPanel(snap);
   if (capPanel) root.append(capPanel);
+  const realizedPanel = renderRealizedPanel(snap);
+  if (realizedPanel) root.append(realizedPanel);
 
   root.append(el('section', { class: 'panel' }, [
     el('h2', { class: 'panel__title' }, [icon('users'), 'תקציב מול ביצוע — לפי צוות']),
@@ -1424,7 +1472,7 @@ export function renderDealSettings(root, { snap, rateCards }) {
     el('div', { class: 'form-actions form-actions--wrap' }, [
       el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'duplicate-deal' } }, [icon('copy'), 'שכפל כתבנית']),
       el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'sync-team-roles' } }, [icon('refresh'), 'סנכרן דרגות מהתעריפון']),
-      el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'export-deal' } }, [icon('download'), 'ייצוא העסקה (CSV)']),
+      el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'export-deal' } }, [icon('download'), 'ייצוא העסקה לאקסל']),
       el('button', { class: 'btn btn--danger btn--sm', type: 'button', dataset: { action: 'delete-deal' } }, [icon('trash'), 'מחק עסקה']),
     ]),
   ]));

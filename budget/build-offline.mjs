@@ -13,7 +13,7 @@ const rd = (p) => readFileSync(join(BUDGET, p), 'utf8');
 const b64 = (p) => readFileSync(join(BUDGET, p)).toString('base64');
 
 /* ---------- 1) מודולי JS בסדר תלויות ---------- */
-const ORDER = ['model.js', 'db.js', 'xlsx.js', 'pdf-table.js', 'charts.js', 'importer.js', 'store.js', 'file-store.js', 'ui.js', 'app.js'];
+const ORDER = ['model.js', 'db.js', 'xlsx.js', 'xlsx-write.js', 'pdf-table.js', 'charts.js', 'importer.js', 'store.js', 'file-store.js', 'ui.js', 'app.js'];
 const SRC = {};
 for (const name of ORDER) SRC[name] = Buffer.from(rd('js/' + name), 'utf8').toString('base64');
 

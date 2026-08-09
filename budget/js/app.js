@@ -4,12 +4,13 @@
 import * as store from './store.js';
 import * as db from './db.js';
 import {
-  computeDeal, dealReview, uid, num, round2, fmtPct, roundUpHours,
-  DEFAULT_TEAM_NAMES, ENTRY_KINDS, ENTRY_STATUSES,
+  computeDeal, dealReview, uid, num, round2, fmtPct, roundUpHours, sourceLabel,
+  DEFAULT_TEAM_NAMES, DEAL_STATUSES, ENTRY_KINDS, ENTRY_STATUSES,
 } from './model.js';
 import * as ui from './ui.js';
 import * as fileStore from './file-store.js';
 import { readTabularFile } from './xlsx.js';
+import { downloadWorkbook } from './xlsx-write.js';
 import { pdfToSheets, isPdf } from './pdf-table.js';
 import {
   detectHeaderRow, guessMapping, rowsToEntries, markDuplicates, parseBudgetSheet, collectPeople,
@@ -1286,41 +1287,80 @@ function exportReviewCSV() {
   const snap = currentSnapshot();
   if (!snap) return;
   const r = dealReview(snap);
-  const rows = [[`תחקיר עסקה: ${snap.deal.name}`, snap.deal.client]];
-  rows.push([]);
-  rows.push(['מדד', 'שעות', 'כסף']);
-  rows.push(['הערכה', r.estHours, r.estCost]);
-  rows.push(['תקציב', r.budgetHours, r.budgetCost]);
-  rows.push(['בפועל', r.actualHours, r.actualCost]);
-  rows.push(['חריגה מהתקציב', r.deltaHours, r.deltaCost]);
-  rows.push(['חריגה מההערכה', r.deltaVsEstimateHours, r.deltaVsEstimateCost]);
-  rows.push([]);
-  rows.push(['פירוק החריגה', 'כסף']);
-  rows.push(['עוד שעות (כמות)', r.volumeEffect]);
-  rows.push(['תמהיל יקר יותר', r.mixEffect]);
-  rows.push(['בלנדד מתוכנן', r.blendedPlanned]);
-  rows.push(['בלנדד בפועל', r.blendedActual]);
-  rows.push([]);
-  rows.push(['מקדם בשימוש', fmtPct(r.usedFactor)], ['מקדם שנדרש', r.requiredFactor === null ? '' : fmtPct(r.requiredFactor)],
-    ['מקדם מוצע', r.suggestedFactor === null ? '' : fmtPct(r.suggestedFactor)]);
-  rows.push([]);
-  rows.push(['צוות', 'דרגה / אדם', 'הוערך', 'תוקצב', 'בפועל', 'Δ שעות', 'Δ ₪', 'ניצול', 'מקדם שנדרש']);
-  for (const l of r.hotspots) {
-    rows.push([l.teamName, l.person ? `${l.person} · ${l.roleName}` : l.roleName,
-      l.estHours, l.budgetHours, l.actualHours, l.deltaHours, l.deltaCost, fmtPct(l.util),
-      l.vsEstimate === null ? '' : fmtPct(l.vsEstimate)]);
-  }
-  rows.push([]);
-  rows.push(['דרגה', 'תעריף', 'שעות מתוכננות', '% מהתכנון', 'שעות בפועל', '% מהביצוע', 'Δ שעות', 'Δ ₪']);
-  for (const x of r.byRole) {
-    rows.push([x.name, x.rate, x.budgetHours, fmtPct(x.plannedShare), x.actualHours, fmtPct(x.actualShare), x.deltaHours, x.deltaCost]);
-  }
+  const pct = (v) => (v === null || v === undefined ? '' : v);
+
+  const sheets = [{
+    name: 'תחקיר',
+    blocks: [
+      { t: 'title', text: `תחקיר עסקה — ${snap.deal.name}` },
+      { t: 'sub', text: `${snap.deal.client || ''} · הופק ב-${stamp()}` },
+      { t: 'gap' },
+      { t: 'table',
+        head: ['נקודת ייחוס', 'שעות', 'כסף'],
+        fmt: ['text', 'hours', 'money'],
+        rows: [
+          ['הערכה מקורית', r.estHours, r.estCost],
+          ['תקציב (אחרי מקדם)', r.budgetHours, r.budgetCost],
+          ['ביצוע בפועל', r.actualHours, r.actualCost],
+        ],
+        total: ['חריגה מהתקציב', r.deltaHours, r.deltaCost] },
+      { t: 'gap' },
+      { t: 'kv', rows: [
+        ['חריגה מול ההערכה — שעות', r.deltaVsEstimateHours, 'hours'],
+        ['חריגה מול ההערכה — כסף', r.deltaVsEstimateCost, 'money'],
+        ['מהחריגה: עוד שעות', r.volumeEffect, 'money'],
+        ['מהחריגה: תמהיל יקר יותר', r.mixEffect, 'money'],
+        ['בלנדד מתוכנן', r.blendedPlanned, 'money'],
+        ['בלנדד בפועל', r.blendedActual, 'money'],
+        ...(snap.realized?.applies ? [
+          ['בלנדד שהתקבל בפועל (ללא ג\'וניור)', snap.realized.blendedSenior, 'money'],
+          ['בלנדד שהתקבל בפועל (כל השעות)', snap.realized.blendedAll, 'money'],
+        ] : []),
+        ['מקדם חריגה בשימוש', r.usedFactor, 'pct'],
+        ['המקדם שנדרש בפועל', pct(r.requiredFactor), 'pct'],
+        ['מקדם מוצע לעסקה דומה', pct(r.suggestedFactor), 'pct'],
+      ] },
+    ],
+  }, {
+    name: 'מוקדי חריגה',
+    blocks: [
+      { t: 'title', text: 'מוקדי החריגה — לפי שורת תקציב' },
+      { t: 'gap' },
+      { t: 'table',
+        head: ['צוות', 'דרגה / אדם', 'הוערך', 'תוקצב', 'בפועל', 'Δ שעות', 'Δ ₪', 'ניצול', 'מקדם שנדרש'],
+        fmt: ['text', 'text', 'hours', 'hours', 'hours', 'hours', 'money', 'pct', 'pct'],
+        rows: r.hotspots.map((l) => [l.teamName, l.person ? `${l.person} · ${l.roleName}` : l.roleName,
+          l.estHours, l.budgetHours, l.actualHours, l.deltaHours, l.deltaCost, l.util, pct(l.vsEstimate)]),
+        total: ['סה"כ', '', r.estHours, r.budgetHours, r.actualHours, r.deltaHours, r.deltaCost, '', ''] },
+    ],
+  }, {
+    name: 'תמהיל דרגות',
+    blocks: [
+      { t: 'title', text: 'תמהיל הדרגות — מתוכנן מול בפועל' },
+      { t: 'gap' },
+      { t: 'table',
+        head: ['דרגה', 'תעריף', 'שעות מתוכננות', '% מהתכנון', 'שעות בפועל', '% מהביצוע', 'Δ שעות', 'Δ ₪'],
+        fmt: ['text', 'money', 'hours', 'pct', 'hours', 'pct', 'hours', 'money'],
+        rows: r.byRole.map((x) => [x.name + (x.junior ? " (ג'וניור)" : ''), x.rate, x.budgetHours,
+          x.plannedShare, x.actualHours, x.actualShare, x.deltaHours, x.deltaCost]) },
+    ],
+  }];
+
   if (r.people.length) {
-    rows.push([]);
-    rows.push(['עורך דין', 'צוותים', 'תוקצב', 'בפועל', 'Δ שעות', 'Δ ₪']);
-    for (const x of r.people) rows.push([x.name, x.teams.join(' · '), x.budgetHours, x.actualHours, x.deltaHours, x.deltaCost]);
+    sheets.push({
+      name: 'לפי אדם',
+      blocks: [
+        { t: 'title', text: 'ביצוע לפי עורך דין' },
+        { t: 'gap' },
+        { t: 'table',
+          head: ['עורך דין', 'צוותים', 'תוקצב', 'בפועל', 'Δ שעות', 'Δ ₪', 'ניצול'],
+          fmt: ['text', 'text', 'hours', 'hours', 'hours', 'money', 'pct'],
+          rows: r.people.map((x) => [x.name, x.teams.join(' · '), x.budgetHours, x.actualHours, x.deltaHours, x.deltaCost, x.util]) },
+      ],
+    });
   }
-  downloadFile(`תחקיר-${snap.deal.name}-${stamp()}.csv`, toCSV(rows));
+
+  downloadWorkbook(`תחקיר — ${snap.deal.name} — ${stamp()}`, sheets);
 }
 
 function exportProgressCSV() {
@@ -1329,16 +1369,47 @@ function exportProgressCSV() {
   const teamName = new Map(snap.teams.map((t) => [t.id, t.name]));
   const lineLabel = new Map();
   for (const t of snap.teams) for (const l of t.lines) lineLabel.set(l.id, l.person ? `${l.person} · ${l.roleName}` : l.roleName);
-  const rows = [['תאריך', 'צוות', 'שורה', 'עורך דין', 'שעות', 'מקור', 'קובץ', 'הערה']];
-  for (const p of [...snap.execution].filter((r) => !r.superseded).sort((a, b) => (a.date || '').localeCompare(b.date || ''))) {
-    rows.push([p.date, teamName.get(p.teamId) || '', lineLabel.get(p.lineId) || '', p.person,
-      p.hours, p.source === 'import' ? 'יובא' : 'ידני', p.fileName, p.note]);
-  }
-  rows.push([]);
+
+  const live = [...snap.execution].filter((r) => !r.superseded)
+    .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
   const periods = ui.progressPeriods(snap, state.progressPeriod);
-  rows.push([`סיכום ${state.progressPeriod}`, 'שעות', 'עלות', 'מצטבר שעות', 'מצטבר עלות']);
-  for (const r of periods) rows.push([r.key, r.hours, r.cost, r.cumulativeHours, r.cumulativeCost]);
-  downloadFile(`מעקב-${snap.deal.name}-${stamp()}.csv`, toCSV(rows));
+  const periodLabel = { day: 'יומי', week: 'שבועי', month: 'חודשי' }[state.progressPeriod] || '';
+  const sources = store.dataSourcesOf(snap.deal.id);
+
+  downloadWorkbook(`מעקב ביצוע — ${snap.deal.name} — ${stamp()}`, [
+    { name: 'דיווחי ביצוע',
+      blocks: [
+        { t: 'title', text: `דיווחי ביצוע — ${snap.deal.name}` },
+        { t: 'sub', text: `${live.length} דיווחים פעילים · ${snap.actualHours} שעות · הופק ב-${stamp()}` },
+        { t: 'gap' },
+        { t: 'table',
+          head: ['תאריך', 'צוות', 'שורת תקציב', 'עורך דין', 'שעות', 'מקור', 'קובץ', 'תקופת חיוב', 'הערה'],
+          fmt: ['date', 'text', 'text', 'text', 'hours', 'text', 'text', 'text', 'text'],
+          rows: live.map((p) => [p.date, teamName.get(p.teamId) || '', lineLabel.get(p.lineId) || '', p.person,
+            p.hours, sourceLabel(p.source), p.fileName || '', p.billPeriod || '', p.note || '']),
+          total: ['סה"כ', '', '', '', snap.actualHours, '', '', '', ''] },
+      ] },
+    { name: `סיכום ${periodLabel}`,
+      blocks: [
+        { t: 'title', text: `סיכום ${periodLabel}` },
+        { t: 'gap' },
+        { t: 'table',
+          head: ['תקופה', 'שעות', 'עלות', 'מצטבר שעות', 'מצטבר עלות', 'ניצול מצטבר'],
+          fmt: ['text', 'hours', 'money', 'hours', 'money', 'pct'],
+          rows: periods.map((r) => [r.key, r.hours, r.cost, r.cumulativeHours, r.cumulativeCost,
+            snap.budgetCost > 0 ? r.cumulativeCost / snap.budgetCost : '']) },
+      ] },
+    { name: 'מקורות מידע',
+      blocks: [
+        { t: 'title', text: 'מקורות המידע' },
+        { t: 'gap' },
+        { t: 'table',
+          head: ['מקור', 'סוג', 'תקופת חיוב', 'מתאריך', 'עד תאריך', 'רשומות', 'שעות'],
+          fmt: ['text', 'text', 'text', 'date', 'date', 'int', 'hours'],
+          rows: sources.map((s) => [s.label, { import: 'דוח שעות', invoice: 'חשבון', manual: 'ידני' }[s.kind] || s.kind,
+            s.periods.join(', '), s.from, s.to, s.count, s.hours]) },
+      ] },
+  ]);
 }
 
 /* ============================================================
@@ -1433,14 +1504,6 @@ function downloadFile(name, content, type = 'text/csv;charset=utf-8') {
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
-function toCSV(rows) {
-  const esc = (v) => {
-    const s = v === null || v === undefined ? '' : String(v);
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  return '﻿' + rows.map((r) => r.map(esc).join(',')).join('\r\n');
-}
-
 function stamp() { return new Date().toISOString().slice(0, 10); }
 
 function exportEntriesCSV() {
@@ -1448,62 +1511,116 @@ function exportEntriesCSV() {
   if (!snap) return;
   const teamName = new Map(snap.teams.map((t) => [t.id, t.name]));
   const roleName = new Map(store.rateCardFor(snap.deal).roles.map((r) => [r.id, r.name]));
-  const rows = [['תאריך', 'תיאור', 'עורך דין', 'צוות', 'דרגה', 'סוג', 'שעות', 'תעריף', 'סכום', 'כולל מע"מ', 'סטטוס', 'ספק', 'מסמך']];
-  for (const e of ui.filterEntries(snap.entries, state.filters)) {
-    rows.push([
-      e.date, e.description, e.person, teamName.get(e.teamId) || '', roleName.get(e.roleId) || '',
-      (ENTRY_KINDS.find((k) => k.id === e.kind) || {}).label || '', e.hours, e.rate, e.amount,
-      e.vatIncluded ? 'כן' : 'לא', (ENTRY_STATUSES.find((s) => s.id === e.status) || {}).label || '',
-      e.supplier, e.docNumber,
-    ]);
-  }
-  downloadFile(`ביצוע-${snap.deal.name}-${stamp()}.csv`, toCSV(rows));
+  const rows = ui.filterEntries(snap.entries, state.filters);
+  const sumHours = round2(rows.reduce((a, e) => a + num(e.hours), 0));
+  const sumAmount = round2(rows.reduce((a, e) => a + num(e.amount), 0));
+
+  downloadWorkbook(`חשבונות — ${snap.deal.name} — ${stamp()}`, [{
+    name: 'חשבונות',
+    blocks: [
+      { t: 'title', text: `חשבונות ומסמכים — ${snap.deal.name}` },
+      { t: 'sub', text: `${rows.length} רישומים · הופק ב-${stamp()}` },
+      { t: 'gap' },
+      { t: 'table',
+        head: ['תאריך', 'תיאור', 'עורך דין', 'צוות', 'דרגה', 'סוג', 'שעות', 'תעריף', 'סכום', 'כולל מע"מ', 'סטטוס', 'ספק', 'מסמך'],
+        fmt: ['date', 'text', 'text', 'text', 'text', 'text', 'hours', 'money', 'money', 'text', 'text', 'text', 'text'],
+        rows: rows.map((e) => [
+          e.date, e.description, e.person, teamName.get(e.teamId) || '', roleName.get(e.roleId) || '',
+          (ENTRY_KINDS.find((k) => k.id === e.kind) || {}).label || '', e.hours || '', e.rate || '', e.amount,
+          e.vatIncluded ? 'כן' : 'לא', (ENTRY_STATUSES.find((s) => s.id === e.status) || {}).label || '',
+          e.supplier, e.docNumber,
+        ]),
+        total: ['סה"כ', '', '', '', '', '', sumHours, '', sumAmount, '', '', '', ''] },
+    ],
+  }]);
 }
 
 function exportDealCSV() {
   const snap = currentSnapshot();
   if (!snap) return;
-  const rows = [];
-  rows.push([`תקציב עסקה: ${snap.deal.name}`, snap.deal.client, '', '', '', '', '']);
-  rows.push([]);
-  rows.push(['צוות', 'דרגה', 'חבר צוות', 'שעות מוערכות', 'שעות תקציב', 'תעריף', 'תקציב ₪',
-    'שעות בפועל', 'עלות בפועל ₪', 'יתרת שעות', 'יתרה ₪', 'ניצול']);
+  const lines = [];
   for (const t of snap.teams) {
     for (const l of t.lines) {
-      rows.push([t.name, l.roleName, l.person, l.estHours, l.budgetHours, l.rate, l.budgetCost,
-        l.actualHours, l.actualCost, l.remainingHours, l.remainingCost, fmtPct(l.util)]);
+      lines.push([t.name, l.roleName, l.person, l.estHours, l.budgetHours, l.rate, l.budgetCost,
+        l.actualHours, l.actualCost, l.remainingHours, l.remainingCost, l.util]);
     }
-    rows.push([`${t.name} — סה"כ`, '', '', t.estHours, t.budgetHours, '', t.budgetCost,
-      t.actualHours, t.actualCost, t.remainingHours, t.remainingCost, fmtPct(t.util)]);
+    lines.push([`${t.name} — סה"כ`, '', '', t.estHours, t.budgetHours, '', t.budgetCost,
+      t.actualHours, t.actualCost, t.remainingHours, t.remainingCost, t.util]);
   }
-  rows.push([]);
-  rows.push(['סה"כ עסקה', '', '', snap.estHours, snap.budgetHours, '', snap.budgetCost,
-    snap.actualHours, snap.actualCost, snap.remainingHours, snap.remainingCost, fmtPct(snap.util)]);
-  rows.push(['תעריף בלנדד (ללא ג\'וניור)', snap.blendedRate]);
-  rows.push(['תעריף ממוצע כולל', snap.blendedAll]);
-  rows.push(['בלנדד בפועל', snap.blendedActual]);
-  rows.push(['תעריף ממוצע בפועל', snap.effectiveRate]);
+
+  const sheets = [{
+    name: 'תקציב',
+    blocks: [
+      { t: 'title', text: `תקציב עסקה — ${snap.deal.name}` },
+      { t: 'sub', text: `${snap.deal.client || ''} · מקדם חריגה ${fmtPct(snap.deal.overrunFactor)} · הופק ב-${stamp()}` },
+      { t: 'gap' },
+      { t: 'table',
+        head: ['צוות', 'דרגה', 'חבר צוות', 'שעות מוערכות', 'שעות תקציב', 'תעריף', 'תקציב ₪',
+          'שעות בפועל', 'עלות בפועל ₪', 'יתרת שעות', 'יתרה ₪', 'ניצול'],
+        fmt: ['text', 'text', 'text', 'hours', 'hours', 'money', 'money', 'hours', 'money', 'hours', 'money', 'pct'],
+        rows: lines,
+        total: ['סה"כ עסקה', '', '', snap.estHours, snap.budgetHours, '', snap.budgetCost,
+          snap.actualHours, snap.actualCost, snap.remainingHours, snap.remainingCost, snap.util] },
+      { t: 'gap' },
+      { t: 'kv', rows: [
+        ['תעריף בלנדד (ללא ג\'וניור)', snap.blendedRate, 'money'],
+        ['תעריף ממוצע כולל', snap.blendedAll, 'money'],
+        ['בלנדד בפועל', snap.blendedActual, 'money'],
+        ['תעריף ממוצע בפועל', snap.effectiveRate, 'money'],
+        ...(snap.hasFee ? [['שכ"ט מוסכם / תקרה', snap.agreedFee, 'money']] : []),
+        ...(snap.realized?.applies ? [
+          ['בלנדד שהתקבל בפועל (ללא ג\'וניור)', snap.realized.blendedSenior, 'money'],
+          ['בלנדד שהתקבל בפועל (כל השעות)', snap.realized.blendedAll, 'money'],
+        ] : []),
+        ...(snap.eac !== null ? [['תחזית לסיום (EAC)', snap.eac, 'money'], ['בסיס התחזית', snap.eacBasis]] : []),
+      ] },
+    ],
+  }];
+
   if (snap.capBudget.applies) {
-    rows.push([]);
-    rows.push(['תקרת שכ"ט', snap.agreedFee, 'הנחה אפקטיבית', fmtPct(snap.capBudget.discountPct, 1)]);
-    rows.push(['תעריף', 'נומינלי', 'אפקטיבי']);
-    for (const r of snap.effectiveRates.roles) rows.push([r.name, r.rate, r.effective]);
-    rows.push(['בלנדד', snap.blendedRate, snap.effectiveRates.blended]);
-    rows.push(['ממוצע כולל', snap.blendedAll, snap.effectiveRates.blendedAll]);
+    sheets.push({
+      name: 'תעריפים אפקטיביים',
+      blocks: [
+        { t: 'title', text: 'תקרת שכ"ט ותעריפים אפקטיביים' },
+        { t: 'sub', text: `תקציב ${snap.budgetCost} מול תקרה ${snap.agreedFee} — הנחה אפקטיבית ${fmtPct(snap.capBudget.discountPct, 1)}` },
+        { t: 'gap' },
+        { t: 'table',
+          head: ['דרגה', 'תעריף נומינלי', 'תעריף אפקטיבי', 'הפרש'],
+          fmt: ['text', 'money', 'money', 'money'],
+          rows: [
+            ...snap.effectiveRates.roles.map((r) => [r.name, r.rate, r.effective, r.effective - r.rate]),
+            ['בלנדד (ללא ג\'וניור)', snap.blendedRate, snap.effectiveRates.blended, snap.effectiveRates.blended - snap.blendedRate],
+            ['ממוצע כולל', snap.blendedAll, snap.effectiveRates.blendedAll, snap.effectiveRates.blendedAll - snap.blendedAll],
+          ] },
+      ],
+    });
   }
-  if (snap.eac !== null) rows.push(['תחזית לסיום (EAC)', snap.eac, snap.eacBasis]);
-  downloadFile(`תקציב-${snap.deal.name}-${stamp()}.csv`, toCSV(rows));
+
+  downloadWorkbook(`תקציב — ${snap.deal.name} — ${stamp()}`, sheets);
 }
 
 function exportPortfolioCSV() {
-  const rows = [['עסקה', 'לקוח', 'סטטוס', 'תקציב', 'בפועל', 'יתרה', 'ניצול', 'שכ"ט מוסכם', 'רווח גולמי', 'תחזית לסיום']];
-  for (const s of state.snapshots.values()) {
-    rows.push([
-      s.deal.name, s.deal.client, s.deal.status, s.budgetCost, s.actualCost, s.remainingCost,
-      fmtPct(s.util), s.agreedFee || '', s.margin === null ? '' : s.margin, s.eac === null ? '' : s.eac,
-    ]);
-  }
-  downloadFile(`סקירת-תקציבים-${stamp()}.csv`, toCSV(rows));
+  const list = [...state.snapshots.values()];
+  const sum = (f) => round2(list.reduce((a, s) => a + num(f(s)), 0));
+  downloadWorkbook(`סקירת תקציבים — ${stamp()}`, [{
+    name: 'סקירה',
+    blocks: [
+      { t: 'title', text: 'סקירת תקציבי עסקאות' },
+      { t: 'sub', text: `${list.length} עסקאות · הופק ב-${stamp()}` },
+      { t: 'gap' },
+      { t: 'table',
+        head: ['עסקה', 'לקוח', 'סטטוס', 'שעות תקציב', 'שעות בפועל', 'תקציב', 'בפועל', 'יתרה', 'ניצול', 'שכ"ט מוסכם', 'רווח גולמי', 'תחזית לסיום'],
+        fmt: ['text', 'text', 'text', 'hours', 'hours', 'money', 'money', 'money', 'pct', 'money', 'money', 'money'],
+        rows: list.map((s) => [
+          s.deal.name, s.deal.client, (DEAL_STATUSES.find((x) => x.id === s.deal.status) || {}).label || s.deal.status,
+          s.budgetHours, s.actualHours, s.budgetCost, s.actualCost, s.remainingCost,
+          s.util, s.agreedFee || '', s.margin === null ? '' : s.margin, s.eac === null ? '' : s.eac,
+        ]),
+        total: ['סה"כ', '', '', sum((s) => s.budgetHours), sum((s) => s.actualHours),
+          sum((s) => s.budgetCost), sum((s) => s.actualCost), sum((s) => s.remainingCost), '',
+          sum((s) => s.agreedFee), '', ''] },
+    ],
+  }]);
 }
 
 /* ============================================================

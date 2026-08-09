@@ -541,6 +541,28 @@ export function computeDeal({ deal, teams, entries, rateCard, progress: progress
       rate: num(r.rate), effective: round2(num(r.rate) * capF),
     })),
   };
+  /**
+   * **הבלנדד שהתקבל בפועל** — מה שייגבה על העסקה חלקי השעות שבוצעו בפועל.
+   * בעסקה בתקרה/פיקס הסכום שנגבה קבוע, ולכן כל שעה נוספת מדללת אותו:
+   * תקרה 50,000 מול 100 שעות = 500 ₪ לשעה בפועל, גם אם התעריף בתעריפון 900.
+   * שתי גרסאות, כמו בבלנדד המתוכנן: על כל השעות, ועל שעות הדרגות שאינן ג'וניור
+   * (כלומר עבודת הג'וניורים "נכללת במחיר").
+   */
+  const collected = hasFee
+    // בפיקס/ריטיינר גובים את הסכום המלא גם אם העבודה הייתה קצרה; בתקרה — עד התקרה
+    ? (deal.feeModel === 'capped' ? Math.min(actualCost, agreed) : agreed)
+    : actualCost;
+  const realized = {
+    applies: hasFee && actualHours > 0,
+    collected: round2(collected),
+    hours: actualHours,
+    seniorHours: round2(actualSeniorHours),
+    juniorHours: round2(actualHours - actualSeniorHours),
+    blendedAll: actualHours > 0 ? round2(collected / actualHours) : 0,
+    blendedSenior: actualSeniorHours > 0 ? round2(collected / actualSeniorHours) : 0,
+    // כמה אחוז מהתעריף המתוכנן נשאר בידינו בפועל
+    vsPlanned: blendedRate > 0 && actualSeniorHours > 0 ? round2(collected / actualSeniorHours) / blendedRate - 1 : null,
+  };
   // התעריף שהתקבל בפועל לשעה, אחרי התקרה
   const realizedRate = actualHours > 0 ? round2(actualCost * capActual.factor / actualHours) : 0;
 
@@ -573,7 +595,8 @@ export function computeDeal({ deal, teams, entries, rateCard, progress: progress
     // כל דיווחי הביצוע (כולל מוחלפים) + פילוח לפי מקור
     execution, progressLog: dealProgress, hoursBySource, lastReportAt,
     // תקרת שכ"ט ותעריפים אפקטיביים
-    capBudget, capActual, effectiveRates, realizedRate,
+    capBudget, capActual, effectiveRates, realizedRate, realized,
+    actualSeniorHours: round2(actualSeniorHours), actualSeniorCost: round2(actualSeniorCost),
     eac, eacHours, eacBasis, eacVariance, eacHoursVariance,
     timePace, progress,
     agreedFee: agreed, hasFee, margin, marginPct, feeUtil,

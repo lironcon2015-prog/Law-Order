@@ -113,6 +113,13 @@ table { border-collapse: collapse; }
 
 /* ---------- טיפוגרפיה של מספרים ---------- */
 .num, .ltr { direction: ltr; unicode-bidi: plaintext; }
+
+/*
+ * מחסנית תווית↑ / ערך↓: התווית בעברית מיושרת לימין, אבל לערך יש direction:ltr
+ * ולכן ברירת המחדל שלו היא שמאל — והמספר "בורח" מתחת לכותרת. יישור פיזי לימין
+ * על המכל מיישר את שניהם לאותו קו. כל דפוס חדש כזה יתווסף לרשימה.
+ */
+.total, .fact, .strip__item, .kpi__body, .team__stat, .dcard__nums > div { text-align: right; }
 .num {
   font-family: 'Inter', 'Assistant', system-ui, sans-serif;
   font-feature-settings: 'tnum' 1;
