@@ -21,7 +21,7 @@ import {
    State
    ============================================================ */
 
-const LS = { deal: 'lb_dealId', tab: 'lb_tab', view: 'lb_view', teamSort: 'lb_teamSort' };
+const LS = { deal: 'lb_dealId', tab: 'lb_tab', view: 'lb_view', teamSort: 'lb_teamSort', expanded: 'lb_open_' };
 
 const state = {
   view: 'overview',        // 'overview' | 'deal' | 'rates'
@@ -127,11 +127,17 @@ function render() {
     const body = ui.el('div', { class: 'tab-body' });
     els.main.append(body);
     if (state.tab === 'budget') {
-      // בכניסה לעסקה נפתחים רק הצוותים שדורשים טיפול — השאר נשארים כשורה
+      // מצב הפתיחה נזכר לכל עסקה; בכניסה ראשונה נפתחים רק הצוותים שדורשים טיפול
       if (state.expandedFor !== snap.deal.id) {
         state.expandedFor = snap.deal.id;
-        state.expandedTeams = new Set(snap.teams.filter((t) => t.status === 'over' || t.status === 'risk').map((t) => t.id));
-        if (!state.expandedTeams.size && snap.teams.length === 1) state.expandedTeams.add(snap.teams[0].id);
+        const saved = readExpanded(snap.deal.id);
+        if (saved) {
+          const live = new Set(snap.teams.map((t) => t.id));
+          state.expandedTeams = new Set(saved.filter((id) => live.has(id)));
+        } else {
+          state.expandedTeams = new Set(snap.teams.filter((t) => t.status === 'over' || t.status === 'risk').map((t) => t.id));
+          if (!state.expandedTeams.size && snap.teams.length === 1) state.expandedTeams.add(snap.teams[0].id);
+        }
       }
       ui.renderBudgetTab(body, {
         snap, rateCard: store.rateCardFor(snap.deal),
@@ -295,6 +301,7 @@ function bindEvents() {
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && els.modal.open) closeModal();
   });
+  document.addEventListener('keydown', onSheetKeydown);
 }
 
 /* ============================================================
@@ -329,19 +336,22 @@ function bindReorder() {
   document.addEventListener('pointerdown', (e) => {
     const grip = e.target.closest('[data-grip]');
     if (!grip) return;
-    const item = grip.closest('.trow, .dtab');
+    const item = grip.closest('.trow, .dtab, tr.bline');
     if (item) item.setAttribute('draggable', 'true');
   });
   document.addEventListener('pointerup', () => {
-    for (const n of document.querySelectorAll('.trow[draggable]')) n.removeAttribute('draggable');
+    for (const n of document.querySelectorAll('.trow[draggable], tr.bline[draggable]')) n.removeAttribute('draggable');
   });
 
   document.addEventListener('dragstart', (e) => {
     const row = e.target.closest?.('.trow[draggable="true"]');
+    const line = e.target.closest?.('tr.bline[draggable="true"]');
     const tab = e.target.closest?.('.dtab[data-action="select-deal"]');
-    const item = row || tab;
+    const item = row || line || tab;
     if (!item) return;
-    drag = row ? { kind: 'team', id: row.dataset.teamId, el: row } : { kind: 'deal', id: tab.dataset.id, el: tab };
+    if (row) drag = { kind: 'team', id: row.dataset.teamId, el: row };
+    else if (line) drag = { kind: 'line', id: line.dataset.lineId, el: line, teamId: line.dataset.teamId };
+    else drag = { kind: 'deal', id: tab.dataset.id, el: tab };
     item.classList.add('dragging');
     e.dataTransfer.effectAllowed = 'move';
     // חלק מהדפדפנים לא מתחילים גרירה בלי מטען
@@ -352,18 +362,20 @@ function bindReorder() {
 
   document.addEventListener('dragover', (e) => {
     if (!drag) return;
-    const item = drag.kind === 'team'
-      ? e.target.closest?.('.trow:not(.trow--head)')
-      : e.target.closest?.('.dtab[data-action="select-deal"]');
+    const item = drag.kind === 'team' ? e.target.closest?.('.trow:not(.trow--head)')
+      : drag.kind === 'line' ? e.target.closest?.('tr.bline')
+        : e.target.closest?.('.dtab[data-action="select-deal"]');
+    // שורת דרגה זזה רק בתוך הצוות שלה — מעבר בין צוותים גורר איתו דיווחי ביצוע
     if (!item || item === drag.el) { clearMarks(); return; }
+    if (drag.kind === 'line' && item.dataset.teamId !== drag.teamId) { clearMarks(); return; }
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
     clearMarks();
     const r = item.getBoundingClientRect();
-    // צוותים: חצי עליון/תחתון · עסקאות: RTL — הצד הימני הוא "לפני"
-    const after = drag.kind === 'team'
-      ? e.clientY > r.top + r.height / 2
-      : e.clientX < r.left + r.width / 2;
+    // אנכי: חצי עליון/תחתון · עסקאות: RTL — הצד הימני הוא "לפני"
+    const after = drag.kind === 'deal'
+      ? e.clientX < r.left + r.width / 2
+      : e.clientY > r.top + r.height / 2;
     item.classList.add(after ? 'drop-after' : 'drop-before');
   });
 
@@ -381,6 +393,12 @@ function bindReorder() {
       await store.reorderDeals(moveId(ids, id, marked.dataset.id, after));
       return render();
     }
+    if (kind === 'line') {
+      const teamId = marked.dataset.teamId;
+      const ids = [...marked.parentElement.rows].map((n) => n.dataset.lineId);
+      await store.reorderLines(teamId, moveId(ids, id, marked.dataset.lineId, after));
+      return render();
+    }
     // סדר לפי מה שרואים על המסך — כך גרירה במיון "לפי דחיפות" מקבעת אותו כסדר ידני
     const visible = [...document.querySelectorAll('.trow:not(.trow--head)')].map((n) => n.dataset.teamId);
     await store.reorderTeams(state.dealId, moveId(visible, id, marked.dataset.teamId, after));
@@ -393,8 +411,11 @@ function bindReorder() {
     const dir = { ArrowUp: -1, ArrowRight: -1, ArrowDown: 1, ArrowLeft: 1 }[e.key];
     if (!dir) return;
     const grip = e.target.closest?.('[data-grip="team"]');
+    const lineGrip = e.target.closest?.('[data-grip="line"]') || e.target.closest?.('tr.bline')?.querySelector('[data-grip="line"]');
     const tab = e.target.closest?.('.dtab[data-action="select-deal"]');
-    if (grip && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+    const vertical = e.key === 'ArrowUp' || e.key === 'ArrowDown';
+
+    if (grip && vertical) {
       e.preventDefault();
       const visible = [...document.querySelectorAll('.trow:not(.trow--head)')].map((n) => n.dataset.teamId);
       const i = visible.indexOf(grip.dataset.teamId);
@@ -403,6 +424,21 @@ function bindReorder() {
       await store.reorderTeams(state.dealId, moveId(visible, visible[i], visible[j], dir > 0));
       setTeamSort('manual');
       focusAfterRender(`[data-grip="team"][data-team-id="${CSS.escape(grip.dataset.teamId)}"]`);
+    } else if (lineGrip && vertical) {
+      // Alt+↑/↓ עובד גם כשהפוקוס בתוך תא בשורה — כדי להזיז בלי לעזוב את המקלדת
+      e.preventDefault();
+      const focusField = e.target.dataset?.field || null;
+      const body = lineGrip.closest('tbody');
+      const ids = [...body.rows].map((n) => n.dataset.lineId);
+      const i = ids.indexOf(lineGrip.dataset.lineId);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= ids.length) return;
+      await store.reorderLines(lineGrip.dataset.teamId, moveId(ids, ids[i], ids[j], dir > 0));
+      render();
+      const sel = focusField
+        ? `tr[data-line-id="${CSS.escape(ids[i])}"] [data-field="${CSS.escape(focusField)}"]`
+        : `[data-grip="line"][data-line-id="${CSS.escape(ids[i])}"]`;
+      focusAfterRender(sel);
     } else if (tab && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
       e.preventDefault();
       const ids = store.cache.deals.map((d) => d.id);
@@ -425,6 +461,43 @@ function setTeamSort(mode) {
   state.teamSort = mode;
   localStorage.setItem(LS.teamSort, mode);
   render();
+}
+
+/* ---------- זיכרון מצב פתוח/סגור של הצוותים, לכל עסקה ---------- */
+function readExpanded(dealId) {
+  try {
+    const raw = localStorage.getItem(`${LS.expanded}${dealId}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function writeExpanded() {
+  if (!state.expandedFor) return;
+  try {
+    localStorage.setItem(`${LS.expanded}${state.expandedFor}`, JSON.stringify([...state.expandedTeams]));
+  } catch { /* מכסת אחסון — לא קריטי */ }
+}
+
+/* ============================================================
+   ניווט מקלדת בגיליון — Enter יורד באותה עמודה, Shift+Enter עולה.
+   חצים לא נתפסים: בשדה מספר הם משנים את הערך, וזו התנהגות שמצפים לה.
+   ============================================================ */
+function onSheetKeydown(e) {
+  if (e.key !== 'Enter' || e.altKey || e.ctrlKey || e.metaKey) return;
+  const cell = e.target.closest?.('.btable--sheet .cellinput');
+  if (!cell) return;
+  const field = cell.dataset.field;
+  const row = cell.closest('tr');
+  const body = row?.parentElement;
+  if (!field || !body) return;
+
+  const rows = [...body.rows];
+  const next = rows[rows.indexOf(row) + (e.shiftKey ? -1 : 1)];
+  e.preventDefault();
+  const target = next?.querySelector(`[data-field="${CSS.escape(field)}"]`);
+  if (!target) { cell.blur(); return; }   // סוף הטבלה — יציאה מהעריכה
+  target.focus();
+  if (target.select) target.select();
 }
 
 async function onClick(e) {
@@ -494,12 +567,14 @@ async function onClick(e) {
       const id = target.dataset.teamId;
       if (state.expandedTeams.has(id)) state.expandedTeams.delete(id);
       else state.expandedTeams.add(id);
+      writeExpanded();
       return render();
     }
 
     case 'focus-team': {
       const id = target.dataset.teamId;
       state.expandedTeams.add(id);
+      writeExpanded();
       render();
       const row = document.querySelector(`.trow[data-team-id="${CSS.escape(id)}"]`);
       if (row) {
@@ -565,10 +640,16 @@ async function onClick(e) {
     case 'delete-team': {
       const team = store.getTeam(target.dataset.teamId);
       return confirmModal('מחיקת צוות', `למחוק את "${team?.name}"? רישומי הביצוע שלו יישמרו ויעברו למצב "ללא שיוך".`, async () => {
-        const moved = await store.deleteTeam(target.dataset.teamId);
+        const snapshot = JSON.parse(JSON.stringify(team));
+        const { count, entryIds } = await store.deleteTeam(target.dataset.teamId);
         state.selectedTeams.delete(target.dataset.teamId);
-        ui.toast(moved ? `הצוות נמחק · ${moved} רישומים עברו ל"ללא שיוך"` : 'הצוות נמחק');
+        state.expandedTeams.delete(target.dataset.teamId);
         render();
+        ui.undoToast(count ? `"${snapshot.name}" נמחק · ${count} רישומים עברו ל"ללא שיוך"` : `"${snapshot.name}" נמחק`, async () => {
+          await store.restoreTeam(snapshot, entryIds);
+          ui.toast('הצוות הוחזר');
+          render();
+        });
       }, 'מחק');
     }
 
@@ -594,9 +675,22 @@ async function onClick(e) {
 
     case 'delete-line': {
       const team = store.getTeam(target.dataset.teamId);
+      const at = team.lines.findIndex((l) => l.id === target.dataset.lineId);
+      if (at < 0) return;
+      const removed = JSON.parse(JSON.stringify(team.lines[at]));
       team.lines = team.lines.filter((l) => l.id !== target.dataset.lineId);
       await store.saveTeam(team);
-      return render();
+      render();
+      ui.undoToast(`השורה "${removed.roleName || 'דרגה'}" נמחקה`, async () => {
+        const fresh = store.getTeam(target.dataset.teamId);
+        if (!fresh) return;
+        const lines = [...fresh.lines];
+        lines.splice(Math.min(at, lines.length), 0, removed);
+        await store.saveTeam({ ...fresh, lines });
+        ui.toast('השורה הוחזרה');
+        render();
+      });
+      return;
     }
 
     case 'add-entry':

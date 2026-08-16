@@ -727,11 +727,31 @@ export async function addTeam(dealId, name) {
 export async function deleteTeam(teamId) {
   // רישומי ביצוע ששויכו לצוות עוברים ל"ללא שיוך" ולא נמחקים
   const orphans = cache.entries.filter((e) => e.teamId === teamId);
+  const entryIds = orphans.map((e) => e.id);
   for (const e of orphans) { e.teamId = ''; e.roleId = e.roleId || ''; }
   cache.teams = cache.teams.filter((t) => t.id !== teamId);
   await Promise.all([db.remove('teams', teamId), db.putMany('entries', orphans)]);
   notify('team');
-  return orphans.length;
+  return { count: orphans.length, entryIds };
+}
+
+/** ביטול מחיקת צוות — מחזיר את הצוות ומחבר אליו בחזרה את רישומי הביצוע */
+export async function restoreTeam(team, entryIds = []) {
+  const restored = await saveTeam(team);
+  const back = cache.entries.filter((e) => entryIds.includes(e.id));
+  for (const e of back) e.teamId = restored.id;
+  if (back.length) await db.putMany('entries', back);
+  notify('team');
+  return restored;
+}
+
+/** סדר השורות בתוך צוות (גרירה בגיליון) */
+export async function reorderLines(teamId, orderedIds) {
+  const team = getTeam(teamId);
+  if (!team) return null;
+  const rank = new Map(orderedIds.map((id, i) => [id, i]));
+  const lines = [...team.lines].sort((a, b) => (rank.get(a.id) ?? 99) - (rank.get(b.id) ?? 99));
+  return saveTeam({ ...team, lines });
 }
 
 export async function reorderTeams(dealId, orderedIds) {

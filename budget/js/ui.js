@@ -700,6 +700,12 @@ function teamSheet(team, { snap, rateCard }) {
   for (const line of team.lines) {
     tbody.append(el('tr', { class: `bline bline--${line.status}`, dataset: { lineId: line.id, teamId: team.id } }, [
       el('td', { class: 'td-role' }, [
+        el('button', {
+          class: 'trow__grip line__grip', type: 'button', html: ICONS.grip, tabindex: '-1',
+          title: 'גרירה לשינוי סדר השורות · Alt+↑ / Alt+↓',
+          'aria-label': `שינוי מיקום השורה ${line.roleName || ''}`,
+          dataset: { grip: 'line', lineId: line.id, teamId: team.id },
+        }),
         el('select', {
           class: `cellinput cellinput--role${line.orphanRole ? ' cellinput--orphan' : ''}`,
           title: line.orphanRole ? 'הדרגה אינה קיימת בתעריפון הנוכחי — התעריף מוקפא בשורה. בחר דרגה מהתעריפון כדי לחבר מחדש.' : null,
@@ -766,7 +772,8 @@ function teamSheet(team, { snap, rateCard }) {
         dataset: { field: 'rateOverride', teamId: team.id, lineId: line.id, auto: line.rateOverride === null ? '1' : '0' },
       })]),
       el('td', { class: 'td-tools' }, [
-        el('button', { class: 'iconbtn iconbtn--danger', type: 'button', title: 'מחק שורה', dataset: { action: 'delete-line', teamId: team.id, lineId: line.id }, html: ICONS.trash }),
+        // מחוץ לסדר ה-Tab: מקש Tab צריך לזרום בין תאי הנתונים, לא דרך כפתורי המחיקה
+        el('button', { class: 'iconbtn iconbtn--danger', type: 'button', tabindex: '-1', title: 'מחק שורה', dataset: { action: 'delete-line', teamId: team.id, lineId: line.id }, html: ICONS.trash }),
       ]),
     ]));
   }
@@ -1969,6 +1976,39 @@ export function toast(message, tone = '') {
     node.classList.add('gone');
     setTimeout(() => node.remove(), 320);
   }, 3200);
+}
+
+/**
+ * טוסט עם ביטול — לפעולות שמוחקות מידע. נשאר על המסך יותר זמן מטוסט רגיל,
+ * ומציג ספירה לאחור כדי שיהיה ברור כמה זמן נשאר לבטל.
+ */
+export function undoToast(message, onUndo, seconds = 8) {
+  let node = document.getElementById('toast');
+  if (!node) {
+    node = el('div', { class: 'toast', id: 'toast', role: 'status', 'aria-live': 'polite' });
+    document.body.append(node);
+  }
+  clearTimeout(toastTimer);
+  clearInterval(undoToast._tick);
+
+  let left = seconds;
+  const counter = el('span', { class: 'toast__count num', text: String(left) });
+  const undoBtn = el('button', { class: 'toast__undo', type: 'button' }, [icon('refresh'), 'בטל']);
+  node.className = 'toast toast--undo';
+  node.replaceChildren(icon('trash'), el('span', { text: message }), undoBtn, counter);
+  node.classList.remove('gone');
+
+  const close = () => {
+    clearInterval(undoToast._tick);
+    node.classList.add('gone');
+    setTimeout(() => node.remove(), 320);
+  };
+  undoBtn.addEventListener('click', async () => { close(); await onUndo(); });
+  undoToast._tick = setInterval(() => {
+    left -= 1;
+    counter.textContent = String(Math.max(0, left));
+    if (left <= 0) close();
+  }, 1000);
 }
 
 /* ============================================================
