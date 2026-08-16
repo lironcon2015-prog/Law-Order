@@ -37,6 +37,7 @@ export const ICONS = {
   filter: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>',
   search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>',
   clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+  grip: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>',
   refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/></svg>',
 };
 
@@ -362,7 +363,7 @@ function subtab(id, label, iconName, active) {
    טאב תקציב — הגיליון החי
    ============================================================ */
 
-export function renderBudgetTab(root, { snap, rateCard, selected = new Set(), expanded = new Set() }) {
+export function renderBudgetTab(root, { snap, rateCard, selected = new Set(), expanded = new Set(), sort = 'priority' }) {
   const d = snap.deal;
 
   if (!snap.teams.length) {
@@ -386,25 +387,43 @@ export function renderBudgetTab(root, { snap, rateCard, selected = new Set(), ex
     checked: selected.size === snap.teams.length ? 'checked' : null,
   });
   allBox.indeterminate = selected.size > 0 && selected.size < snap.teams.length;
+  const sortBtn = (id, label, title) => el('button', {
+    class: `segbtn${sort === id ? ' is-on' : ''}`, type: 'button', title,
+    'aria-pressed': String(sort === id), dataset: { action: 'set-team-sort', sort: id },
+  }, [label]);
+
   wrap.append(el('div', { class: 'pickbar' }, [
     el('label', { class: 'inline-check' }, [allBox, el('span', { text: 'סמן את כל הצוותים' })]),
     el('span', { class: 'pickbar__hint', text: selected.size ? `${selected.size} צוותים מסומנים` : 'סמן צוותים כדי לקבל חישוב מצרפי' }),
     selected.size ? el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'clear-picks' } }, [icon('close'), 'נקה סימון']) : null,
+    el('div', { class: 'seg' }, [
+      el('span', { class: 'seg__label', text: 'מיון' }),
+      sortBtn('priority', 'לפי דחיפות', 'צוותים שחרגו או בסיכון עולים לראש הרשימה'),
+      sortBtn('manual', 'הסדר שלי', 'הסדר שקבעת בגרירה'),
+    ]),
   ]));
 
-  // הצוותים שדורשים טיפול עולים לראש הרשימה — העין מוצאת אותם בלי לסרוק
-  const needsWork = snap.teams.filter((t) => t.status === 'over' || t.status === 'risk');
-  const onTrack = snap.teams.filter((t) => !(t.status === 'over' || t.status === 'risk'));
   const section = (label, list, tone) => {
     if (!list.length) return;
     wrap.append(el('div', { class: `tsec ${tone ? `tsec--${tone}` : ''}`.trim(), text: `${label} · ${list.length}` }));
     wrap.append(teamListHead());
+    const list_ = el('div', { class: 'tlist', dataset: { droplist: 'teams' } });
     for (const team of list) {
-      for (const node of renderTeamRow(team, { snap, rateCard, selected, expanded })) wrap.append(node);
+      for (const node of renderTeamRow(team, { snap, rateCard, selected, expanded })) list_.append(node);
     }
+    wrap.append(list_);
   };
-  section('דורש טיפול', needsWork, 'alert');
-  section(needsWork.length ? 'בתוואי' : 'צוותים', onTrack);
+
+  if (sort === 'manual') {
+    // הסדר שנקבע בגרירה — רשימה אחת, בלי קיבוץ שדורס אותו
+    section('צוותים', snap.teams);
+  } else {
+    // הצוותים שדורשים טיפול עולים לראש הרשימה — העין מוצאת אותם בלי לסרוק
+    const needsWork = snap.teams.filter((t) => t.status === 'over' || t.status === 'risk');
+    const onTrack = snap.teams.filter((t) => !(t.status === 'over' || t.status === 'risk'));
+    section('דורש טיפול', needsWork, 'alert');
+    section(needsWork.length ? 'בתוואי' : 'צוותים', onTrack);
+  }
 
   wrap.append(el('div', { class: 'team-add-row' }, [
     el('button', { class: 'btn-add-row', type: 'button', dataset: { action: 'add-team' } }, [icon('plus'), 'הוסף צוות (אותה מתודולוגיה)']),
@@ -560,7 +579,7 @@ function totalItem(label, value, calcKey, hint) {
 function teamListHead() {
   const c = (text) => el('span', { class: 'trow__head-cell', text });
   return el('div', { class: 'trow trow--head' }, [
-    el('span', {}), el('span', {}), c('צוות'), c('ניצול שעות'),
+    el('span', {}), el('span', {}), el('span', {}), c('צוות'), c('ניצול שעות'),
     c('בוצע / תקציב'), c('עלות בפועל'), c('יתרה'), el('span', {}), el('span', {}),
   ]);
 }
@@ -584,6 +603,13 @@ function renderTeamRow(team, { snap, rateCard, selected = new Set(), expanded = 
     style: `--team-color:${team.color}`,
   }, [
     el('span', { class: 'trow__rail' }),
+    // ידית גרירה: השורה נעשית draggable רק בלחיצה עליה, אחרת אי אפשר לסמן טקסט בשדות
+    el('button', {
+      class: 'trow__grip', type: 'button', html: ICONS.grip,
+      title: 'גרירה לשינוי סדר · Alt+↑ / Alt+↓',
+      'aria-label': `שינוי מיקום הצוות ${team.name}`,
+      dataset: { grip: 'team', teamId: team.id },
+    }),
     el('label', { class: 'trow__pick', title: 'סימון הצוות לחישוב מצרפי' }, [
       el('input', {
         type: 'checkbox', dataset: { pick: 'team', teamId: team.id },

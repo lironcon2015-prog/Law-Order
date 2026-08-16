@@ -21,7 +21,7 @@ import {
    State
    ============================================================ */
 
-const LS = { deal: 'lb_dealId', tab: 'lb_tab', view: 'lb_view' };
+const LS = { deal: 'lb_dealId', tab: 'lb_tab', view: 'lb_view', teamSort: 'lb_teamSort' };
 
 const state = {
   view: 'overview',        // 'overview' | 'deal' | 'rates'
@@ -33,6 +33,7 @@ const state = {
   expandedTeams: new Set(),   // צוותים שהגיליון שלהם פתוח
   expandedFor: null,          // העסקה שעבורה נקבע הפתיחה האוטומטית
   progressPeriod: 'week',     // תקופת הסיכום במסך המעקב: day | week | month
+  teamSort: localStorage.getItem('lb_teamSort') === 'manual' ? 'manual' : 'priority',
 };
 
 let els = {};
@@ -134,7 +135,7 @@ function render() {
       }
       ui.renderBudgetTab(body, {
         snap, rateCard: store.rateCardFor(snap.deal),
-        selected: state.selectedTeams, expanded: state.expandedTeams,
+        selected: state.selectedTeams, expanded: state.expandedTeams, sort: state.teamSort,
       });
     }
     else if (state.tab === 'progress') ui.renderProgressTab(body, { snap, period: state.progressPeriod, sources: store.dataSourcesOf(snap.deal.id) });
@@ -266,32 +267,7 @@ function bindEvents() {
     if (file && cb) await cb(file);
   });
 
-  // גרירה לשינוי סדר הטאבים
-  let dragId = null;
-  els.tabs.addEventListener('dragstart', (e) => {
-    const tab = e.target.closest('[data-action="select-deal"]');
-    if (!tab) return;
-    dragId = tab.dataset.id;
-    tab.classList.add('dragging');
-  });
-  els.tabs.addEventListener('dragend', (e) => {
-    e.target.closest?.('.dtab')?.classList.remove('dragging');
-    dragId = null;
-  });
-  els.tabs.addEventListener('dragover', (e) => {
-    if (dragId) e.preventDefault();
-  });
-  els.tabs.addEventListener('drop', async (e) => {
-    const target = e.target.closest('[data-action="select-deal"]');
-    if (!dragId || !target || target.dataset.id === dragId) return;
-    e.preventDefault();
-    const ids = store.cache.deals.map((d) => d.id);
-    const from = ids.indexOf(dragId);
-    const to = ids.indexOf(target.dataset.id);
-    ids.splice(to, 0, ids.splice(from, 1)[0]);
-    await store.reorderDeals(ids);
-    render();
-  });
+  bindReorder();
 
   // גרירת קבצים לכל המסך כשנמצאים בטאב ביצוע
   const dropTargets = ['dragenter', 'dragover'];
@@ -319,6 +295,136 @@ function bindEvents() {
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && els.modal.open) closeModal();
   });
+}
+
+/* ============================================================
+   שינוי סדר בגרירה — צוותים (אנכי) ועסקאות (אופקי)
+   מנוע אחד לשניהם: ידית גרירה, קו יעד, ומקלדת (Alt+חצים) כחלופה נגישה.
+   ============================================================ */
+
+/** סדר חדש למערך מזהים: מזיזים את dragId לפני/אחרי targetId */
+function moveId(ids, dragId, targetId, after) {
+  const out = ids.filter((id) => id !== dragId);
+  const at = out.indexOf(targetId);
+  if (at === -1) return ids;
+  out.splice(after ? at + 1 : at, 0, dragId);
+  return out;
+}
+
+function bindReorder() {
+  let drag = null;   // { kind: 'team' | 'deal', id, el }
+
+  const clearMarks = () => {
+    for (const n of document.querySelectorAll('.drop-before, .drop-after')) {
+      n.classList.remove('drop-before', 'drop-after');
+    }
+  };
+  const endDrag = () => {
+    drag?.el.classList.remove('dragging');
+    drag = null;
+    clearMarks();
+  };
+
+  // הידית היא מה שהופך את הפריט לגריר — כדי שגרירה בתוך שדות טקסט תמשיך לעבוד
+  document.addEventListener('pointerdown', (e) => {
+    const grip = e.target.closest('[data-grip]');
+    if (!grip) return;
+    const item = grip.closest('.trow, .dtab');
+    if (item) item.setAttribute('draggable', 'true');
+  });
+  document.addEventListener('pointerup', () => {
+    for (const n of document.querySelectorAll('.trow[draggable]')) n.removeAttribute('draggable');
+  });
+
+  document.addEventListener('dragstart', (e) => {
+    const row = e.target.closest?.('.trow[draggable="true"]');
+    const tab = e.target.closest?.('.dtab[data-action="select-deal"]');
+    const item = row || tab;
+    if (!item) return;
+    drag = row ? { kind: 'team', id: row.dataset.teamId, el: row } : { kind: 'deal', id: tab.dataset.id, el: tab };
+    item.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    // חלק מהדפדפנים לא מתחילים גרירה בלי מטען
+    try { e.dataTransfer.setData('text/plain', drag.id); } catch { /* noop */ }
+  });
+
+  document.addEventListener('dragend', endDrag);
+
+  document.addEventListener('dragover', (e) => {
+    if (!drag) return;
+    const item = drag.kind === 'team'
+      ? e.target.closest?.('.trow:not(.trow--head)')
+      : e.target.closest?.('.dtab[data-action="select-deal"]');
+    if (!item || item === drag.el) { clearMarks(); return; }
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    clearMarks();
+    const r = item.getBoundingClientRect();
+    // צוותים: חצי עליון/תחתון · עסקאות: RTL — הצד הימני הוא "לפני"
+    const after = drag.kind === 'team'
+      ? e.clientY > r.top + r.height / 2
+      : e.clientX < r.left + r.width / 2;
+    item.classList.add(after ? 'drop-after' : 'drop-before');
+  });
+
+  document.addEventListener('drop', async (e) => {
+    if (!drag) return;
+    const marked = document.querySelector('.drop-before, .drop-after');
+    if (!marked) return;
+    e.preventDefault();
+    const after = marked.classList.contains('drop-after');
+    const kind = drag.kind, id = drag.id;
+    endDrag();
+
+    if (kind === 'deal') {
+      const ids = store.cache.deals.map((d) => d.id);
+      await store.reorderDeals(moveId(ids, id, marked.dataset.id, after));
+      return render();
+    }
+    // סדר לפי מה שרואים על המסך — כך גרירה במיון "לפי דחיפות" מקבעת אותו כסדר ידני
+    const visible = [...document.querySelectorAll('.trow:not(.trow--head)')].map((n) => n.dataset.teamId);
+    await store.reorderTeams(state.dealId, moveId(visible, id, marked.dataset.teamId, after));
+    setTeamSort('manual');
+  });
+
+  // חלופה למקלדת: Alt+↑/↓ לצוות, Alt+←/→ לעסקה (RTL — ימין הוא לכיוון ההתחלה)
+  document.addEventListener('keydown', async (e) => {
+    if (!e.altKey) return;
+    const dir = { ArrowUp: -1, ArrowRight: -1, ArrowDown: 1, ArrowLeft: 1 }[e.key];
+    if (!dir) return;
+    const grip = e.target.closest?.('[data-grip="team"]');
+    const tab = e.target.closest?.('.dtab[data-action="select-deal"]');
+    if (grip && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      e.preventDefault();
+      const visible = [...document.querySelectorAll('.trow:not(.trow--head)')].map((n) => n.dataset.teamId);
+      const i = visible.indexOf(grip.dataset.teamId);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= visible.length) return;
+      await store.reorderTeams(state.dealId, moveId(visible, visible[i], visible[j], dir > 0));
+      setTeamSort('manual');
+      focusAfterRender(`[data-grip="team"][data-team-id="${CSS.escape(grip.dataset.teamId)}"]`);
+    } else if (tab && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+      e.preventDefault();
+      const ids = store.cache.deals.map((d) => d.id);
+      const i = ids.indexOf(tab.dataset.id);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= ids.length) return;
+      await store.reorderDeals(moveId(ids, ids[i], ids[j], dir > 0));
+      render();
+      focusAfterRender(`.dtab[data-id="${CSS.escape(tab.dataset.id)}"]`);
+    }
+  });
+}
+
+/** אחרי render() ה-DOM מוחלף — מחזירים את הפוקוס לאותו פריט כדי להמשיך להזיז */
+function focusAfterRender(selector) {
+  requestAnimationFrame(() => document.querySelector(selector)?.focus());
+}
+
+function setTeamSort(mode) {
+  state.teamSort = mode;
+  localStorage.setItem(LS.teamSort, mode);
+  render();
 }
 
 async function onClick(e) {
@@ -379,9 +485,12 @@ async function onClick(e) {
       state.selectedTeams.clear();
       return render();
 
+    case 'set-team-sort':
+      return setTeamSort(target.dataset.sort);
+
     case 'toggle-team': {
       // לחיצה על שדה בתוך השורה (שם הצוות, סימון) לא מקפלת אותה
-      if (e.target.closest('input, select, label, .iconbtn')) return;
+      if (e.target.closest('input, select, label, .iconbtn, [data-grip]')) return;
       const id = target.dataset.teamId;
       if (state.expandedTeams.has(id)) state.expandedTeams.delete(id);
       else state.expandedTeams.add(id);
