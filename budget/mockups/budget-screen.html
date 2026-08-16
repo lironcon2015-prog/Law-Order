@@ -40,7 +40,7 @@ table{border-collapse:collapse}
 .neg{color:var(--negative)} .pos{color:var(--positive)} .warn{color:var(--warn)}
 
 /* ---------- מעטפת המסמך ---------- */
-.page{max-width:1360px;margin:0 auto;padding:36px 26px 90px}
+.page{max-width:1580px;margin:0 auto;padding:36px 26px 90px}
 .doc-head{border-bottom:1px solid var(--line);padding-bottom:22px;margin-bottom:26px}
 .eyebrow{font-size:.7rem;font-weight:800;letter-spacing:.2em;color:var(--gold-deep);text-transform:uppercase}
 .doc-head h1{font-size:1.9rem;font-weight:800;color:var(--text-strong);letter-spacing:-.02em;margin-top:8px;text-wrap:balance}
@@ -231,6 +231,114 @@ table{border-collapse:collapse}
 .c-total .v{font-size:1.35rem;font-weight:700;color:var(--text-strong)}
 .c-total .v--gold{color:var(--gold-bright)}
 
+/* ============ א+ב מאוחד · דסקטופ ============ */
+/* פס עליון: הירו והמפה זה לצד זה — ניצול רוחב במקום ערימה אנכית */
+.m-band{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:14px;margin-bottom:12px}
+.m-hero{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,.9fr) minmax(0,1.1fr);
+  border:1px solid var(--line);border-radius:var(--radius-lg);background:var(--surface-1);overflow:hidden}
+.m-hero > div{padding:16px 18px;text-align:right}
+.m-hero > div + div{border-inline-end:1px solid var(--line-soft)}
+.m-hero .big{font-size:2.9rem;font-weight:800;color:var(--text-strong);line-height:1;letter-spacing:-.03em}
+.m-hero .mid{font-size:1.55rem;font-weight:700;line-height:1.2}
+.m-hero .u{font-size:.8rem;color:var(--text-muted);margin-top:7px}
+.m-risk{background:linear-gradient(180deg,rgba(251,146,60,.10),transparent 72%)}
+.m-facts{display:flex;gap:0;border:1px solid var(--line-soft);border-radius:var(--radius-md);
+  background:rgba(255,255,255,.012);padding:9px 4px;margin-bottom:16px}
+.m-facts div{flex:1;text-align:right;padding:2px 14px;border-inline-end:1px solid var(--line-soft)}
+.m-facts div:last-child{border-inline-end:0}
+.m-facts .v{font-size:.95rem;font-weight:600;color:var(--text-secondary)}
+
+/* שורת צוות מכווצת — רחבה, לדסקטופ */
+.m-row{display:grid;
+  grid-template-columns:4px 210px minmax(160px,1fr) 132px 120px 120px 116px 78px 26px;
+  align-items:center;gap:16px;padding:0 16px 0 0;min-height:56px;
+  border:1px solid var(--line);border-radius:var(--radius-md);background:var(--surface-1);margin-bottom:7px;
+  transition:border-color .16s var(--ease-out),background .16s var(--ease-out)}
+.m-row:hover{border-color:var(--line-strong);background:var(--surface-2)}
+.m-row--open{border-color:rgba(248,113,113,.42);background:var(--surface-2);border-radius:var(--radius-md) var(--radius-md) 0 0;margin-bottom:0}
+.m-rail{align-self:stretch;border-radius:var(--radius-pill)}
+.m-tname{font-size:1.05rem;font-weight:700;color:var(--text-strong);padding:9px 0}
+.m-tname small{display:block;font-size:.74rem;color:var(--text-faint);font-weight:600}
+/* כותרות עמודה פעם אחת מעל הרשימה — לא בכל שורה */
+.m-rowhead{display:grid;grid-template-columns:4px 210px minmax(160px,1fr) 132px 120px 120px 116px 78px 26px;
+  gap:16px;padding:0 16px 6px 0;align-items:end}
+.m-rowhead > div{text-align:right}
+.m-cell{text-align:right}
+.m-cell .v{font-size:1.05rem;font-weight:700;color:var(--text-primary)}
+.m-cell .v.quiet{font-weight:600;color:var(--text-muted)}
+.m-chev{color:var(--text-faint);font-size:.8rem;text-align:center}
+
+/* גוף הצוות הפתוח */
+.m-body{border:1px solid rgba(248,113,113,.42);border-top:0;border-radius:0 0 var(--radius-md) var(--radius-md);
+  background:var(--surface-1);padding:4px 16px 12px;margin-bottom:12px}
+
+/* ---- הטבלה: היררכיה פנימית ---- */
+.mt{width:100%;font-size:.88rem;table-layout:fixed}
+.mt th,.mt td{text-align:right;padding:8px 12px}
+.mt thead .grp th{font-size:.64rem;letter-spacing:.14em;text-transform:uppercase;color:var(--text-faint);
+  font-weight:800;padding-bottom:2px;border-bottom:0}
+.mt thead .cols th{font-size:.67rem;letter-spacing:.07em;text-transform:uppercase;color:var(--text-faint);
+  font-weight:700;border-bottom:1px solid var(--line);padding-top:2px}
+.mt .sep{border-inline-start:1px solid var(--line-soft)}
+.mt tbody tr{border-bottom:1px solid var(--line-soft)}
+.mt tbody tr:hover{background:rgba(255,255,255,.026)}
+.mt td:first-child{border-inline-start:3px solid transparent}
+.mt tr.sev-watch td:first-child{border-inline-start-color:var(--gold)}
+.mt tr.sev-over  td:first-child{border-inline-start-color:var(--negative)}
+.mt .role{font-weight:600;color:var(--text-primary)}
+.mt .role small{display:block;font-size:.72rem;color:var(--text-faint);font-weight:500}
+
+/* עמודת העוגן — לשם העין הולכת ראשונה */
+.mt .anchor{padding-block:6px}
+/* הערך והמד מיושרים לאותו קצה ימני — הכלל של יישור מספרים ב-RTL */
+.mt .anchor .nums{display:block;direction:ltr;text-align:right}
+.mt .anchor .nums .of{margin-inline-start:6px}
+.mt .anchor .done{font-size:1.22rem;font-weight:800;color:var(--text-strong);letter-spacing:-.01em}
+.mt .anchor .of{font-size:.86rem;color:var(--text-faint);font-weight:600}
+.mt .anchor .done.over{color:var(--negative)}
+.mt .anchor .trk{height:7px;border-radius:var(--radius-pill);background:var(--surface-3);position:relative;margin-top:5px;
+  box-shadow:inset 0 0 0 1px var(--line-soft)}
+.mt .anchor .trk i{position:absolute;inset-inline-start:0;top:0;height:100%;border-radius:var(--radius-pill);background:var(--text-secondary)}
+.mt .anchor .trk i.over{background:var(--negative)}
+.mt .anchor .trk b{position:absolute;inset-inline-start:100%;top:0;height:100%;background:var(--negative);opacity:.75;
+  border-radius:0 var(--radius-pill) var(--radius-pill) 0}
+.mt .anchor .trk b::after{content:'';position:absolute;inset:0;border-radius:inherit;
+  background:repeating-linear-gradient(45deg,transparent,transparent 3px,rgba(0,0,0,.4) 3px,rgba(0,0,0,.4) 6px)}
+/* המד יושב מתחת למספר ומיושר לאותו קצה — ברוחב יחסי לגודל השורה */
+.mt .anchor .trk{margin-inline-start:auto}
+.mt .pctcell{font-size:1rem;font-weight:700;color:var(--text-muted)}
+.mt .pctcell.watch{color:var(--gold)}
+.mt .pctcell.over{color:var(--negative)}
+.mt .delta{font-weight:700;color:var(--negative)}
+.mt .delta.none{color:var(--text-faint);font-weight:500}
+
+/* תוצר מול קלט: התוצר מודגש, הקלט שקוף עד מגע */
+.mt .out{color:var(--text-strong);font-weight:700}
+.mt .out--soft{color:var(--text-secondary);font-weight:600}
+.mt .in{color:var(--text-muted);font-weight:500}
+.mt .in em{font-style:normal;display:inline-block;min-width:56px;padding:4px 8px;border-radius:8px;
+  border:1px solid transparent;transition:border-color .14s,background .14s}
+.mt tbody tr:hover .in em{border-color:var(--line);background:var(--surface-2)}
+.mt .in em:focus{outline:none;border-color:var(--gold-line);background:var(--surface-2)}
+.mt tfoot td{border-top:1px solid var(--line-strong);padding-top:11px;color:var(--text-primary);font-weight:700}
+.mt tfoot .anchor .done{font-size:1.22rem}
+.mt tfoot .lblcell{color:var(--text-muted);font-weight:700}
+
+/* לפני/אחרי */
+.ba{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:26px}
+.ba > div{border:1px solid var(--line);border-radius:var(--radius-lg);background:var(--surface-1);padding:14px 16px;overflow-x:auto}
+.ba h4{font-size:.78rem;text-transform:uppercase;letter-spacing:.1em;color:var(--text-faint);font-weight:800;margin-bottom:10px}
+.ba .now h4{color:var(--text-faint)}
+.ba .next{border-color:var(--gold-line);background-image:linear-gradient(180deg,var(--gold-softer),transparent 55%)}
+.ba .next h4{color:var(--gold-bright)}
+.fakein{display:inline-block;min-width:58px;padding:4px 9px;border-radius:8px;border:1px solid var(--line);background:var(--surface-2);color:var(--text-secondary)}
+
+@media (max-width:1200px){
+  .m-band{grid-template-columns:1fr}
+  .m-row{grid-template-columns:4px 1fr 120px 90px 26px}
+  .m-row .m-hide{display:none}
+  .ba{grid-template-columns:1fr}
+}
 @media (max-width:860px){
   .a-hero{grid-template-columns:1fr}
   .a-hero > div + div{border-inline-end:0;border-top:1px solid var(--line-soft)}
@@ -249,14 +357,76 @@ table{border-collapse:collapse}
   </header>
 
   <nav class="switch" role="tablist">
-    <button role="tab" aria-selected="true" data-pane="an">הניתוח</button>
+    <button role="tab" aria-selected="true" data-pane="ab">המוצע · א+ב לדסקטופ</button>
+    <button role="tab" aria-selected="false" data-pane="an">הניתוח</button>
     <button role="tab" aria-selected="false" data-pane="a">א׳ · היררכיה שקטה</button>
     <button role="tab" aria-selected="false" data-pane="b">ב׳ · מסת צוותים</button>
     <button role="tab" aria-selected="false" data-pane="c">ג׳ · שעות קודם</button>
   </nav>
 
+  <!-- ============ א+ב מאוחד ============ -->
+  <section class="pane on" id="pane-ab">
+    <div class="dir-head">
+      <h2>המימוש המוצע · א+ב, מכוון לדסקטופ</h2>
+      <p class="sub">ההיררכיה של א׳ ופרופורציית הצוותים של ב׳ באותו מסך — ובנוסף <b>היררכיה בתוך הטבלה עצמה</b>,
+        שהייתה חסרה בשני הכיוונים. הפריסה בנויה לרוחב מסך: הירו והמפה זה לצד זה, טבלה בלי גלילה אופקית,
+        ושורות בגובה שמאפשר לראות צוות שלם בלי לגלול.</p>
+      <div class="meta-row">
+        <span class="tag">רוחב יעד: <b>1440–1920</b></span>
+        <span class="tag">גלילה: <b>3,163px → מסך אחד</b></span>
+        <span class="tag tag--cost">עלות: <b>בינונית</b> · CSS + עמודת עוגן + state קיפול</span>
+        <span class="tag">הטבלה: <b>11 עמודות → 9</b>, בשלוש רמות בולטוּת</span>
+      </div>
+    </div>
+
+    <div class="ba">
+      <div class="now">
+        <h4>שורת דרגה — היום</h4>
+        <table class="qt" style="min-width:0">
+          <thead><tr><th>דרגה</th><th>חבר צוות</th><th>מוערכות</th><th>שעות תקציב</th><th>תעריף</th><th>תקציב ₪</th><th>שעות בפועל</th><th>עלות ₪</th><th>יתרה ₪</th><th>ניצול</th></tr></thead>
+          <tbody><tr>
+            <td>שותף</td><td class="in"><span class="fakein">שם</span></td>
+            <td class="in num"><span class="fakein">70</span></td><td class="in num"><span class="fakein">84</span></td>
+            <td class="in num"><span class="fakein">900</span></td><td class="num">₪75,600</td>
+            <td class="in num"><span class="fakein">64.4</span></td><td class="num">₪57,960</td>
+            <td class="num">₪17,640</td><td class="num">77%</td>
+          </tr></tbody>
+        </table>
+        <p style="font-size:.82rem;color:var(--text-faint);margin-top:12px">
+          עשרה ערכים באותו משקל, חמישה מהם בתוך מסגרת קלט. אין דבר אחד שהעין נוחתת עליו,
+          ואי אפשר להשוות שורה לשורה בלי לקרוא מספרים.</p>
+      </div>
+      <div class="next">
+        <h4>שורת דרגה — מוצע</h4>
+        <table class="mt" style="table-layout:auto">
+          <thead><tr class="cols"><th>דרגה</th><th style="width:230px">שעות · בוצע מתוך תקציב</th><th>ניצול</th><th>חריגה</th><th class="sep">תקציב ₪</th><th>יתרה ₪</th><th>תעריף</th></tr></thead>
+          <tbody><tr class="sev-watch">
+            <td class="role">שותף<small>1 עו״ד</small></td>
+            <td class="anchor">
+              <div class="nums"><span class="done num">64.4</span><span class="of num">/ 84</span></div>
+              <div class="trk"><i style="width:77%"></i></div>
+            </td>
+            <td class="pctcell watch num">77%</td>
+            <td class="delta none num">—</td>
+            <td class="out num sep">₪75,600</td>
+            <td class="out--soft num">₪17,640</td>
+            <td class="in num"><em>₪900</em></td>
+          </tr></tbody>
+        </table>
+        <p style="font-size:.82rem;color:var(--text-faint);margin-top:12px">
+          עוגן אחד לשורה — כמה שעות נשרפו מתוך מה שתוקצב, כמספר וכמד.
+          ״חריגה״ ריקה כשאין חריגה, כך שדיו מופיע רק איפה שיש בעיה. הקלט שקוף עד שנוגעים בו.</p>
+      </div>
+    </div>
+
+    <div class="frame"><div class="frame__bar"><div class="frame__dots"><i></i><i></i><i></i></div><span class="frame__title">LexBudget · תקציב · 1600px</span></div>
+      <div class="screen" id="mock-ab"></div></div>
+    <p class="note">שלוש רמות בולטוּת בטבלה: <b>עוגן</b> (שעות בוצע/תוקצב + מד) ← <b>תוצר</b> (תקציב ₪, יתרה — טקסט חזק, בלי מסגרת)
+      ← <b>קלט</b> (תעריף, מוערכות — muted, מסגרת רק ב-hover). פס חומרה בקצה השורה מסמן דרגות שדורשות מבט, בלי לצבוע את כל השורה.</p>
+  </section>
+
   <!-- ============ ניתוח ============ -->
-  <section class="pane on" id="pane-an">
+  <section class="pane" id="pane-an">
     <p class="lede">התחושה ש״הכל נראה אותו דבר״ היא לא עניין של טעם — היא תוצאה מדידה: במסך יש <strong>כ־120 מספרים</strong>
       שכולם באותו טווח משקל וגודל, <strong>חמישה כרטיסי צוות זהים לחלוטין</strong> במבנה ובגובה, ו־<strong>3,163 פיקסלים של גלילה</strong>
       עד סוף המסך. כשהכל מודגש — שום דבר לא מודגש.</p>
@@ -601,6 +771,142 @@ function mockC() {
   </div>`;
 }
 
+/* ============ א+ב מאוחד · דסקטופ ============ */
+function mockAB() {
+  const sorted = [...T].sort((a, b) => (a.st === 'over' ? -1 : b.st === 'over' ? 1 : b.bc - a.bc));
+  const alerts = sorted.filter((t) => t.st === 'over');
+  const rest = sorted.filter((t) => t.st !== 'over');
+  const cell = (v, cls = '', hide = false) =>
+    `<div class="m-cell ${hide ? 'm-hide' : ''}"><div class="v num ${cls}">${v}</div></div>`;
+  const rowHead = () => `
+    <div class="m-rowhead">
+      <div></div><div class="lbl">צוות</div><div class="lbl">ניצול שעות</div>
+      <div class="lbl">בוצע / תקציב</div><div class="lbl m-hide">עלות בפועל</div>
+      <div class="lbl m-hide">יתרה</div><div class="lbl m-hide">שעות שנותרו</div><div></div><div></div>
+    </div>`;
+
+  /* שורת צוות מכווצת */
+  const row = (t, open) => `
+    <div class="m-row ${open ? 'm-row--open' : ''}">
+      <span class="m-rail" style="background:${t.color}"></span>
+      <div class="m-tname">${t.name}<small class="num">${pct(t.bc / D.budgetCost)} מתקציב העסקה · ${money(t.bc)}</small></div>
+      <div><div class="bar"><i style="width:${Math.min(t.util, 1) * 100}%;background:${STC[t.st]}">${t.util > 1 ? '<span class="hatch"></span>' : ''}</i></div></div>
+      ${cell(`${hrs(t.ah)} / ${hrs(t.bh)}`)}
+      ${cell(money(t.ac), 'quiet', true)}
+      ${cell(money(t.rc), t.rc < 0 ? 'neg' : '', true)}
+      ${cell(hrs(t.bh - t.ah), t.bh - t.ah < 0 ? 'neg' : 'quiet', true)}
+      <div style="text-align:center"><span class="pill pill--${t.st === 'over' ? 'over' : 'ok'} num">${pct(t.util)}</span></div>
+      <div class="m-chev">${open ? '▲' : '▼'}</div>
+    </div>`;
+
+  /* הטבלה עם שלוש רמות הבולטוּת */
+  const table = (t) => {
+    const maxBH = Math.max(...t.lines.map((l) => l[2]));
+    const line = (l) => {
+      const over = l[9] === 'over', watch = l[9] === 'watch';
+      const delta = l[5] - l[2];
+      return `<tr class="sev-${l[9]}">
+        <td class="role">${l[0]}<small>${l[0] === 'שותף' ? 'א׳ לוי' : l[0] === 'עו״ד' ? 'ד׳ כהן · מ׳ אברהמי' : 'י׳ שגב'}</small></td>
+        <td class="anchor">
+          <div class="nums"><span class="done num ${over ? 'over' : ''}">${hrs(l[5])}</span><span class="of num">/ ${hrs(l[2])}</span></div>
+          <div class="trk" style="width:${Math.max(38, (l[2] / maxBH) * 100)}%">
+            <i class="${over ? 'over' : ''}" style="width:${Math.min(l[8], 1) * 100}%"></i>
+            ${over ? `<b style="width:${(l[8] - 1) * 100}%"></b>` : ''}
+          </div>
+        </td>
+        <td class="pctcell num ${l[9]}">${pct(l[8])}</td>
+        <td class="delta num ${over ? '' : 'none'}">${over ? '+' + hrs(delta) + ' ש׳' : '—'}</td>
+        <td class="out num sep">${money(l[4])}</td>
+        <td class="out--soft num">${money(l[6])}</td>
+        <td class="num ${l[7] < 0 ? 'neg' : 'out--soft'}">${money(l[7])}</td>
+        <td class="in num"><em>${hrs(l[1])}</em></td>
+        <td class="in num"><em>${money(l[3])}</em></td>
+      </tr>`;
+    };
+    const tOver = t.ah > t.bh;
+    return `<table class="mt">
+      <colgroup><col style="width:15%"><col style="width:23%"><col style="width:7%"><col style="width:9%">
+        <col style="width:12%"><col style="width:12%"><col style="width:11%"><col style="width:5.5%"><col style="width:5.5%"></colgroup>
+      <thead>
+        <tr class="grp"><th colspan="4">ביצוע מול תקציב</th><th colspan="3" class="sep">כסף נגזר</th><th colspan="2">קלט תכנון</th></tr>
+        <tr class="cols"><th>דרגה</th><th>שעות · בוצע מתוך תקציב</th><th>ניצול</th><th>חריגה</th>
+          <th class="sep">תקציב ₪</th><th>עלות בפועל ₪</th><th>יתרה ₪</th><th>מוערכות</th><th>תעריף</th></tr>
+      </thead>
+      <tbody>${t.lines.map(line).join('')}</tbody>
+      <tfoot><tr>
+        <td class="lblcell">סה״כ הצוות</td>
+        <td class="anchor">
+          <div class="nums"><span class="done num ${tOver ? 'over' : ''}">${hrs(t.ah)}</span><span class="of num">/ ${hrs(t.bh)}</span></div>
+          <div class="trk"><i class="${tOver ? 'over' : ''}" style="width:${Math.min(t.util, 1) * 100}%"></i>
+            ${tOver ? `<b style="width:${(t.util - 1) * 100}%"></b>` : ''}</div>
+        </td>
+        <td class="pctcell num ${t.st}">${pct(t.util)}</td>
+        <td class="delta num ${tOver ? '' : 'none'}">${tOver ? '+' + hrs(t.ah - t.bh) + ' ש׳' : '—'}</td>
+        <td class="out num sep">${money(t.bc)}</td>
+        <td class="out--soft num">${money(t.ac)}</td>
+        <td class="num ${t.rc < 0 ? 'neg' : 'out--soft'}">${money(t.rc)}</td>
+        <td class="in num">${hrs(t.eh)}</td><td></td>
+      </tr></tfoot>
+    </table>`;
+  };
+
+  return `
+  ${dealHead()}
+  <div class="m-band">
+    <div class="m-hero">
+      <div>
+        <div class="lbl">ניצול התקציב</div>
+        <div class="big num">${pct(D.util)}</div>
+        <div class="bar" style="margin-top:10px"><i style="width:${D.util * 100}%;background:var(--gold)"></i></div>
+        <div class="u num">${hrs(D.actualHours)} מתוך ${hrs(D.budgetHours)} שעות</div>
+      </div>
+      <div>
+        <div class="lbl">יתרה</div>
+        <div class="mid num pos">${money(D.remainingCost)}</div>
+        <div class="u num">${hrs(D.remainingHours)} שעות נותרו</div>
+      </div>
+      <div class="m-risk">
+        <div class="lbl" style="color:var(--warn)">תחזית לסיום</div>
+        <div class="mid num warn">${money(D.eac)}</div>
+        <div class="u num">${money(D.eacVar)} מעל התקציב · שריפה ${pct(D.util)} מול ${pct(D.progress)} התקדמות</div>
+      </div>
+    </div>
+
+    <div class="b-map" style="margin-bottom:0">
+      <h4><span>מפת התקציב · ${money(D.budgetCost)} בחמישה צוותים</span><span class="num" style="color:var(--text-faint)">רוחב = חלק מהתקציב</span></h4>
+      <div class="b-stack">
+        ${[...T].sort((a, b) => b.bc - a.bc).map((t) => `
+          <div class="b-seg ${t.st === 'over' ? 'b-seg--over' : ''}" style="flex:${t.bc};background:${t.color}" title="${t.name}">
+            <span class="num">${pct(t.bc / D.budgetCost)}</span></div>`).join('')}
+      </div>
+      <div class="b-legend">
+        ${[...T].sort((a, b) => b.bc - a.bc).map((t) => `<span><i style="background:${t.color}"></i>${t.name}</span>`).join('')}
+      </div>
+    </div>
+  </div>
+
+  <div class="m-facts">
+    <div><div class="lbl">שעות תקציב</div><div class="v num">${hrs(D.budgetHours)}</div></div>
+    <div><div class="lbl">שעות מוערכות</div><div class="v num">${hrs(D.estHours)}</div></div>
+    <div><div class="lbl">בלנדד מתוכנן</div><div class="v num">${money(D.blended)}</div></div>
+    <div><div class="lbl">בלנדד בפועל</div><div class="v num">${money(D.blendedActual)}</div></div>
+    <div><div class="lbl">בלנדד אחרי תקרה</div><div class="v num neg">${money(D.capBlended)}</div></div>
+    <div><div class="lbl">שכ״ט מוסכם</div><div class="v num">${money(D.fee)}</div></div>
+  </div>
+
+  <div class="b-sect b-sect--alert">דורש טיפול · ${alerts.length}</div>
+  ${rowHead()}
+  ${alerts.map((t) => row(t, true) + `<div class="m-body">${table(t)}</div>`).join('')}
+  <div class="b-sect">בתוואי · ${rest.length}</div>
+  ${rowHead()}
+  ${rest.map((t) => row(t, false)).join('')}
+  <div class="m-body" style="border-color:var(--line);border-top:1px solid var(--line);border-radius:var(--radius-md);margin-top:12px">
+    <div style="font-size:.78rem;color:var(--text-faint);padding:6px 0 8px">כך נראה צוות תקין כשפותחים אותו — אותה טבלה, בלי דיו של חריגה</div>
+    ${table(T[0])}
+  </div>`;
+}
+
+document.getElementById('mock-ab').innerHTML = mockAB();
 document.getElementById('mock-a').innerHTML = mockA();
 document.getElementById('mock-b').innerHTML = mockB();
 document.getElementById('mock-c').innerHTML = mockC();
