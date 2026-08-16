@@ -30,6 +30,8 @@ const state = {
   filters: { q: '', teamId: '', kind: '', status: '' },
   snapshots: new Map(),
   selectedTeams: new Set(),   // צוותים מסומנים לחישוב מצרפי (בעסקה הפעילה)
+  expandedTeams: new Set(),   // צוותים שהגיליון שלהם פתוח
+  expandedFor: null,          // העסקה שעבורה נקבע הפתיחה האוטומטית
   progressPeriod: 'week',     // תקופת הסיכום במסך המעקב: day | week | month
 };
 
@@ -123,7 +125,18 @@ function render() {
     ui.renderDealHeader(els.main, { snap, tab: state.tab });
     const body = ui.el('div', { class: 'tab-body' });
     els.main.append(body);
-    if (state.tab === 'budget') ui.renderBudgetTab(body, { snap, rateCard: store.rateCardFor(snap.deal), selected: state.selectedTeams });
+    if (state.tab === 'budget') {
+      // בכניסה לעסקה נפתחים רק הצוותים שדורשים טיפול — השאר נשארים כשורה
+      if (state.expandedFor !== snap.deal.id) {
+        state.expandedFor = snap.deal.id;
+        state.expandedTeams = new Set(snap.teams.filter((t) => t.status === 'over' || t.status === 'risk').map((t) => t.id));
+        if (!state.expandedTeams.size && snap.teams.length === 1) state.expandedTeams.add(snap.teams[0].id);
+      }
+      ui.renderBudgetTab(body, {
+        snap, rateCard: store.rateCardFor(snap.deal),
+        selected: state.selectedTeams, expanded: state.expandedTeams,
+      });
+    }
     else if (state.tab === 'progress') ui.renderProgressTab(body, { snap, period: state.progressPeriod, sources: store.dataSourcesOf(snap.deal.id) });
     else if (state.tab === 'actuals') ui.renderActualsTab(body, { snap, filters: state.filters });
     else if (state.tab === 'control') ui.renderControlTab(body, { snap });
@@ -188,7 +201,7 @@ function markDirty() {
 }
 
 function goDeal(id, tab) {
-  if (id !== state.dealId) state.selectedTeams.clear();   // הסימון שייך לעסקה שממנה יצאנו
+  if (id !== state.dealId) { state.selectedTeams.clear(); state.expandedFor = null; }   // הסימון שייך לעסקה שממנה יצאנו
   state.view = 'deal';
   state.dealId = id;
   state.tab = tab || state.tab || 'budget';
@@ -365,6 +378,28 @@ async function onClick(e) {
     case 'clear-picks':
       state.selectedTeams.clear();
       return render();
+
+    case 'toggle-team': {
+      // לחיצה על שדה בתוך השורה (שם הצוות, סימון) לא מקפלת אותה
+      if (e.target.closest('input, select, label, .iconbtn')) return;
+      const id = target.dataset.teamId;
+      if (state.expandedTeams.has(id)) state.expandedTeams.delete(id);
+      else state.expandedTeams.add(id);
+      return render();
+    }
+
+    case 'focus-team': {
+      const id = target.dataset.teamId;
+      state.expandedTeams.add(id);
+      render();
+      const row = document.querySelector(`.trow[data-team-id="${CSS.escape(id)}"]`);
+      if (row) {
+        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        row.classList.add('trow--flash');
+        setTimeout(() => row.classList.remove('trow--flash'), 1200);
+      }
+      return;
+    }
 
     case 'set-period':
       state.progressPeriod = target.dataset.period;
