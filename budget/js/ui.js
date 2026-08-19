@@ -639,13 +639,14 @@ function renderTeamRow(team, { snap, rateCard, selected = new Set(), expanded = 
   if (!isOpen) return [row];
   return [row, el('div', { class: `tsheet${team.status === 'over' ? ' tsheet--alert' : ''}`, dataset: { teamBody: team.id } }, [
     el('div', { class: 'btable-wrap' }, teamSheet(team, { snap, rateCard })),
+    sheetLegend(),
     el('div', { class: 'team__foot' }, [
       el('button', { class: 'btn-add-row btn-add-row--sm', type: 'button', dataset: { action: 'add-line', teamId: team.id } }, [icon('plus'), 'הוסף שורה']),
       el('button', { class: 'btn-add-row btn-add-row--sm', type: 'button', dataset: { action: 'split-by-person', teamId: team.id }, title: 'שורה לכל עורך דין — לתמחור לפי אדם' }, [icon('users'), 'פרוס לפי אנשי צוות']),
       el('label', { class: 'inline-field' }, [
         el('span', { text: 'מקדם חריגה לצוות' }),
         el('input', {
-          class: 'cellinput cellinput--sm num', type: 'number', step: '0.05', min: '0', max: '2',
+          class: 'cellinput is-input cellinput--sm num', type: 'number', step: '0.05', min: '0', max: '2',
           value: String(team.overrunFactor === null ? '' : team.overrunFactor),
           placeholder: String(snap.deal.overrunFactor),
           title: 'ריק = ירושה מהעסקה',
@@ -654,10 +655,85 @@ function renderTeamRow(team, { snap, rateCard, selected = new Set(), expanded = 
       ]),
       el('label', { class: 'inline-field' }, [
         el('span', { text: 'אחראי' }),
-        el('input', { class: 'cellinput cellinput--sm', value: team.lead, placeholder: 'שם', dataset: { field: 'lead', teamId: team.id } }),
+        el('input', { class: 'cellinput is-input cellinput--sm', value: team.lead, placeholder: 'שם', dataset: { field: 'lead', teamId: team.id } }),
       ]),
     ]),
   ])];
+}
+
+/*
+ * שדה מחושב מול שדה הזנה — כלל בכל הגיליון:
+ * ערך מחושב מוצג כטקסט ולא כשדה, כדי שאי אפשר יהיה להקליד לתוכו בטעות.
+ * דריסה ידנית היא פעולה מפורשת (כפתור), והתא הדרוס מסומן באזהרה עם דרך אחת
+ * לחזור לחישוב — כך אף פעם לא נשארים עם ערך "תקוע" בלי לדעת.
+ */
+function calcValue(key, text, title) {
+  return el('span', { class: 'calcnum num', dataset: { calc: key }, title: title || null, text });
+}
+
+function overrideBtn(action, teamId, lineId, title) {
+  return el('button', {
+    class: 'ovr-btn', type: 'button', tabindex: '-1', title,
+    'aria-label': title, dataset: { action, teamId, lineId }, html: ICONS.edit,
+  });
+}
+
+function resetBtn(action, teamId, lineId, title) {
+  return el('button', {
+    class: 'ovr-reset', type: 'button', tabindex: '-1', title,
+    'aria-label': title, dataset: { action, teamId, lineId }, html: ICONS.refresh,
+  });
+}
+
+/** שעות התקציב: מחושב = מוערכות × (1 + מקדם חריגה), מעוגל כלפי מעלה */
+function planHoursCell(line, team) {
+  if (line.hoursOverride === null) {
+    return el('span', { class: 'calcwrap' }, [
+      calcValue(`line-plan-${line.id}`, fmtHours(line.budgetHours),
+        'שעות תקציב — מחושב: שעות מוערכות × (1 + מקדם חריגה), מעוגל כלפי מעלה. לשינוי — ערוך את "מוערכות".'),
+      overrideBtn('override-hours', team.id, line.id, 'דריסה ידנית של שעות התקציב'),
+    ]);
+  }
+  return el('span', { class: 'calcwrap calcwrap--override' }, [
+    el('input', {
+      class: 'cellinput cellinput--plan-h is-override num', type: 'number', step: '1', min: '0',
+      value: String(line.budgetHours),
+      title: 'שעות התקציב נדרסו ידנית — הן לא מתעדכנות משעות מוערכות או ממקדם החריגה.',
+      dataset: { field: 'hoursOverride', teamId: team.id, lineId: line.id, auto: '0' },
+    }),
+    resetBtn('reset-hours', team.id, line.id, 'החזר לחישוב אוטומטי'),
+  ]);
+}
+
+/** התעריף מגיע מהתעריפון; דריסה חלה על השורה הזו בלבד */
+function rateCell(line, team, deal) {
+  if (line.rateOverride === null) {
+    return el('span', { class: 'calcwrap' }, [
+      calcValue(`line-rate-${line.id}`, money(line.rate, deal), 'תעריף מהתעריפון של העסקה. לשינוי גורף — מסך התעריפונים.'),
+      overrideBtn('override-rate', team.id, line.id, 'דריסת תעריף לשורה זו'),
+    ]);
+  }
+  return el('span', { class: 'calcwrap calcwrap--override' }, [
+    el('input', {
+      class: 'cellinput is-override num', type: 'number', step: '10', min: '0', value: String(line.rate),
+      title: 'התעריף נדרס ידנית בשורה זו — הוא לא מתעדכן מהתעריפון.',
+      dataset: { field: 'rateOverride', teamId: team.id, lineId: line.id, auto: '0' },
+    }),
+    resetBtn('reset-rate', team.id, line.id, 'החזר לתעריף מהתעריפון'),
+  ]);
+}
+
+/** מקרא — מה מזינים ומה מחושב. בלעדיו המשתמש לומד את זה רק בטעויות */
+function sheetLegend() {
+  const item = (mark, text, cls = '') => el('span', { class: `lgnd__item ${cls}`.trim() }, [
+    mark ? el('span', { class: 'lgnd__mark', text: mark }) : el('span', { class: 'lgnd__mark th-mark--in' }),
+    text,
+  ]);
+  return el('div', { class: 'lgnd' }, [
+    item('', 'שדה הזנה', 'lgnd__item--in'),
+    item('ƒ', 'מחושב — לא ניתן להקלדה'),
+    item('⚠', 'נדרס ידנית', 'lgnd__item--ovr'),
+  ]);
 }
 
 /** פער השעות של שורה — מוצג רק כשיש חריגה, כדי שדיו יופיע רק איפה שיש בעיה */
@@ -684,14 +760,22 @@ function teamSheet(team, { snap, rateCard }) {
     ]),
     el('tr', {}, [
       el('th', { class: 'th-role', text: 'דרגה' }),
-      el('th', { class: 'th-anchor', text: 'שעות · בוצע מתוך תקציב', title: 'המספר הגדול = שעות שדווחו (מכל המקורות). לידו שעות התקציב, וניתן לדרוס אותן.' }),
-      el('th', { class: 'th-util', text: 'ניצול' }),
-      el('th', { class: 'th-delta', text: 'חריגה' }),
-      el('th', { class: 'col-sep', text: 'תקציב ₪' }),
-      el('th', { text: 'עלות בפועל ₪', title: 'שעות בפועל × תעריף התכנון' }),
-      el('th', { text: 'יתרה ₪' }),
-      el('th', { class: 'th-plan', text: 'מוערכות', title: 'ההערכה הראשונית של הצוות' }),
-      el('th', { class: 'th-plan', text: 'תעריף' }),
+      el('th', { class: 'th-anchor' }, [
+        'שעות · בוצע מתוך תקציב',
+        el('span', { class: 'th-mark th-mark--in', title: 'השעות שבוצעו — שדה הזנה' }),
+        el('span', { class: 'th-mark', title: 'שעות התקציב — מחושב', text: 'ƒ' }),
+      ]),
+      el('th', { class: 'th-util' }, ['ניצול', el('span', { class: 'th-mark', text: 'ƒ' })]),
+      el('th', { class: 'th-delta' }, ['חריגה', el('span', { class: 'th-mark', text: 'ƒ' })]),
+      el('th', { class: 'col-sep' }, ['תקציב ₪', el('span', { class: 'th-mark', text: 'ƒ' })]),
+      el('th', { title: 'שעות בפועל × תעריף התכנון' }, ['עלות בפועל ₪', el('span', { class: 'th-mark', text: 'ƒ' })]),
+      el('th', {}, ['יתרה ₪', el('span', { class: 'th-mark', text: 'ƒ' })]),
+      el('th', { class: 'th-plan', title: 'ההערכה הראשונית של הצוות' }, [
+        'מוערכות', el('span', { class: 'th-mark th-mark--in' }),
+      ]),
+      el('th', { class: 'th-plan', title: 'מהתעריפון — ניתן לדרוס לשורה בודדת' }, [
+        'תעריף', el('span', { class: 'th-mark', text: 'ƒ' }),
+      ]),
       el('th', { class: 'th-tools' }),
     ]),
   ]));
@@ -707,7 +791,7 @@ function teamSheet(team, { snap, rateCard }) {
           dataset: { grip: 'line', lineId: line.id, teamId: team.id },
         }),
         el('select', {
-          class: `cellinput cellinput--role${line.orphanRole ? ' cellinput--orphan' : ''}`,
+          class: `cellinput is-input cellinput--role${line.orphanRole ? ' cellinput--orphan' : ''}`,
           title: line.orphanRole ? 'הדרגה אינה קיימת בתעריפון הנוכחי — התעריף מוקפא בשורה. בחר דרגה מהתעריפון כדי לחבר מחדש.' : null,
           dataset: { field: 'roleId', teamId: team.id, lineId: line.id },
         }, [
@@ -717,7 +801,7 @@ function teamSheet(team, { snap, rateCard }) {
           ...rateCard.roles.map((r) => el('option', { value: r.id, selected: r.id === line.roleId ? 'selected' : null, text: r.name })),
         ]),
         el('input', {
-          class: 'cellinput cellinput--person', value: line.person || '', placeholder: 'שם (אופציונלי)',
+          class: 'cellinput is-input cellinput--person', value: line.person || '', placeholder: 'שם (אופציונלי)',
           dataset: { field: 'person', teamId: team.id, lineId: line.id },
         }),
       ]),
@@ -726,7 +810,7 @@ function teamSheet(team, { snap, rateCard }) {
       el('td', { class: 'td-anchor' }, [
         el('div', { class: 'anchor__nums' }, [
           el('input', {
-            class: 'cellinput cellinput--done num', type: 'number', step: '0.25', min: '0',
+            class: 'cellinput is-input cellinput--done num', type: 'number', step: '0.25', min: '0',
             value: line.actualHours ? String(line.actualHours) : '', placeholder: '0',
             title: line.lastReportAt
               ? `סך השעות שדווחו. דיווח אחרון: ${line.lastReportAt}. שינוי כאן נרשם כעדכון מתוארך בטאב "דיווח ומעקב".`
@@ -734,12 +818,7 @@ function teamSheet(team, { snap, rateCard }) {
             dataset: { field: 'manualHours', teamId: team.id, lineId: line.id },
           }),
           el('span', { class: 'anchor__sep', text: '/' }),
-          el('input', {
-            class: 'cellinput cellinput--plan-h num', type: 'number', step: '1', min: '0',
-            value: String(line.budgetHours), placeholder: String(line.budgetHours),
-            title: 'שעות התקציב. ניתן לדרוס ידנית; ריק = חישוב אוטומטי לפי המקדם.',
-            dataset: { field: 'hoursOverride', teamId: team.id, lineId: line.id, auto: line.hoursOverride === null ? '1' : '0' },
-          }),
+          planHoursCell(line, team),
         ]),
         // אורך המד יחסי לגודל השורה — כך רואים גם ניצול וגם משקל
         el('div', {
@@ -763,14 +842,11 @@ function teamSheet(team, { snap, rateCard }) {
 
       // ---- קלט תכנון ----
       el('td', { class: 'td-plan' }, [el('input', {
-        class: 'cellinput cellinput--quiet num', type: 'number', step: '0.5', min: '0', value: String(line.estHours),
+        class: 'cellinput is-input num', type: 'number', step: '0.5', min: '0', value: String(line.estHours),
+        title: 'שעות מוערכות — שדה הזנה. שעות התקציב נגזרות ממנו.',
         dataset: { field: 'estHours', teamId: team.id, lineId: line.id },
       })]),
-      el('td', { class: 'td-plan' }, [el('input', {
-        class: 'cellinput cellinput--quiet num', type: 'number', step: '10', min: '0', value: String(line.rate),
-        title: 'תעריף מהתעריפון. שינוי כאן = דריסה לשורה זו בלבד.',
-        dataset: { field: 'rateOverride', teamId: team.id, lineId: line.id, auto: line.rateOverride === null ? '1' : '0' },
-      })]),
+      el('td', { class: 'td-plan td-rate' }, [rateCell(line, team, d)]),
       el('td', { class: 'td-tools' }, [
         // מחוץ לסדר ה-Tab: מקש Tab צריך לזרום בין תאי הנתונים, לא דרך כפתורי המחיקה
         el('button', { class: 'iconbtn iconbtn--danger', type: 'button', tabindex: '-1', title: 'מחק שורה', dataset: { action: 'delete-line', teamId: team.id, lineId: line.id }, html: ICONS.trash }),
@@ -2072,8 +2148,15 @@ export function refreshComputed(snap, selected = new Set()) {
       // רוחב המד יחסי לגודל השורה — צריך להתעדכן גם כששעות התקציב משתנות תוך כדי הקלדה
       const track = document.querySelector(`[data-calc="line-bar-${CSS.escape(line.id)}"]`);
       if (track) track.style.width = `${Math.max(34, Math.round((line.budgetHours / maxHours) * 100))}%`;
-      const input = document.querySelector(`input[data-field="hoursOverride"][data-line-id="${CSS.escape(line.id)}"]`);
-      if (input && input.dataset.auto === '1' && document.activeElement !== input) input.value = String(line.budgetHours);
+      set(`line-plan-${line.id}`, fmtHours(line.budgetHours));
+      set(`line-rate-${line.id}`, money(line.rate, d));
+      /*
+       * תיבת השעות שדווחו מציגה את הסך המאוחד מכל המקורות — ולכן היא חייבת
+       * להתיישר בחזרה מול המודל אחרי כל חישוב. בלי זה נשאר בה מה שהוקלד
+       * (או ריק, אחרי מחיקה) בזמן שהשורה כבר מציגה מספר אחר.
+       */
+      const done = document.querySelector(`input[data-field="manualHours"][data-line-id="${CSS.escape(line.id)}"]`);
+      if (done && document.activeElement !== done) done.value = line.actualHours ? String(line.actualHours) : '';
     }
   }
 

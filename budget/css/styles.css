@@ -794,15 +794,10 @@ tr.bline:hover .line__grip { opacity: .55; }
 .anchor__plan { font-size: .88rem; color: var(--text-faint); font-weight: 600; }
 .cellinput--done {
   font-size: 1.2rem; font-weight: 800; color: var(--text-strong);
-  width: 78px; padding: 2px 6px; background: transparent; border-color: transparent;
+  width: 82px; padding: 2px 6px;
 }
 .cellinput--done::placeholder { color: var(--text-faint); font-weight: 700; }
-.cellinput--plan-h {
-  font-size: .88rem; font-weight: 600; color: var(--text-faint);
-  width: 56px; padding: 2px 5px; background: transparent; border-color: transparent;
-}
-tr:hover .cellinput--done, tr:hover .cellinput--plan-h { border-color: var(--line); background: var(--surface-2); }
-.cellinput--done:focus, .cellinput--plan-h:focus { border-color: var(--gold-line); background: var(--surface-2); }
+.cellinput--plan-h { font-size: .88rem; font-weight: 700; width: 62px; padding: 2px 5px; }
 .bline--over .cellinput--done { color: var(--negative); }
 .anchor__track { margin-top: 5px; margin-inline-start: auto; }
 .anchor__track .mbar { width: 100%; }
@@ -811,18 +806,74 @@ tr:hover .cellinput--done, tr:hover .cellinput--plan-h { border-color: var(--lin
 .delta { font-weight: 700; color: var(--negative); }
 .delta--none { color: var(--text-faint); font-weight: 500; }
 
-/* קלט תכנון — שקט עד שנוגעים */
-.cellinput--quiet {
-  color: var(--text-muted); background: transparent; border-color: transparent; width: 100%;
+/* ---------- שדה הזנה מול ערך מחושב ---------- */
+/*
+ * שדה שאפשר להקליד בו נראה כמו שדה — תמיד, לא רק ב-hover. ערך מחושב הוא
+ * טקסט בלבד ולכן אי אפשר להקליד לתוכו בטעות. ההבחנה הזו היא הכלל בגיליון.
+ */
+.tsheet .is-input {
+  width: 100%; color: var(--text-secondary);
+  background: rgba(255,255,255,.026);
+  border-color: transparent; border-block-end-color: var(--line-strong);
+  border-radius: var(--radius-sm) var(--radius-sm) 4px 4px;
 }
-tr:hover .cellinput--quiet { border-color: var(--line); background: var(--surface-2); color: var(--text-secondary); }
-.cellinput--quiet:focus { border-color: var(--gold-line); background: var(--surface-2); color: var(--text-primary); }
+.tsheet .is-input:hover { background: var(--surface-2); border-color: var(--line); }
+.tsheet .is-input:focus {
+  background: var(--surface-2); border-color: var(--gold-line); color: var(--text-primary);
+  box-shadow: 0 0 0 3px rgba(242,202,80,.12);
+}
+.tsheet .cellinput--done.is-input { width: 82px; background: rgba(255,255,255,.03); }
+
+.calcwrap { position: relative; display: inline-flex; align-items: center; gap: 4px; }
+.calcnum { color: var(--text-faint); font-weight: 600; cursor: default; }
+.anchor__nums .calcnum { font-size: .88rem; }
+.td-rate .calcnum { font-size: .88rem; color: var(--text-muted); }
+
+/* דריסה — פעולה מפורשת, מופיעה על התא בריחוף */
+.ovr-btn, .ovr-reset {
+  display: grid; place-items: center; width: 20px; height: 20px; padding: 0;
+  border-radius: 6px; border: 1px solid transparent; background: none;
+  color: var(--text-faint); opacity: 0; transition: all var(--t-fast) var(--ease-out);
+}
+.ovr-btn svg, .ovr-reset svg { width: 12px; height: 12px; }
+tr:hover .ovr-btn { opacity: .65; }
+.ovr-btn:hover { opacity: 1; color: var(--gold); background: var(--surface-3); border-color: var(--line); }
+.ovr-reset { opacity: 1; color: var(--warn); }
+.ovr-reset:hover { background: var(--warn-soft); border-color: rgba(251,146,60,.4); }
+
+/* תא שנדרס — אזהרה קבועה, כדי שלא יישאר ערך "תקוע" בלי לדעת */
+.tsheet .is-override {
+  width: 100%; color: var(--warn); font-weight: 700;
+  background: var(--warn-soft); border-color: rgba(251,146,60,.45);
+}
+.tsheet .is-override:focus { border-color: var(--warn); box-shadow: 0 0 0 3px rgba(251,146,60,.16); }
+.calcwrap--override::before {
+  content: '⚠'; font-size: .72rem; color: var(--warn);
+  position: absolute; inset-inline-end: -12px; top: 50%; transform: translateY(-50%);
+}
+.anchor__nums .calcwrap--override .cellinput { width: 62px; }
+
+/* סימון בכותרת העמודה: מה מזינים ומה מחושב */
+.th-mark {
+  display: inline-block; margin-inline-start: 5px; font-size: .72rem;
+  color: var(--text-faint); font-weight: 700; opacity: .8;
+}
+/* סימון "שדה הזנה" = תיבה קטנה בצורת שדה, לא אימוג'י */
+.th-mark--in {
+  width: 13px; height: 9px; vertical-align: -1px;
+  border: 1px solid var(--line-strong); border-block-end: 2px solid var(--gold-deep);
+  border-radius: 3px; background: rgba(255,255,255,.03);
+}
+
+/* מקרא מתחת לגיליון */
+.lgnd { display: flex; gap: 16px; flex-wrap: wrap; padding: 8px 2px 4px; }
+.lgnd__item { display: inline-flex; align-items: center; gap: 5px; font-size: .72rem; color: var(--text-faint); }
+.lgnd__mark { font-size: .78rem; font-weight: 700; }
+.lgnd__item--in .lgnd__mark { color: var(--gold-deep); }
+.lgnd__item--ovr .lgnd__mark { color: var(--warn); }
 .cellinput--person {
-  display: block; margin-top: 3px; font-size: .74rem; color: var(--text-faint);
-  background: transparent; border-color: transparent; padding: 1px 7px; width: 100%;
+  display: block; margin-top: 3px; font-size: .74rem; padding: 1px 7px;
 }
-tr:hover .cellinput--person { border-color: var(--line-soft); }
-.cellinput--person:focus { border-color: var(--gold-line); background: var(--surface-2); color: var(--text-primary); }
 .team__stat--manual .num { color: var(--gold-bright); }
 .team__bars { display: flex; flex-direction: column; gap: 2px; }
 .team__bar--billed { opacity: .55; }

@@ -4,7 +4,7 @@
 import * as store from './store.js';
 import * as db from './db.js';
 import {
-  computeDeal, dealReview, uid, num, round2, fmtPct, roundUpHours, sourceLabel,
+  computeDeal, dealReview, uid, num, round2, fmtPct, fmtHours, roundUpHours, sourceLabel,
   DEFAULT_TEAM_NAMES, DEAL_STATUSES, ENTRY_KINDS, ENTRY_STATUSES,
 } from './model.js';
 import * as ui from './ui.js';
@@ -561,6 +561,38 @@ async function onClick(e) {
     case 'set-team-sort':
       return setTeamSort(target.dataset.sort);
 
+    /*
+     * דריסה של שדה מחושב היא פעולה מפורשת: הערך המחושב הנוכחי נכנס כערך
+     * התחלתי, השדה נפתח להקלדה ומסומן כאזהרה, ותמיד יש דרך אחת לחזור לחישוב.
+     */
+    case 'override-hours':
+    case 'override-rate': {
+      const isHours = action === 'override-hours';
+      const team = store.getTeam(target.dataset.teamId);
+      const row = currentSnapshot()?.teams
+        .find((t) => t.id === target.dataset.teamId)?.lines
+        .find((l) => l.id === target.dataset.lineId);
+      const line = team?.lines.find((l) => l.id === target.dataset.lineId);
+      if (!team || !line || !row) return;
+      if (isHours) line.hoursOverride = row.budgetHours; else line.rateOverride = row.rate;
+      await store.saveTeam(team);
+      render();
+      ui.toast(isHours ? 'שעות התקציב נדרסות ידנית — לא יתעדכנו מהמוערכות' : 'התעריף נדרס בשורה זו — לא יתעדכן מהתעריפון');
+      return focusAfterRender(`tr[data-line-id="${CSS.escape(target.dataset.lineId)}"] [data-field="${isHours ? 'hoursOverride' : 'rateOverride'}"]`);
+    }
+
+    case 'reset-hours':
+    case 'reset-rate': {
+      const isHours = action === 'reset-hours';
+      const team = store.getTeam(target.dataset.teamId);
+      const line = team?.lines.find((l) => l.id === target.dataset.lineId);
+      if (!team || !line) return;
+      if (isHours) line.hoursOverride = null; else line.rateOverride = null;
+      await store.saveTeam(team);
+      ui.toast(isHours ? 'שעות התקציב חזרו לחישוב אוטומטי' : 'התעריף חזר לתעריפון');
+      return render();
+    }
+
     case 'toggle-team': {
       // לחיצה על שדה בתוך השורה (שם הצוות, סימון) לא מקפלת אותה
       if (e.target.closest('input, select, label, .iconbtn, [data-grip]')) return;
@@ -889,7 +921,23 @@ async function onChange(e) {
 
   // הזנת סך מצטבר בשורה → נרשם כעדכון ביצוע מתוארך (שומר היסטוריה)
   if (node.dataset.field === 'manualHours' && node.dataset.lineId) {
-    await store.setLineManualTotal(node.dataset.lineId, node.value === '' ? 0 : num(node.value));
+    const lineId = node.dataset.lineId;
+    const snap = currentSnapshot();
+    const row = snap?.teams.flatMap((t) => t.lines).find((l) => l.id === lineId);
+    /*
+     * התיבה מציגה את סך השעות מכל המקורות, ולכן היא צריכה גם *לקבוע* את הסך.
+     * החלק הידני הוא ההפרש מול מה שכבר הגיע מדוחות ומחשבונות — אחרת הקלדה של
+     * הסך הייתה מתווספת לדיווחים הקיימים במקום להחליף אותם (ספירה כפולה).
+     */
+    const manual = store.manualHoursOfLine(lineId);
+    const fromSources = round2((row?.actualHours ?? 0) - manual);
+    const wanted = node.value === '' ? 0 : num(node.value);
+    if (wanted + 0.001 < fromSources) {
+      ui.toast(`בשורה כבר מדווחות ${fmtHours(fromSources)} שעות מדוחות ומחשבונות — אי אפשר לרדת מתחתן כאן. מחק את המקור בטאב "דיווח ומעקב".`, 'error');
+      node.value = row?.actualHours ? String(row.actualHours) : '';
+      return;
+    }
+    await store.setLineManualTotal(lineId, round2(wanted - fromSources));
     refreshLive();
     return;
   }
