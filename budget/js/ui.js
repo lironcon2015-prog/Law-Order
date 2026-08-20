@@ -863,10 +863,13 @@ function teamSheet(team, { snap, rateCard }) {
             : null,
           ...rateCard.roles.map((r) => el('option', { value: r.id, selected: r.id === line.roleId ? 'selected' : null, text: r.name })),
         ]),
-        el('input', {
-          class: 'cellinput is-input cellinput--person', value: line.person || '', placeholder: 'שם (אופציונלי)',
-          dataset: { field: 'person', teamId: team.id, lineId: line.id },
-        }),
+        // השם נבחר מהספרייה בלבד. הקלדה בתא פותחת את החלון עם הטקסט כשאילתת חיפוש,
+        // כדי לא לאבד את מהירות ההקלדה שהייתה כאן קודם.
+        el('button', {
+          class: `cellinput is-input cellinput--person${line.personName ? '' : ' is-empty'}`,
+          type: 'button', title: 'בחירת חבר צוות מהספרייה',
+          dataset: { action: 'open-person-picker', teamId: team.id, lineId: line.id },
+        }, [line.personName || 'בחר חבר צוות…']),
       ]),
 
       // ---- העוגן: מה שהעין צריכה למצוא ראשון ----
@@ -1069,7 +1072,7 @@ export function renderProgressTab(root, { snap, period = 'week', sources = [] })
   const teamName = new Map(snap.teams.map((t) => [t.id, t.name]));
   const lineLabel = new Map();
   for (const t of snap.teams) for (const l of t.lines) {
-    lineLabel.set(l.id, l.person ? `${l.person} · ${l.roleName}` : l.roleName);
+    lineLabel.set(l.id, l.personName ? `${l.personName} · ${l.roleName}` : l.roleName);
   }
 
   root.append(el('div', { class: 'toolbar' }, [
@@ -1203,7 +1206,7 @@ export function renderProgressForm(record, { snap }) {
     for (const l of t.lines) {
       lineOptions.push(el('option', {
         value: `${t.id}|${l.id}`,
-        text: `${t.name} · ${l.person ? `${l.person} (${l.roleName})` : l.roleName}`,
+        text: `${t.name} · ${l.personName ? `${l.personName} (${l.roleName})` : l.roleName}`,
         selected: p.lineId === l.id ? 'selected' : null,
       }));
     }
@@ -1473,7 +1476,7 @@ export function renderProgressImportPreview({
     el('option', { value: '', text: '— ללא שיוך —' }),
     ...teams.flatMap((t) => t.lines.map((l) => el('option', {
       value: `${t.id}|${l.id}`,
-      text: `${t.name} · ${l.person ? `${l.person} (${l.roleName})` : l.roleName}`,
+      text: `${t.name} · ${l.personName ? `${l.personName} (${l.roleName})` : l.roleName}`,
       selected: `${t.id}|${l.id}` === selected ? 'selected' : null,
     }))),
   ];
@@ -1545,20 +1548,29 @@ export function renderProgressImportPreview({
 /** טופס פריסת צוות לשורות לפי אנשים */
 export function renderSplitForm({ team, roles, people }) {
   const form = el('form', { class: 'modal-form', id: 'split-form' }, [
-    el('p', { class: 'modal-text', text: `כל שם ייצור שורה נפרדת בצוות "${team.name}", עם דרגה משלו ואפשרות לתעריף אישי. שורות דרגה ריקות שלא דווח עליהן יוסרו.` }),
+    el('p', { class: 'modal-text', text: `כל איש צוות ייצור שורה נפרדת בצוות "${team.name}", עם דרגה משלו ואפשרות לתעריף אישי. שורות דרגה ריקות שלא דווח עליהן יוסרו. מי שאינו ברשימה — להוסיף קודם במסך "אנשי צוות".` }),
   ]);
   const list = el('div', { class: 'split-list' });
 
-  const row = (name = '', roleId = '') => el('div', { class: 'split-row', dataset: { personRow: '1' } }, [
-    el('input', { class: 'input', placeholder: 'שם עורך הדין', value: name, dataset: { personName: '1' } }),
+  // הבחירה היא מהספרייה בלבד (select של אנשים), לא הקלדה חופשית
+  const row = (personId = '', roleId = '') => el('div', { class: 'split-row', dataset: { personRow: '1' } }, [
+    el('select', { class: 'select', dataset: { personPick: '1' } }, [
+      el('option', { value: '', text: '— בחר איש צוות —' }),
+      ...people.map((p) => el('option', {
+        value: p.id, selected: p.id === personId ? 'selected' : null,
+        text: [p.name, p.title].filter(Boolean).join(' · '),
+      })),
+    ]),
     el('select', { class: 'select', dataset: { personRole: '1' } },
       roles.map((r) => el('option', { value: r.id, text: `${r.name} · ${r.rate}₪`, selected: r.id === roleId ? 'selected' : null }))),
     el('input', { class: 'input num', type: 'number', step: '10', min: '0', placeholder: 'תעריף אישי (רשות)', dataset: { personRate: '1' } }),
   ]);
 
   const roleByName = new Map(roles.map((r) => [String(r.name).trim().toLowerCase(), r.id]));
-  for (const p of people) list.append(row(p.name, roleByName.get(String(p.roleName || '').trim().toLowerCase()) || ''));
-  for (let i = people.length; i < Math.max(3, people.length + 2); i++) list.append(row());
+  // אנשים שכבר משויכים לצוות הזה בספרייה — מוצעים ראשונים
+  const suggested = people.filter((p) => String(p.defaultTeamName || '').trim() === String(team.name || '').trim());
+  for (const p of suggested) list.append(row(p.id, roleByName.get(String(p.title || '').trim().toLowerCase()) || ''));
+  for (let i = suggested.length; i < Math.max(3, suggested.length + 2); i++) list.append(row());
 
   form.append(list);
   const add = el('button', { class: 'btn-add-row btn-add-row--sm', type: 'button' }, [icon('plus'), 'הוסף שורה']);
@@ -1798,6 +1810,7 @@ export function renderDealSettings(root, { snap, rateCards }) {
       el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'duplicate-deal' } }, [icon('copy'), 'שכפל כתבנית']),
       el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'sync-team-roles' } }, [icon('refresh'), 'סנכרן דרגות מהתעריפון']),
       el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'export-deal' } }, [icon('download'), 'ייצוא העסקה לאקסל']),
+      el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'export-deal-contacts' }, title: 'מזהה לבד מי משויך לעסקה' }, [icon('users'), 'ייצוא אנשי קשר']),
       el('button', { class: 'btn btn--danger btn--sm', type: 'button', dataset: { action: 'delete-deal' } }, [icon('trash'), 'מחק עסקה']),
     ]),
   ]));
@@ -1814,6 +1827,224 @@ function field(label, control, hint) {
 /* ============================================================
    תעריפונים (מסך גלובלי)
    ============================================================ */
+
+/* ============================================================
+   ספריית אנשי הצוות — מסך משותף לכל העסקאות
+   ============================================================ */
+
+export function renderPeopleView(root, { people, usageOf, dupes = [] }) {
+  root.replaceChildren();
+  root.append(el('div', { class: 'page-head' }, [
+    el('div', {}, [
+      el('h1', { class: 'page-title', text: 'אנשי צוות' }),
+      el('p', { class: 'page-sub', text: 'מקור האמת היחיד לשמות: כל שם שמופיע בעסקה נבחר מכאן. שינוי כאן משתקף בכל העסקאות ובכל הייצואים.' }),
+    ]),
+    el('div', { class: 'page-actions' }, [
+      el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'people-template' }, title: 'קובץ עם העמודות שהייבוא מצפה להן' }, [icon('download'), 'תבנית אקסל']),
+      el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'import-people' } }, [icon('upload'), 'ייבוא מאקסל']),
+      el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'export-people' } }, [icon('download'), 'ייצוא אנשי קשר']),
+      el('button', { class: 'btn btn--primary btn--sm', type: 'button', dataset: { action: 'new-person' } }, [icon('plus'), 'איש צוות חדש']),
+    ]),
+  ]));
+
+  if (dupes.length) {
+    root.append(el('section', { class: 'panel panel--dd' }, [
+      el('h2', { class: 'panel__title' }, [icon('alert'), `שמות דומים — ${dupes.length} זוגות`]),
+      el('p', { class: 'panel__hint', text: 'ייתכן שאותו אדם נרשם פעמיים. מיזוג מעביר את כל השורות לרשומה שנשארת ושומר את הכתיב השני כזיהוי נוסף.' }),
+      el('ul', { class: 'alerts alerts--compact' }, dupes.map(([a, b]) => el('li', { class: 'alert alert--watch' }, [
+        icon('users'),
+        el('span', { text: `${a.name} · ${b.name}` }),
+        el('div', { class: 'toolbar__spacer' }),
+        el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'merge-people', keepId: a.id, dropId: b.id } }, `השאר "${a.name}"`),
+        el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'merge-people', keepId: b.id, dropId: a.id } }, `השאר "${b.name}"`),
+      ]))),
+    ]));
+  }
+
+  if (!people.length) {
+    root.append(el('div', { class: 'empty' }, [
+      el('h2', { text: 'אין עדיין אנשי צוות' }),
+      el('p', { text: 'אפשר להוסיף ידנית, לייבא מאקסל, או פשוט להזין שם בגיליון של עסקה — הוא ייווצר כאן.' }),
+    ]));
+    return;
+  }
+
+  const table = el('table', { class: 'btable btable--people-dir' });
+  table.append(el('thead', {}, el('tr', {}, [
+    el('th', { class: 'th-pick' }, [el('input', { type: 'checkbox', dataset: { pick: 'people-all' }, 'aria-label': 'סמן הכל' })]),
+    el('th', { text: 'שם' }), el('th', { text: 'תפקיד' }), el('th', { text: 'צוות' }),
+    el('th', { text: 'דוא"ל' }), el('th', { text: 'טלפון' }),
+    el('th', { text: 'בשימוש' }), el('th', { text: 'פעיל' }), el('th', { class: 'th-tools' }),
+  ])));
+
+  const tbody = el('tbody');
+  for (const person of people) {
+    const use = usageOf(person.id);
+    tbody.append(el('tr', { class: person.active ? '' : 'is-inactive', dataset: { personId: person.id } }, [
+      el('td', { class: 'td-pick' }, [el('input', {
+        type: 'checkbox', dataset: { pick: 'person', personId: person.id },
+        'aria-label': `סימון ${person.name}`,
+      })]),
+      el('td', {}, [
+        el('input', { class: 'cellinput is-input', value: person.name, dataset: { pfield: 'name', personId: person.id }, 'aria-label': 'שם' }),
+        person.aliases.length ? el('span', { class: 'sub', text: `ידוע גם כ: ${person.aliases.join(' · ')}` }) : null,
+      ]),
+      el('td', {}, [el('input', { class: 'cellinput is-input', value: person.title, placeholder: 'שותף / עו״ד', dataset: { pfield: 'title', personId: person.id }, 'aria-label': 'תפקיד' })]),
+      el('td', {}, [el('input', { class: 'cellinput is-input', value: person.defaultTeamName, placeholder: 'צוות ברירת מחדל', dataset: { pfield: 'defaultTeamName', personId: person.id }, 'aria-label': 'צוות' })]),
+      el('td', {}, [el('input', { class: 'cellinput is-input ltr', type: 'email', value: person.email, placeholder: 'name@firm.co.il', dataset: { pfield: 'email', personId: person.id }, 'aria-label': 'דוא״ל' })]),
+      el('td', {}, [el('input', { class: 'cellinput is-input ltr', value: person.phone, placeholder: '050-0000000', dataset: { pfield: 'phone', personId: person.id }, 'aria-label': 'טלפון' })]),
+      el('td', { class: 'num muted', title: `${use.lines} שורות תקציב`, text: use.deals ? `${use.deals} עסקאות` : '—' }),
+      el('td', {}, [el('label', { class: 'inline-check--dd' }, [el('input', {
+        type: 'checkbox', checked: person.active ? 'checked' : null,
+        dataset: { pfield: 'active', personId: person.id }, 'aria-label': 'פעיל',
+      })])]),
+      el('td', { class: 'td-tools' }, [
+        el('button', {
+          class: 'iconbtn iconbtn--danger', type: 'button', tabindex: '-1',
+          title: use.lines ? 'משויך לשורות תקציב — אפשר לסמן כלא פעיל' : 'מחק',
+          dataset: { action: 'delete-person', personId: person.id }, html: ICONS.trash,
+        }),
+      ]),
+    ]));
+  }
+  table.append(tbody);
+  root.append(el('section', { class: 'panel' }, [el('div', { class: 'btable-wrap' }, table)]));
+}
+
+/** טופס איש צוות — לחלון "חדש" ולעריכה מלאה */
+export function renderPersonForm(person = {}) {
+  const form = el('form', { class: 'form form--grid', id: 'person-form' }, [
+    field('שם מלא', el('input', { class: 'input', name: 'name', value: person.name || '', required: 'required', placeholder: 'לדוגמה: דנה כהן' })),
+    field('תפקיד', el('input', { class: 'input', name: 'title', value: person.title || '', placeholder: 'שותף / עו״ד / מתמחה' })),
+    field('צוות ברירת מחדל', el('input', { class: 'input', name: 'defaultTeamName', value: person.defaultTeamName || '', placeholder: 'לדוגמה: קורפורייט' })),
+    field('דוא"ל', el('input', { class: 'input ltr', type: 'email', name: 'email', value: person.email || '', placeholder: 'name@firm.co.il' })),
+    field('טלפון', el('input', { class: 'input ltr', name: 'phone', value: person.phone || '', placeholder: '050-0000000' })),
+  ]);
+  if (person.id) form.append(el('input', { type: 'hidden', name: 'id', value: person.id }));
+  return form;
+}
+
+/**
+ * חלון בחירת איש צוות — הדרך היחידה לשייך שם לשורה.
+ * מחפש לפי מפתח זהות (כך ש"כהן" מוצא גם "עו״ד דנה כהן"), ומציע הקמה כשאין התאמה.
+ */
+export function renderPersonPicker({ people, query = '', currentId = '' }) {
+  const wrap = el('div', { class: 'picker' });
+  wrap.append(el('input', {
+    class: 'input picker__search', id: 'person-search', value: query,
+    placeholder: 'חיפוש לפי שם…', autocomplete: 'off', dataset: { pickerSearch: '1' },
+  }));
+  const list = el('div', { class: 'picker__list', id: 'person-picker-list' });
+  wrap.append(list);
+  renderPersonPickerList(list, { people, query, currentId });
+  return wrap;
+}
+
+export function renderPersonPickerList(list, { people, query = '', currentId = '' }) {
+  list.replaceChildren();
+  if (!people.length) {
+    list.append(el('div', { class: 'picker__empty' }, [
+      el('p', { text: query ? `לא נמצא "${query}" בספריית אנשי הצוות.` : 'הספרייה ריקה.' }),
+      el('button', { class: 'btn btn--primary btn--sm', type: 'button', dataset: { action: 'new-person-from-picker', name: query } },
+        [icon('plus'), query ? `הקם את "${query}" כאיש צוות` : 'הקם איש צוות חדש']),
+    ]));
+    return;
+  }
+  for (const person of people) {
+    list.append(el('button', {
+      class: `picker__item${person.id === currentId ? ' is-current' : ''}`, type: 'button',
+      dataset: { action: 'pick-person', personId: person.id },
+    }, [
+      el('span', { class: 'picker__name', text: person.name }),
+      el('span', { class: 'picker__meta', text: [person.title, person.defaultTeamName].filter(Boolean).join(' · ') }),
+    ]));
+  }
+  list.append(el('button', {
+    class: 'picker__new', type: 'button', dataset: { action: 'new-person-from-picker', name: query },
+  }, [icon('plus'), query ? `לא זה? הקם את "${query}" כאיש צוות` : 'איש צוות חדש…']));
+}
+
+/** בחירת אנשי הקשר לייצוא מתוך העסקה — עם מקור השיוך לכל אחד */
+export function renderDealContactsForm({ rows, dealName }) {
+  const form = el('form', { class: 'modal-form', id: 'deal-contacts-form' }, [
+    el('p', { class: 'modal-text', text: `אלה האנשים שהמערכת מזהה כמשויכים ל"${dealName}". בטל סימון למי שלא צריך להיכנס לרשימה.` }),
+  ]);
+  const table = el('table', { class: 'btable' });
+  table.append(el('thead', {}, el('tr', {}, [
+    el('th', { class: 'th-pick' }), el('th', { text: 'שם' }), el('th', { text: 'תפקיד' }),
+    el('th', { text: 'צוות בעסקה' }), el('th', { text: 'מקור השיוך' }), el('th', { text: 'שעות' }),
+    el('th', { text: 'דוא"ל' }),
+  ])));
+  table.append(el('tbody', {}, rows.map((r) => el('tr', {}, [
+    el('td', { class: 'td-pick' }, [el('input', {
+      type: 'checkbox', checked: 'checked',
+      dataset: { contactPick: '1', personId: r.person.id }, 'aria-label': `כלול את ${r.person.name}`,
+    })]),
+    el('td', { class: 'td-strong', text: r.person.name }),
+    el('td', { text: r.person.title || '—' }),
+    el('td', { text: r.teams.join(' · ') || '—' }),
+    el('td', { class: 'muted', text: r.sources.join(' · ') }),
+    el('td', { class: 'num', text: r.hours ? fmtHours(r.hours) : '—' }),
+    el('td', { class: 'ltr muted', text: r.person.email || '—' }),
+  ]))));
+  form.append(el('div', { class: 'btable-wrap' }, table));
+  return form;
+}
+
+/** תצוגה מקדימה לייבוא אנשי קשר — סטטוס לכל שורה והחלטה לכל שורה */
+export function renderContactsImportPreview({ rows, header, mapping, fileName, skipped }) {
+  const STATUS = {
+    create: { label: 'חדש', tone: 'ok' },
+    same:   { label: 'קיים · זהה', tone: 'draft' },
+    update: { label: 'קיים · עדכון', tone: 'watch' },
+    fuzzy:  { label: 'התאמה מקורבת', tone: 'risk' },
+  };
+  const form = el('form', { class: 'modal-form', id: 'contacts-import-form' }, [
+    el('p', { class: 'modal-text', text: `${fileName} · ${rows.length} שורות${skipped ? ` · ${skipped} שורות בלי שם דולגו` : ''}` }),
+    el('p', { class: 'panel__hint', text: `עמודות שזוהו: ${TARGET_CONTACT_LABELS(mapping, header)}` }),
+  ]);
+
+  form.append(field('עדכון רשומות קיימות', el('select', { class: 'select', dataset: { importMode: '1' } }, [
+    el('option', { value: 'fill', text: 'השלמת שדות ריקים בלבד (מומלץ)' }),
+    el('option', { value: 'full', text: 'עדכון מלא — הקובץ דורס את הקיים' }),
+  ])));
+
+  const table = el('table', { class: 'btable' });
+  table.append(el('thead', {}, el('tr', {}, [
+    el('th', { text: 'שם בקובץ' }), el('th', { text: 'סטטוס' }), el('th', { text: 'הרשומה בספרייה' }),
+    el('th', { text: 'תפקיד' }), el('th', { text: 'צוות' }), el('th', { text: 'דוא"ל' }), el('th', { text: 'טלפון' }),
+    el('th', { text: 'פעולה' }),
+  ])));
+  table.append(el('tbody', {}, rows.map((r, i) => {
+    const st = STATUS[r.status];
+    const options = r.status === 'create'
+      ? [['create', 'צור חדש'], ['skip', 'דלג']]
+      : r.status === 'same'
+        ? [['skip', 'דלג'], ['update', 'עדכן בכל זאת']]
+        : [['update', r.status === 'fuzzy' ? `עדכן את "${r.match.name}"` : 'עדכן'], ['create', 'צור רשומה נפרדת'], ['skip', 'דלג']];
+    return el('tr', {}, [
+      el('td', { class: 'td-strong', text: r.contact.name }),
+      el('td', {}, [el('span', { class: `pill pill--${st.tone}`, text: st.label })]),
+      el('td', { class: 'muted', text: r.match?.name || '—' }),
+      el('td', { text: r.contact.title || '—' }),
+      el('td', { text: r.contact.defaultTeamName || '—' }),
+      el('td', { class: 'ltr', text: r.contact.email || '—' }),
+      el('td', { class: 'ltr', text: r.contact.phone || '—' }),
+      el('td', {}, [el('select', { class: 'select select--sm', dataset: { rowAction: String(i) } },
+        options.map(([v, label], k) => el('option', { value: v, text: label, selected: k === 0 ? 'selected' : null })))]),
+    ]);
+  })));
+  form.append(el('div', { class: 'btable-wrap btable-wrap--map' }, table));
+  return form;
+}
+
+function TARGET_CONTACT_LABELS(mapping, header) {
+  const names = { name: 'שם', title: 'תפקיד', team: 'צוות', email: 'דוא"ל', phone: 'טלפון' };
+  const found = Object.entries(mapping)
+    .filter(([, idx]) => idx !== undefined)
+    .map(([field, idx]) => `${names[field] || field} ← "${String(header[idx] ?? '').trim()}"`);
+  return found.length ? found.join(' · ') : 'לא זוהו עמודות — ודא שיש שורת כותרת';
+}
 
 export function renderRatesView(root, { rateCards, deals }) {
   root.replaceChildren();

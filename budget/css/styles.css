@@ -865,6 +865,34 @@ tr:hover .ovr-btn { opacity: .65; }
   border-radius: 3px; background: rgba(255,255,255,.03);
 }
 
+/* ---------- חלון בחירת איש צוות + ספריית אנשי הצוות ---------- */
+.picker { display: flex; flex-direction: column; gap: 10px; min-width: min(420px, 76vw); }
+.picker__search { position: sticky; top: 0; }
+.picker__list { display: flex; flex-direction: column; gap: 4px; max-height: 46vh; overflow-y: auto; }
+.picker__item, .picker__new {
+  display: flex; align-items: baseline; gap: 10px; width: 100%; text-align: start;
+  padding: 9px 12px; border-radius: var(--radius-md);
+  border: 1px solid transparent; background: var(--surface-2); color: var(--text-primary);
+  transition: all var(--t-fast) var(--ease-out);
+}
+.picker__item:hover, .picker__new:hover { background: var(--surface-3); border-color: var(--line); }
+.picker__item:focus-visible, .picker__new:focus-visible { border-color: var(--gold-line); }
+.picker__item.is-current { border-color: var(--gold-line); background: var(--gold-softer); }
+.picker__name { font-weight: 700; }
+.picker__meta { font-size: .78rem; color: var(--text-faint); margin-inline-start: auto; }
+.picker__new { border-style: dashed; border-color: var(--line); color: var(--gold-bright); justify-content: center; }
+.picker__empty { display: flex; flex-direction: column; gap: 10px; align-items: center; padding: 18px 10px; text-align: center; }
+.picker__empty p { color: var(--text-muted); font-size: .88rem; }
+
+.cellinput--person.is-empty { color: var(--text-faint); }
+.cellinput--person { text-align: start; }
+
+.btable--people-dir td { vertical-align: top; }
+.btable--people-dir .th-pick, .btable--people-dir .td-pick { width: 34px; }
+.btable--people-dir tr.is-inactive { opacity: .5; }
+.btable--people-dir input[type="checkbox"] { accent-color: var(--gold); width: 15px; height: 15px; }
+.select--sm { padding: 5px 8px; font-size: .8rem; }
+
 /* ---------- בדיקת נאותות מול יתר הצוותים ---------- */
 .chip-mini--dd {
   background: var(--info-soft); color: var(--info); border-color: rgba(56,189,248,.32);

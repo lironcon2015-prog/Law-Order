@@ -133,7 +133,9 @@ export function normalizeLine(l) {
       ? null : num(l.hoursOverride),
     rateOverride: l?.rateOverride === null || l?.rateOverride === undefined || l?.rateOverride === ''
       ? null : num(l.rateOverride),
-    // חבר הצוות שהשורה מתייחסת אליו (אופציונלי — אפשר כמה שורות לאותה דרגה)
+    // חבר הצוות שהשורה מתייחסת אליו — הפניה לספריית האנשים (מקור אמת יחיד).
+    // `person` נשאר רק כשריד למיגרציה: אחרי ההמרה הוא ריק, והשם נקרא מהספרייה.
+    personId: String(l?.personId ?? ''),
     person: String(l?.person ?? ''),
     // מעקב שוטף: שעות שהוזנו ידנית מדוח פנימי. נפרד לחלוטין מרישומי החשבונות.
     manualHours: l?.manualHours === null || l?.manualHours === undefined || l?.manualHours === ''
@@ -159,6 +161,27 @@ export function normalizeTeam(t, i = 0) {
     lines: Array.isArray(t?.lines) ? t.lines.map(normalizeLine) : [],
     createdAt: t?.createdAt || new Date().toISOString(),
     updatedAt: t?.updatedAt || new Date().toISOString(),
+  };
+}
+
+/** רשומת איש צוות בספרייה — מקור האמת היחיד לשם, לתפקיד ולפרטי הקשר */
+export function normalizePerson(p) {
+  const name = String(p?.name ?? '').trim();
+  return {
+    id: p?.id || uid('per'),
+    // מפתח זהות מנורמל (ראה importer.personKey) — לחיפוש ולהתאמת כתיב
+    key: String(p?.key ?? '').trim(),
+    name,
+    title: String(p?.title ?? ''),
+    defaultTeamName: String(p?.defaultTeamName ?? ''),
+    email: String(p?.email ?? '').trim(),
+    phone: String(p?.phone ?? '').trim(),
+    // כתיבים נוספים שנמצאו בדוחות — נתוני זיהוי על אותה רשומה, לא מקור נוסף
+    aliases: Array.isArray(p?.aliases) ? [...new Set(p.aliases.filter(Boolean).map(String))] : [],
+    active: p?.active === false ? false : true,
+    notes: String(p?.notes ?? ''),
+    createdAt: p?.createdAt || new Date().toISOString(),
+    updatedAt: p?.updatedAt || new Date().toISOString(),
   };
 }
 
@@ -357,7 +380,9 @@ export function lineRate(line, role) {
  * מחשב תמונת מצב מלאה של עסקה: תקציב, ביצוע, סטיות, תחזית.
  * @returns {object} snapshot
  */
-export function computeDeal({ deal, teams, entries, rateCard, progress: progressLog }) {
+export function computeDeal({ deal, teams, entries, rateCard, progress: progressLog, people }) {
+  // שם חבר הצוות נקרא מהספרייה בכל רינדור — אין עותק שני של השם על השורה
+  const peopleById = new Map((people || []).map((p) => [p.id, p]));
   const roles = roleMap(rateCard);
   const rolesByName = roleNameMap(rateCard);
   const dealEntries = (entries || []).filter((e) => e.dealId === deal.id);
@@ -370,7 +395,12 @@ export function computeDeal({ deal, teams, entries, rateCard, progress: progress
     const team = dealTeams.find((t) => t.id === rec.teamId);
     if (!team) return '';
     const byPerson = rec.person
-      ? team.lines.find((l) => normPerson(l.person) && normPerson(l.person) === normPerson(rec.person))
+      ? team.lines.find((l) => {
+        const nm = peopleById.get(l.personId);
+        if (!nm) return false;
+        const target = normPerson(rec.person);
+        return normPerson(nm.name) === target || (nm.aliases || []).some((a) => normPerson(a) === target);
+      })
       : null;
     const byRole = rec.roleId ? team.lines.find((l) => l.roleId === rec.roleId) : null;
     return (byPerson || byRole)?.id || '';
@@ -433,6 +463,7 @@ export function computeDeal({ deal, teams, entries, rateCard, progress: progress
           ...line,
           roleId: effRoleId,
           roleName: role?.name || line.roleName || '—',
+          personName: peopleById.get(line.personId)?.name || '',
           // הדרגה כבר לא קיימת בתעריפון (גם לא לפי שם) — מוצג למשתמש כדי שלא ייעלם בשקט
           orphanRole: !role,
           junior: !!role?.junior,
@@ -730,7 +761,7 @@ export function dealReview(snapshot) {
       if (!num(l.estHours) && !l.actualHours) continue;
       lines.push({
         teamId: t.id, teamName: t.name, teamColor: t.color, lineId: l.id,
-        roleId: l.roleId, roleName: l.roleName, person: l.person, junior: l.junior, rate: l.rate,
+        roleId: l.roleId, roleName: l.roleName, person: l.personName || '', junior: l.junior, rate: l.rate,
         estHours: round2(num(l.estHours)), budgetHours: l.budgetHours, actualHours: l.actualHours,
         budgetCost: l.budgetCost, actualCost: l.actualCost,
         deltaHours: round2(l.actualHours - l.budgetHours),
