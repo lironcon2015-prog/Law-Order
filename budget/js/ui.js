@@ -4,7 +4,7 @@
 import {
   fmtMoney, fmtHours, fmtPct, STATUS_LABEL, DEAL_STATUSES, FEE_MODELS,
   ENTRY_KINDS, ENTRY_STATUSES, TEAM_COLORS, num, round2, computePortfolio, burnSeries,
-  aggregateTeams, progressByPeriod, sourceLabel, dealReview,
+  aggregateTeams, aggregateByKind, progressByPeriod, sourceLabel, dealReview,
 } from './model.js';
 import { barCompare, donut, burnLine, gauge, miniBar } from './charts.js';
 import { TARGET_FIELDS } from './importer.js';
@@ -243,6 +243,7 @@ export function renderDealHeader(root, { snap, tab }) {
         ]),
       ]),
       el('div', { class: 'page-actions' }, [
+        el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'export-deal' }, title: 'ייצוא התקציב לאקסל מעוצב' }, [icon('download'), 'ייצוא לאקסל']),
         el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'add-entry' } }, [icon('plus'), 'רישום ביצוע']),
         el('button', { class: 'btn btn--primary btn--sm', type: 'button', dataset: { action: 'import-entries' } }, [icon('upload'), 'העלאת חשבונות']),
       ]),
@@ -451,6 +452,10 @@ export function renderBudgetTab(root, { snap, rateCard, selected = new Set(), ex
     ]));
   }
 
+  // בדיקת נאותות מול יתר הצוותים
+  const dd = ddSplitPanel(snap);
+  if (dd) wrap.append(dd);
+
   // תעריפים אפקטיביים אחרי תקרת שכ"ט
   const capPanel = renderCapPanel(snap);
   if (capPanel) wrap.append(capPanel);
@@ -537,7 +542,7 @@ function renderCapPanel(snap) {
       fact('שעות שדווחו בפועל', fmtHours(snap.realized.hours)),
       fact('תעריף בפועל (תקרה ÷ שעות)', money(snap.realized.blendedAll, d),
         snap.realized.blendedAll < snap.blendedAll ? 'neg' : 'pos'),
-      fact('תעריף בפועל ללא ג\'וניורים', money(snap.realized.blendedSenior, d),
+      fact('תעריף בפועל ללא ג\'וניורים (בניכוי עלותם)', money(snap.realized.blendedSenior, d),
         snap.realized.blendedSenior < snap.blendedRate ? 'neg' : 'pos'),
     ]) : null,
     el('div', { class: 'btable-wrap' }, el('table', { class: 'btable btable--rates' }, [
@@ -552,7 +557,10 @@ function renderCapPanel(snap) {
           el('td', { class: `num ${r.effective < r.rate ? 'neg' : ''}`, text: money(r.effective - r.rate, d) }),
         ])),
         el('tr', { class: 'row--total' }, [
-          el('td', { text: 'בלנדד (ללא ג\'וניור)' }),
+          el('td', {}, [
+            el('span', { text: 'בלנדד (ללא ג\'וניור)' }),
+            el('span', { class: 'sub', text: '(שכ״ט − עלות הג\'וניורים) ÷ שעות הבכירים' }),
+          ]),
           el('td', { class: 'num', text: money(snap.blendedRate, d) }),
           el('td', { class: 'num td-strong', text: money(snap.effectiveRates.blended, d) }),
           el('td', { class: `num ${snap.effectiveRates.blended < snap.blendedRate ? 'neg' : ''}`, text: money(snap.effectiveRates.blended - snap.blendedRate, d) }),
@@ -622,7 +630,14 @@ function renderTeamRow(team, { snap, rateCard, selected = new Set(), expanded = 
         class: 'trow__name', value: team.name, 'aria-label': 'שם הצוות',
         dataset: { field: 'name', teamId: team.id },
       }),
-      el('span', { class: 'trow__meta num', dataset: { calc: `team-share-${team.id}` }, text: `${fmtPct(share)} מהתקציב · ${money(team.budgetCost, d)}` }),
+      // הצ'יפ יושב בתוך בלוק הזהות ולא כעמודה נפרדת — עמודה נוספת הייתה מזיזה
+      // את כל המספרים בשורות שיש בהן צ'יפ (כל שורה היא grid נפרד)
+      el('span', { class: 'trow__sub' }, [
+        el('span', { class: 'trow__meta num', dataset: { calc: `team-share-${team.id}` }, text: `${fmtPct(share)} מהתקציב · ${money(team.budgetCost, d)}` }),
+        team.kind === 'dd'
+          ? el('span', { class: 'chip-mini chip-mini--dd', title: 'צוות בדיקת נאותות — מופרד בכל החיתוכים ובייצואים', text: 'בדיקת נאותות' })
+          : null,
+      ]),
     ]),
     el('div', { class: 'trow__bar', title: fmtPct(team.util), dataset: { calc: `team-bar-${team.id}`, html: '1' }, html: miniBar(team.util, team.status) }),
     cell(`team-hours-live-${team.id}`, `${fmtHours(team.actualHours)} / ${fmtHours(team.budgetHours)}`),
@@ -656,6 +671,13 @@ function renderTeamRow(team, { snap, rateCard, selected = new Set(), expanded = 
       el('label', { class: 'inline-field' }, [
         el('span', { text: 'אחראי' }),
         el('input', { class: 'cellinput is-input cellinput--sm', value: team.lead, placeholder: 'שם', dataset: { field: 'lead', teamId: team.id } }),
+      ]),
+      el('label', { class: 'inline-check inline-check--dd', title: 'הצוות ייחשב לבדיקת נאותות ויופרד בכל החיתוכים ובייצואים לאקסל' }, [
+        el('input', {
+          type: 'checkbox', checked: team.kind === 'dd' ? 'checked' : null,
+          dataset: { field: 'kind', teamId: team.id },
+        }),
+        el('span', { text: 'צוות בדיקת נאותות' }),
       ]),
     ]),
   ])];
@@ -721,6 +743,47 @@ function rateCell(line, team, deal) {
     }),
     resetBtn('reset-rate', team.id, line.id, 'החזר לתעריף מהתעריפון'),
   ]);
+}
+
+/**
+ * הפרדת בדיקת נאותות מול יתר הצוותים — אותו רכיב במסך התקציב, בבקרה ובתחקיר,
+ * כדי שהחיתוך ייראה זהה בכל מקום.
+ */
+export function ddSplitPanel(snap) {
+  const k = aggregateByKind(snap);
+  if (!k.hasDD) return null;
+  const d = snap.deal;
+  const col = (label, agg, cls) => el('div', { class: `ddcol ${cls}`.trim() }, [
+    el('div', { class: 'ddcol__head' }, [
+      el('span', { class: 'ddcol__title', text: label }),
+      el('span', { class: 'ddcol__count num', text: `${agg.count} צוותים` }),
+    ]),
+    el('div', { class: 'facts' }, [
+      fact('תקציב', money(agg.budgetCost, d)),
+      fact('שעות תקציב', fmtHours(agg.budgetHours)),
+      fact('בוצע בפועל', money(agg.actualCost, d)),
+      fact('שעות בפועל', fmtHours(agg.actualHours)),
+      fact('יתרה', money(agg.remainingCost, d), agg.remainingCost < 0 ? 'neg' : ''),
+      fact('ניצול', fmtPct(agg.util), agg.util > 1 ? 'neg' : ''),
+      fact('בלנדד (ללא ג\'וניור)', money(agg.blendedRate, d)),
+      fact('חלק מתקציב העסקה', fmtPct(agg.shareOfDeal)),
+    ]),
+  ]);
+  return el('section', { class: 'panel panel--dd' }, [
+    el('h2', { class: 'panel__title' }, [icon('layers'), 'בדיקת נאותות מול יתר הצוותים']),
+    el('p', { class: 'panel__hint', text: 'הפילוח לפי סיווג הצוות (מסומן בגיליון הצוות). מופיע גם בייצואים לאקסל.' }),
+    el('div', { class: 'ddsplit' }, [
+      col('בדיקת נאותות', k.dd, 'ddcol--dd'),
+      col('יתר הצוותים', k.regular, ''),
+    ]),
+  ]);
+}
+
+/** "% מהצוות" לאדם — מספר אחד כשהוא בצוות אחד, ורשימה קצרה כשהוא חוצה צוותים */
+function shareText(teamShares = []) {
+  if (!teamShares.length) return '—';
+  if (teamShares.length === 1) return fmtPct(teamShares[0].share);
+  return teamShares.map((t) => fmtPct(t.share)).join(' · ');
 }
 
 /** מקרא — מה מזינים ומה מחושב. בלעדיו המשתמש לומד את זה רק בטעויות */
@@ -1206,6 +1269,9 @@ export function renderReviewTab(root, { snap }) {
     ]),
   ]));
 
+  const ddPanel = ddSplitPanel(snap);
+  if (ddPanel) root.append(ddPanel);
+
   /* --- 3. מוקדי החריגה --- */
   root.append(el('section', { class: 'panel' }, [
     el('h2', { class: 'panel__title' }, [icon('alert'), 'מוקדי החריגה']),
@@ -1214,6 +1280,7 @@ export function renderReviewTab(root, { snap }) {
       el('thead', {}, el('tr', {}, [
         el('th', { text: 'צוות' }), el('th', { text: 'דרגה / אדם' }),
         el('th', { text: 'הוערך' }), el('th', { text: 'תוקצב' }), el('th', { text: 'בפועל' }),
+        el('th', { text: '% מהצוות', title: 'שיעור השעות שבוצעו בשורה מכלל השעות שבוצעו באותו צוות' }),
         el('th', { text: 'Δ שעות' }), el('th', { text: 'Δ ₪' }), el('th', { text: 'ניצול' }), el('th', { text: 'מקדם שנדרש' }),
       ])),
       el('tbody', {}, r.hotspots.map((l) => el('tr', {}, [
@@ -1222,6 +1289,7 @@ export function renderReviewTab(root, { snap }) {
         el('td', { class: 'num', text: fmtHours(l.estHours) }),
         el('td', { class: 'num', text: fmtHours(l.budgetHours) }),
         el('td', { class: 'num td-strong', text: fmtHours(l.actualHours) }),
+        el('td', { class: 'num', text: fmtPct(l.shareOfTeam) }),
         el('td', { class: `num ${tone(l.deltaHours)}`, text: `${sign(l.deltaHours)}${fmtHours(l.deltaHours)}` }),
         el('td', { class: `num ${tone(l.deltaCost)}`, text: `${sign(l.deltaCost)}${money(l.deltaCost, d)}` }),
         el('td', { class: `num pct pct--${statusOfUtil(l.util)}`, text: fmtPct(l.util) }),
@@ -1262,13 +1330,21 @@ export function renderReviewTab(root, { snap }) {
       el('div', { class: 'btable-wrap' }, el('table', { class: 'btable' }, [
         el('thead', {}, el('tr', {}, [
           el('th', { text: 'עורך דין' }), el('th', { text: 'צוותים' }),
-          el('th', { text: 'תוקצב' }), el('th', { text: 'בפועל' }), el('th', { text: 'Δ שעות' }), el('th', { text: 'Δ ₪' }), el('th', { text: 'ניצול' }),
+          el('th', { text: 'תוקצב' }), el('th', { text: 'בפועל' }),
+          el('th', { text: '% מהצוות', title: 'שיעור השעות של האדם מכלל השעות שבוצעו באותו צוות. אדם בכמה צוותים — שיעור לכל צוות.' }),
+          el('th', { text: 'Δ שעות' }), el('th', { text: 'Δ ₪' }), el('th', { text: 'ניצול' }),
         ])),
         el('tbody', {}, r.people.map((x) => el('tr', {}, [
           el('td', { text: x.name }),
           el('td', { class: 'muted', text: x.teams.join(' · ') }),
           el('td', { class: 'num', text: fmtHours(x.budgetHours) }),
           el('td', { class: 'num td-strong', text: fmtHours(x.actualHours) }),
+          el('td', {}, [
+            el('span', { class: 'num', text: shareText(x.teamShares) }),
+            x.teamShares.length > 1
+              ? el('span', { class: 'sub', text: x.teamShares.map((t) => `${t.team} ${fmtPct(t.share)}`).join(' · ') })
+              : null,
+          ]),
           el('td', { class: `num ${tone(x.deltaHours)}`, text: `${sign(x.deltaHours)}${fmtHours(x.deltaHours)}` }),
           el('td', { class: `num ${tone(x.deltaCost)}`, text: `${sign(x.deltaCost)}${money(x.deltaCost, d)}` }),
           el('td', { class: `num pct pct--${statusOfUtil(x.util)}`, text: fmtPct(x.util) }),
@@ -1527,6 +1603,8 @@ export function filterEntries(entries, filters = {}) {
 
 export function renderControlTab(root, { snap }) {
   const d = snap.deal;
+  const ddPanel = ddSplitPanel(snap);
+  if (ddPanel) root.append(ddPanel);
 
   if (snap.alerts.length) {
     root.append(el('section', { class: 'panel' }, [

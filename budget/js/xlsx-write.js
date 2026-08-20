@@ -109,9 +109,13 @@ const S = {
   base: 0, title: 1, sub: 2, head: 3, label: 4,
   money: 5, hours: 6, pct: 7, date: 8, int: 9,
   total: 10, totalMoney: 11, totalHours: 12, muted: 13,
+  totalPct: 14,
+  sub_: 15, subMoney: 16, subHours: 17, subPct: 18,
 };
 const FMT_STYLE = { text: S.base, money: S.money, hours: S.hours, pct: S.pct, date: S.date, int: S.int };
-const TOTAL_STYLE = { text: S.total, money: S.totalMoney, hours: S.totalHours, pct: S.total, date: S.total, int: S.total };
+const TOTAL_STYLE = { text: S.total, money: S.totalMoney, hours: S.totalHours, pct: S.totalPct, date: S.total, int: S.total };
+// שורת סיכום ביניים (סה"כ צוות וכד') — מודגשת עם רקע וקו עליון, ונבדלת מסה"כ הכללי
+const SUBTOTAL_STYLE = { text: S.sub_, money: S.subMoney, hours: S.subHours, pct: S.subPct, date: S.sub_, int: S.sub_ };
 
 const STYLES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
@@ -121,27 +125,31 @@ const STYLES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <numFmt numFmtId="166" formatCode="0.0%"/>
 <numFmt numFmtId="167" formatCode="dd/mm/yyyy"/>
 </numFmts>
-<fonts count="6">
+<fonts count="7">
 <font><sz val="11"/><name val="Arial"/></font>
 <font><b/><sz val="15"/><color rgb="FF1A1A1A"/><name val="Arial"/></font>
 <font><i/><sz val="10"/><color rgb="FF777777"/><name val="Arial"/></font>
 <font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Arial"/></font>
 <font><b/><sz val="11"/><name val="Arial"/></font>
 <font><sz val="10"/><color rgb="FF777777"/><name val="Arial"/></font>
+<font><b/><sz val="11"/><color rgb="FF1F2430"/><name val="Arial"/></font>
 </fonts>
-<fills count="4">
+<fills count="6">
 <fill><patternFill patternType="none"/></fill>
 <fill><patternFill patternType="gray125"/></fill>
 <fill><patternFill patternType="solid"><fgColor rgb="FF1F2430"/><bgColor indexed="64"/></patternFill></fill>
 <fill><patternFill patternType="solid"><fgColor rgb="FFF3F4F6"/><bgColor indexed="64"/></patternFill></fill>
+<fill><patternFill patternType="solid"><fgColor rgb="FFEDEFF3"/><bgColor indexed="64"/></patternFill></fill>
+<fill><patternFill patternType="solid"><fgColor rgb="FFDFE3EA"/><bgColor indexed="64"/></patternFill></fill>
 </fills>
-<borders count="3">
+<borders count="4">
 <border><left/><right/><top/><bottom/><diagonal/></border>
 <border><left/><right/><top/><bottom style="thin"><color rgb="FFBFBFBF"/></bottom><diagonal/></border>
 <border><left/><right/><top style="thin"><color rgb="FF888888"/></top><bottom style="double"><color rgb="FF888888"/></bottom><diagonal/></border>
+<border><left/><right/><top style="thin"><color rgb="FFAAB0BA"/></top><bottom/><diagonal/></border>
 </borders>
 <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-<cellXfs count="14">
+<cellXfs count="19">
 <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="center"/></xf>
 <xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment vertical="center"/></xf>
 <xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>
@@ -152,10 +160,15 @@ const STYLES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <xf numFmtId="166" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
 <xf numFmtId="167" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
 <xf numFmtId="3" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
-<xf numFmtId="0" fontId="4" fillId="0" borderId="2" xfId="0" applyFont="1" applyBorder="1"/>
-<xf numFmtId="164" fontId="4" fillId="0" borderId="2" xfId="0" applyNumberFormat="1" applyFont="1" applyBorder="1"/>
-<xf numFmtId="165" fontId="4" fillId="0" borderId="2" xfId="0" applyNumberFormat="1" applyFont="1" applyBorder="1"/>
+<xf numFmtId="0" fontId="4" fillId="5" borderId="2" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>
+<xf numFmtId="164" fontId="4" fillId="5" borderId="2" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/>
+<xf numFmtId="165" fontId="4" fillId="5" borderId="2" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/>
 <xf numFmtId="0" fontId="5" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+<xf numFmtId="166" fontId="4" fillId="4" borderId="2" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/>
+<xf numFmtId="0" fontId="6" fillId="4" borderId="3" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>
+<xf numFmtId="164" fontId="6" fillId="4" borderId="3" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/>
+<xf numFmtId="165" fontId="6" fillId="4" borderId="3" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/>
+<xf numFmtId="166" fontId="6" fillId="4" borderId="3" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/>
 </cellXfs>
 </styleSheet>`;
 
@@ -182,6 +195,7 @@ function cellXml(ref, value, style, fmt) {
  *  { t:'title'|'sub', text }
  *  { t:'kv', rows:[[label, value, fmt]] }
  *  { t:'table', head:[], rows:[[]], fmt:[], total?:[] }
+ *     שורה ב-rows יכולה להיות מערך רגיל, או { cells:[], kind:'subtotal' } לשורת סיכום ביניים
  *  { t:'gap' }
  */
 function sheetXml(sheet) {
@@ -221,7 +235,11 @@ function sheetXml(sheet) {
       if (!freeze) freeze = headRow;
       const fmtOf = (c) => (b.fmt || [])[c] || 'text';
       for (const line of b.rows) {
-        push({ xml: rowXml(line, (c) => FMT_STYLE[fmtOf(c)] ?? S.base, fmtOf) });
+        // שורת סיכום ביניים מסומנת ב-kind ומקבלת רקע, הדגשה וקו עליון
+        const cells = Array.isArray(line) ? line : line.cells;
+        const styleMap = Array.isArray(line) || line.kind !== 'subtotal' ? FMT_STYLE : SUBTOTAL_STYLE;
+        const fallback = styleMap === FMT_STYLE ? S.base : S.sub_;
+        push({ xml: rowXml(cells, (c) => styleMap[fmtOf(c)] ?? fallback, fmtOf) });
       }
       if (b.total) push({ xml: rowXml(b.total, (c) => TOTAL_STYLE[fmtOf(c)] ?? S.total, fmtOf) });
       if (b.rows.length) filters.push(`${colName(0)}${headRow}:${colName(b.head.length - 1)}${r}`);

@@ -865,12 +865,35 @@ tr:hover .ovr-btn { opacity: .65; }
   border-radius: 3px; background: rgba(255,255,255,.03);
 }
 
+/* ---------- בדיקת נאותות מול יתר הצוותים ---------- */
+.chip-mini--dd {
+  background: var(--info-soft); color: var(--info); border-color: rgba(56,189,248,.32);
+  white-space: nowrap; align-self: center;
+}
+.trow__sub { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.trow__sub .chip-mini { flex: 0 0 auto; padding: 1px 7px; font-size: .64rem; }
+.panel--dd { border-color: rgba(56,189,248,.28); background: linear-gradient(180deg, rgba(56,189,248,.05), rgba(255,255,255,0) 60%), var(--surface-1); }
+.ddsplit { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.ddcol {
+  border: 1px solid var(--line); border-radius: var(--radius-md);
+  background: rgba(255,255,255,.015); padding: 13px 15px;
+}
+.ddcol--dd { border-color: rgba(56,189,248,.35); background: rgba(56,189,248,.04); }
+.ddcol__head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.ddcol__title { font-size: .92rem; font-weight: 700; color: var(--text-strong); }
+.ddcol--dd .ddcol__title { color: var(--info); }
+.ddcol__count { font-size: .74rem; color: var(--text-faint); }
+@media (max-width: 900px) { .ddsplit { grid-template-columns: 1fr; } }
+
 /* מקרא מתחת לגיליון */
 .lgnd { display: flex; gap: 16px; flex-wrap: wrap; padding: 8px 2px 4px; }
 .lgnd__item { display: inline-flex; align-items: center; gap: 5px; font-size: .72rem; color: var(--text-faint); }
 .lgnd__mark { font-size: .78rem; font-weight: 700; }
 .lgnd__item--in .lgnd__mark { color: var(--gold-deep); }
 .lgnd__item--ovr .lgnd__mark { color: var(--warn); }
+.inline-check--dd { display: inline-flex; align-items: center; gap: 6px; font-size: .8rem; color: var(--text-muted); cursor: pointer; }
+.inline-check--dd input { accent-color: var(--info); width: 15px; height: 15px; cursor: pointer; }
+.inline-check--dd:hover { color: var(--text-secondary); }
 .cellinput--person {
   display: block; margin-top: 3px; font-size: .74rem; padding: 1px 7px;
 }
