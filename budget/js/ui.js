@@ -4,7 +4,7 @@
 import {
   fmtMoney, fmtHours, fmtPct, STATUS_LABEL, DEAL_STATUSES, FEE_MODELS,
   ENTRY_KINDS, ENTRY_STATUSES, TEAM_COLORS, num, round2, computePortfolio, burnSeries,
-  aggregateTeams, progressByPeriod, sourceLabel, dealReview,
+  aggregateTeams, progressByPeriod, sourceLabel, dealReview, splitsTotal,
 } from './model.js';
 import { barCompare, donut, burnLine, gauge, miniBar } from './charts.js';
 import { TARGET_FIELDS } from './importer.js';
@@ -763,7 +763,7 @@ export function renderActualsList(root, { snap, filters }) {
 
 const PERIODS = [['day', 'יומי'], ['week', 'שבועי'], ['month', 'חודשי']];
 
-export function renderProgressTab(root, { snap, period = 'week', sources = [] }) {
+export function renderProgressTab(root, { snap, period = 'week', sources = [], allocation = [] }) {
   const d = snap.deal;
   const teamName = new Map(snap.teams.map((t) => [t.id, t.name]));
   const lineLabel = new Map();
@@ -858,6 +858,47 @@ export function renderProgressTab(root, { snap, period = 'week', sources = [] })
     ]));
   }
 
+  // אלוקציה בין צוותים — איך השעות של כל אדם מתחלקות, ותיקון בדיעבד
+  if (allocation.length) {
+    const lineName = new Map();
+    for (const t of snap.teams) for (const l of t.lines) lineName.set(l.id, l.person ? `${l.person} · ${l.roleName}` : l.roleName);
+    const split = allocation.filter((p) => p.splits.length > 1).length;
+    root.append(el('section', { class: 'panel' }, [
+      el('h2', { class: 'panel__title' }, [
+        icon('users'), `אלוקציה בין צוותים · ${allocation.length} אנשים`,
+        split ? el('span', { class: 'pill pill--info', text: `${split} מפוצלים` }) : null,
+      ]),
+      el('p', { class: 'panel__hint', text: 'כך מתחלקות בפועל השעות שדווחו לכל אדם. "תקן אלוקציה" מחלק מחדש דיווחים שכבר נקלטו — הסך הכולל לא משתנה, רק החלוקה בין הצוותים.' }),
+      el('div', { class: 'btable-wrap' }, el('table', { class: 'etable' }, [
+        el('thead', {}, el('tr', {}, [
+          el('th', { text: 'עורך דין / עובד' }), el('th', { text: 'שעות' }),
+          el('th', { text: 'חלוקה בפועל' }), el('th', { text: 'תקופות' }), el('th', { class: 'th-tools' }),
+        ])),
+        el('tbody', {}, allocation.map((p) => el('tr', {}, [
+          el('td', {}, [
+            el('span', { text: p.name }),
+            p.unassignedHours ? el('span', { class: 'sub', text: `${fmtHours(p.unassignedHours)} שעות ללא שיוך לשורה` }) : null,
+          ]),
+          el('td', { class: 'num td-strong', text: fmtHours(p.hours) }),
+          el('td', {}, [el('div', { class: 'alloc-view' }, p.splits.length
+            ? p.splits.map((sp) => el('span', { class: 'alloc-view__part' }, [
+              el('span', { class: 'alloc-view__team', text: teamName.get(sp.teamId) || '— ללא צוות —' }),
+              el('span', { class: 'alloc-view__pct num', text: `${round2(sp.pct)}%` }),
+              el('span', { class: 'muted', text: `${fmtHours(sp.hours)} ש׳ · ${lineName.get(sp.lineId) || '—'}` }),
+            ]))
+            : [el('span', { class: 'muted', text: 'אין שיוך לשורת תקציב' })])]),
+          el('td', { class: 'muted', text: p.periods.length ? p.periods.join(', ') : '—' }),
+          el('td', { class: 'td-tools' }, [
+            el('button', {
+              class: 'btn btn--ghost btn--sm', type: 'button',
+              dataset: { action: 'edit-allocation', personKey: p.key },
+            }, [icon('edit'), 'תקן אלוקציה']),
+          ]),
+        ]))),
+      ])),
+    ]));
+  }
+
   // היסטוריית העדכונים
   const list = [...(snap.execution || [])].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   root.append(el('section', { class: 'panel' }, [
@@ -876,7 +917,11 @@ export function renderProgressTab(root, { snap, period = 'week', sources = [] })
           p.person && lineLabel.get(p.lineId) && !lineLabel.get(p.lineId).includes(p.person)
             ? el('span', { class: 'sub', text: p.person }) : null,
         ]),
-        el('td', { class: `num ${p.hours < 0 ? 'neg' : ''}`, text: fmtHours(p.hours) }),
+        el('td', { class: `num ${p.hours < 0 ? 'neg' : ''}` }, [
+          el('span', { text: fmtHours(p.hours) }),
+          num(p.allocPct) && round2(num(p.allocPct)) !== 100
+            ? el('span', { class: 'sub', text: `${round2(num(p.allocPct))}% מתוך ${fmtHours(p.sourceHours)}` }) : null,
+        ]),
         el('td', {}, [el('span', { class: `pill pill--${p.source === 'invoice' ? 'info' : p.source === 'import' ? 'watch' : 'ok'}`, text: sourceLabel(p.source) })]),
         el('td', { class: 'muted', text: p.superseded ? `הוחלף ע"י ${p.supersededBy}` : (p.note || p.fileName || '') }),
         el('td', { class: 'td-tools' }, [
@@ -1071,9 +1116,112 @@ export function renderReviewTab(root, { snap }) {
 /** גישה לסיכום התקופתי מחוץ למודול (לייצוא) */
 export const progressPeriods = (snap, period) => progressByPeriod(snap, period);
 
+/** אפשרויות בחירת שורת תקציב (מקובצות לפי צוות) */
+export function lineOptionsFor(teams, selected, { emptyLabel = '— ללא שיוך —' } = {}) {
+  return [
+    el('option', { value: '', text: emptyLabel }),
+    // שם הצוות חוזר גם בטקסט האופציה — ב-select סגור התווית של ה-optgroup אינה נראית
+    ...teams.map((t) => el('optgroup', { label: t.name },
+      t.lines.map((l) => el('option', {
+        value: `${t.id}|${l.id}`,
+        text: `${t.name} · ${l.person ? `${l.person} (${l.roleName})` : l.roleName}`,
+        selected: `${t.id}|${l.id}` === selected ? 'selected' : null,
+      })))),
+  ];
+}
+
+/**
+ * עורך אלוקציה: שורה לכל צוות שהאדם עובד בו, עם אחוז השעות שלו.
+ * `dataset.imp` מטופל ב-app.js (שינוי) ו-`data-action` (הוספה/הסרה/איש צוות חדש).
+ */
+export function allocEditor({ personKey: key, splits, teams, hours = 0 }) {
+  const total = splitsTotal(splits);
+  const box = el('div', { class: 'alloc' });
+  splits.forEach((sp, idx) => {
+    box.append(el('div', { class: 'alloc__row' }, [
+      el('select', { class: 'select select--sm', dataset: { imp: 'allocLine', personKey: key, idx: String(idx) } },
+        lineOptionsFor(teams, `${sp.teamId}|${sp.lineId}`)),
+      splits.length > 1 || total !== 100
+        ? el('span', { class: 'alloc__pct' }, [
+          el('input', {
+            class: 'input input--sm num', type: 'number', min: '0', max: '100', step: '1',
+            value: String(round2(sp.pct)), dataset: { imp: 'allocPct', personKey: key, idx: String(idx) },
+          }),
+          el('span', { class: 'muted', text: '%' }),
+          hours ? el('span', { class: 'muted', text: `≈ ${fmtHours((num(hours) * num(sp.pct)) / 100)} ש׳` }) : null,
+        ])
+        : null,
+      splits.length > 1
+        ? el('button', {
+          class: 'iconbtn iconbtn--danger', type: 'button', title: 'הסר שיוך',
+          dataset: { action: 'alloc-remove', personKey: key, idx: String(idx) }, html: ICONS.close,
+        })
+        : null,
+    ]));
+  });
+  if (!splits.length) {
+    box.append(el('div', { class: 'alloc__row' }, [
+      el('select', { class: 'select select--sm', dataset: { imp: 'allocLine', personKey: key, idx: '0' } },
+        lineOptionsFor(teams, '')),
+    ]));
+  }
+  box.append(el('div', { class: 'alloc__tools' }, [
+    el('button', { class: 'linkbtn', type: 'button', dataset: { action: 'alloc-add', personKey: key } },
+      [icon('plus'), 'צוות נוסף']),
+    el('button', { class: 'linkbtn', type: 'button', dataset: { action: 'alloc-new-member', personKey: key } },
+      [icon('users'), 'איש צוות חדש']),
+    splits.length > 1
+      ? el('span', { class: `pill pill--${Math.abs(total - 100) < 0.01 ? 'ok' : 'over'}`, text: `סה"כ ${round2(total)}%` })
+      : null,
+  ]));
+  return box;
+}
+
+/** טופס הקמת איש צוות חדש מתוך דוח שעות */
+export function renderNewMemberForm({ name, teams, roles, rateHint = 0, teamId = '' }) {
+  return el('form', { class: 'modal-form', id: 'member-form' }, [
+    el('p', { class: 'modal-text', text: 'תיווצר שורת תקציב על שמו בצוות שנבחר, והשעות שלו בדוח ישויכו אליה. אפשר לפצל אותו אחר כך בין כמה צוותים.' }),
+    field('שם', el('input', { class: 'input', name: 'person', value: name || '', required: 'required' })),
+    el('div', { class: 'grid-2' }, [
+      field('צוות', el('select', { class: 'select', name: 'teamId' },
+        teams.map((t) => el('option', { value: t.id, text: t.name, selected: t.id === teamId ? 'selected' : null })))),
+      field('דרגה', el('select', { class: 'select', name: 'roleId' },
+        roles.map((r) => el('option', { value: r.id, text: `${r.name} · ${fmtMoney(r.rate)}` })))),
+    ]),
+    el('div', { class: 'grid-2' }, [
+      field('תעריף אישי', el('input', { class: 'input num', type: 'number', step: '10', name: 'rate', value: rateHint ? String(rateHint) : '' }),
+        'ריק = התעריף של הדרגה בתעריפון.'),
+      field('שעות מוערכות', el('input', { class: 'input num', type: 'number', step: '1', name: 'estHours', value: '0' }),
+        'אפשר להשאיר 0 — השורה נועדה לקלוט את השעות שדווחו.'),
+    ]),
+  ]);
+}
+
+/** טופס תיקון אלוקציה בדיעבד */
+export function renderAllocationForm({ person, splits, teams, scopes }) {
+  const form = el('form', { class: 'modal-form', id: 'alloc-form' }, [
+    el('p', { class: 'modal-text', text: `חלוקת השעות של ${person.name} בין הצוותים. השינוי חל על דיווחים שכבר נקלטו — כל דיווח מחולק מחדש לפי האחוזים החדשים, והסך הכולל (${fmtHours(person.hours)} שעות) נשמר.` }),
+    field('היקף התיקון', el('select', { class: 'select', name: 'scope' },
+      scopes.map((sc) => el('option', { value: sc.id, text: sc.label }))),
+    'אפשר לתקן רק תקופת חיוב או דוח מסוים, אם האלוקציה השתנתה באמצע.'),
+  ]);
+  const list = el('div', { class: 'alloc-list' });
+  const row = (teamId = '', lineId = '', pct = '') => el('div', { class: 'alloc-list__row', dataset: { allocRow: '1' } }, [
+    el('select', { class: 'select', dataset: { allocTarget: '1' } }, lineOptionsFor(teams, lineId ? `${teamId}|${lineId}` : '', { emptyLabel: '— בחר שורת תקציב —' })),
+    el('input', { class: 'input num', type: 'number', min: '0', max: '100', step: '1', value: pct === '' ? '' : String(round2(pct)), dataset: { allocPct: '1' }, placeholder: '%' }),
+    el('button', { class: 'iconbtn iconbtn--danger', type: 'button', dataset: { action: 'alloc-row-remove' }, title: 'הסר', html: ICONS.close }),
+  ]);
+  const rows = (splits.length ? splits : [{ teamId: '', lineId: '', pct: 100 }]).map((sp) => row(sp.teamId, sp.lineId, sp.pct));
+  list.append(...rows);
+  form.append(field('אלוקציה', list, 'הסכום צריך להיות 100%. שורה בלי אחוז לא תיכלל.'));
+  form.append(el('button', { class: 'btn-add-row btn-add-row--sm', type: 'button', dataset: { action: 'alloc-form-add' } }, [icon('plus'), 'צוות נוסף']));
+  form._allocRow = row;
+  return form;
+}
+
 /** מסך ייבוא דוח שעות: מיפוי עמודות + שיוך כל אדם לשורת תקציב */
 export function renderProgressImportPreview({
-  sheets, sheetIndex, headerRow, mapping, people, peopleLines, cumulative, teams, records,
+  sheets, sheetIndex, headerRow, mapping, people, peopleAlloc, cumulative, teams, records,
   unmatched, skipped, duplicates = 0, dateRange = null, overlap = 'skip',
   billPeriods = [], knownPeriods = [], peopleMatch = {},
 }) {
@@ -1154,23 +1302,20 @@ export function renderProgressImportPreview({
     })),
   ])));
 
-  // שיוך אנשים לשורות התקציב
-  const lineOptions = (selected) => [
-    el('option', { value: '', text: '— ללא שיוך —' }),
-    ...teams.flatMap((t) => t.lines.map((l) => el('option', {
-      value: `${t.id}|${l.id}`,
-      text: `${t.name} · ${l.person ? `${l.person} (${l.roleName})` : l.roleName}`,
-      selected: `${t.id}|${l.id}` === selected ? 'selected' : null,
-    }))),
-  ];
+  // שיוך אנשים לשורות התקציב — כולל אלוקציה של אותו אדם בין כמה צוותים
   if (people.length) {
-    const missing = people.filter((p) => !peopleLines[p.key]).length;
+    const missing = people.filter((p) => !(peopleAlloc[p.key] || []).length).length;
+    const offBalance = people.filter((p) => {
+      const t = splitsTotal(peopleAlloc[p.key] || []);
+      return t > 0 && Math.abs(t - 100) > 0.01;
+    }).length;
     wrap.append(el('section', { class: 'panel panel--people' }, [
       el('h3', { class: 'panel__title' }, [
         icon('users'), `שיוך לשורות התקציב · ${people.length} שמות`,
         missing ? el('span', { class: 'pill pill--watch', text: `${missing} ללא שיוך` }) : null,
+        offBalance ? el('span', { class: 'pill pill--over', text: `${offBalance} אלוקציה שאינה 100%` }) : null,
       ]),
-      el('p', { class: 'panel__hint', text: 'העלות נגזרת מהתעריף של השורה שנבחרה. שם שמשויך פעם אחת ייזכר לייבוא הבא ולעסקאות אחרות.' }),
+      el('p', { class: 'panel__hint', text: 'העלות נגזרת מהתעריף של השורה שנבחרה. חבר צוות שעובד בכמה צוותים — הוסיפו לו שורה נוספת ופצלו את השעות באחוזים (למשל 80/20). השיוך והאלוקציה ייזכרו לייבוא הבא.' }),
       // שיוך מהיר: בוחרים צוות וכל אדם מוצמד לשורה שלו בו (לפי שם, ואם אין — לפי הדרגה שבדוח)
       el('div', { class: 'people-bulk' }, [
         el('span', { class: 'muted', text: 'שיוך מהיר — כל האנשים לצוות:' }),
@@ -1182,23 +1327,26 @@ export function renderProgressImportPreview({
       el('div', { class: 'btable-wrap' }, el('table', { class: 'btable btable--people' }, [
         el('thead', {}, el('tr', {}, [
           el('th', { text: 'עורך דין / עובד' }), el('th', { text: 'שורות' }), el('th', { text: 'שעות' }),
-          el('th', { text: 'תעריף בדוח' }), el('th', { text: 'שורת תקציב' }),
+          el('th', { text: 'תעריף בדוח' }), el('th', { text: 'אלוקציה לשורות התקציב' }),
         ])),
-        el('tbody', {}, people.map((p) => el('tr', { class: peopleLines[p.key] ? '' : 'row--dupe' }, [
-          el('td', {}, [
-            el('span', { text: p.name }),
-            peopleMatch[p.key] ? el('span', { class: 'sub', text: peopleMatch[p.key] }) : null,
-            (p.variants || []).length > 1 ? el('span', { class: 'sub', text: `בדוח: ${p.variants.join(' · ')}` }) : null,
-          ]),
-          el('td', { class: 'num', text: String(p.rows) }),
-          el('td', { class: 'num', text: fmtHours(p.hours) }),
-          el('td', { class: 'num muted', text: p.rateHint ? `${p.rateHint.toLocaleString('he-IL')} ₪` : '—' }),
-          el('td', {}, [el('select', { class: 'select select--sm', dataset: { imp: 'personLine', personKey: p.key } }, lineOptions(peopleLines[p.key]))]),
-        ]))),
+        el('tbody', {}, people.map((p) => {
+          const splits = peopleAlloc[p.key] || [];
+          return el('tr', { class: splits.length ? '' : 'row--dupe' }, [
+            el('td', {}, [
+              el('span', { text: p.name }),
+              peopleMatch[p.key] ? el('span', { class: 'sub', text: peopleMatch[p.key] }) : null,
+              (p.variants || []).length > 1 ? el('span', { class: 'sub', text: `בדוח: ${p.variants.join(' · ')}` }) : null,
+            ]),
+            el('td', { class: 'num', text: String(p.rows) }),
+            el('td', { class: 'num', text: fmtHours(p.hours) }),
+            el('td', { class: 'num muted', text: p.rateHint ? `${p.rateHint.toLocaleString('he-IL')} ₪` : '—' }),
+            el('td', {}, [allocEditor({ personKey: p.key, splits, teams, hours: p.hours })]),
+          ]);
+        })),
       ])),
       el('label', { class: 'inline-check' }, [
         el('input', { type: 'checkbox', checked: 'checked', dataset: { imp: 'rememberPeople' } }),
-        el('span', { text: 'זכור את השיוך לייבוא הבא' }),
+        el('span', { text: 'זכור את השיוך והאלוקציה לייבוא הבא' }),
       ]),
     ]));
   }

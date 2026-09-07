@@ -1,7 +1,7 @@
 // importer.js — ייבוא מקבצים: (א) חשבונות/שעות לטבלת הביצוע, (ב) גיליון תקציב קיים.
 // המיפוי מנוחש אוטומטית ומוצג למשתמש לאישור לפני הכתיבה.
 
-import { num, uid, round2 } from './model.js';
+import { num, uid, round2, normalizeSplits, allocateHours } from './model.js';
 
 /* ============================================================
    ייבוא רישומי ביצוע (חשבונות / שעות / הוצאות)
@@ -323,7 +323,11 @@ export function rowsToEntries(rows, mapping, opts) {
 
 /**
  * ממיר שורות דוח שעות לעדכוני ביצוע (מעקב ידני).
- * @param opts { dealId, resolve(person, roleName) → { teamId, lineId, roleId } | null,
+ * `resolve` מחזיר **אלוקציה**: מערך יעדים עם אחוזים ([{teamId,lineId,roleId,pct}]),
+ * כי אותו אדם יכול להשתייך לכמה צוותים. שעות השורה מתחלקות ביניהם לפי האחוזים,
+ * וכל הרשומות שנוצרו מאותה שורה נושאות allocGroupId משותף כדי שאפשר יהיה
+ * לשנות את האלוקציה בדיעבד.
+ * @param opts { dealId, resolve(person, roleName) → [{teamId,lineId,roleId,pct}] | {teamId,lineId,roleId} | null,
  *               cumulative: boolean, currentByLine: Map<lineId, hours>, fileName, batchId, defaultDate }
  */
 export function rowsToProgress(rows, mapping, opts) {
@@ -334,7 +338,7 @@ export function rowsToProgress(rows, mapping, opts) {
   const pick = (row, field) => (mapping[field] === undefined ? null : row[mapping[field]]);
   const out = [];
   const unmatched = new Set();
-  const totals = new Map();   // lineId → שעות בקובץ (למצב מצטבר)
+  const totals = new Map();   // מפתח אדם → סך שעות בקובץ (למצב מצטבר)
   let skipped = 0;
 
   // מה שכבר דווח, לפי שורה+תאריך+אדם — לזיהוי חפיפה בין דוחות
@@ -347,50 +351,77 @@ export function rowsToProgress(rows, mapping, opts) {
     reported.set(k, cur);
   }
 
+  const markDuplicate = (rec) => {
+    const prev = reported.get(progressKey(rec));
+    rec.duplicate = !!prev;
+    rec.existingHours = prev ? prev.hours : 0;
+    return rec;
+  };
+
   for (const row of rows || []) {
     if (!row || !row.length) continue;
     const hours = num(pick(row, 'hours'));
     if (!hours) { skipped++; continue; }
     const person = String(pick(row, 'personName') ?? '').trim();
     const roleName = String(pick(row, 'roleName') ?? '').trim();
-    const target = resolve ? resolve(person, roleName) : null;
-    if (!target) unmatched.add(person || roleName || '(ללא שם)');
+    const targets = asSplits(resolve ? resolve(person, roleName) : null);
+    if (!targets.length) unmatched.add(person || roleName || '(ללא שם)');
     const billPeriod = billPeriodOf(pick(row, 'billDate'));
     const date = toISODate(pick(row, 'date')) || (billPeriod ? `${billPeriod}-01` : '') || defaultDate || new Date().toISOString().slice(0, 10);
 
     if (cumulative) {
-      const key = target?.lineId || `~${person}`;
-      const cur = totals.get(key) || { hours: 0, date, target, person };
+      const key = personKey(person) || `~${person}`;
+      const cur = totals.get(key) || { hours: 0, date, targets, person };
       cur.hours += hours;
+      if (targets.length) cur.targets = targets;
       if (date > cur.date) cur.date = date;
       totals.set(key, cur);
       continue;
     }
-    const rec = {
-      dealId, teamId: target?.teamId || '', lineId: target?.lineId || '', roleId: target?.roleId || '',
-      person, date, hours, source: 'import', fileName, batchId, billPeriod,
+
+    const base = {
+      dealId, person, date, source: 'import', fileName, batchId, billPeriod,
       // תקופת החיוב היא גם התקופה שהרשומה "מכסה" — כך דיווח ידני באותו חודש מוחלף
       periodFrom: billPeriod ? `${billPeriod}-01` : date,
       periodTo: billPeriod ? monthEnd(billPeriod) : date,
-      note: roleName && !target?.lineId ? `דרגה בדוח: ${roleName}` : '',
+      sourceHours: round2(hours),
     };
-    // חפיפה: אותה שורת תקציב, אותו תאריך ואותו אדם כבר דווחו בעבר
-    const prev = reported.get(progressKey(rec));
-    rec.duplicate = !!prev;
-    rec.existingHours = prev ? prev.hours : 0;
-    out.push(rec);
+    if (!targets.length) {
+      out.push(markDuplicate({
+        ...base, teamId: '', lineId: '', roleId: '', hours, allocGroupId: '', allocPct: 100,
+        note: roleName ? `דרגה בדוח: ${roleName}` : '',
+      }));
+      continue;
+    }
+    const groupId = uid('alc');
+    const parts = allocateHours(hours, targets.map((t) => t.pct));
+    targets.forEach((t, i) => {
+      if (!parts[i]) return;
+      out.push(markDuplicate({
+        ...base, teamId: t.teamId || '', lineId: t.lineId || '', roleId: t.roleId || '',
+        hours: parts[i], allocGroupId: groupId, allocPct: t.pct,
+        note: targets.length > 1 ? `אלוקציה ${t.pct}% מתוך ${round2(hours)} שעות` : '',
+      }));
+    });
   }
 
-  // דוח מצטבר: רושמים רק את ההפרש מול מה שכבר דווח
+  // דוח מצטבר: רושמים רק את ההפרש מול מה שכבר דווח, לכל יעד באלוקציה
   if (cumulative) {
     for (const [key, rec] of totals) {
-      const already = num(currentByLine.get(rec.target?.lineId) || 0);
-      const delta = round2(rec.hours - already);
-      if (!delta) { skipped++; continue; }
-      out.push({
-        dealId, teamId: rec.target?.teamId || '', lineId: rec.target?.lineId || '', roleId: rec.target?.roleId || '',
-        person: rec.person, date: rec.date, hours: delta, source: 'import', fileName, batchId,
-        note: `דוח מצטבר: ${round2(rec.hours)} שעות · דווח קודם ${already}`,
+      const targets = rec.targets || [];
+      if (!targets.length) { skipped++; continue; }
+      const groupId = uid('alc');
+      const parts = allocateHours(rec.hours, targets.map((t) => t.pct));
+      targets.forEach((t, i) => {
+        const already = num(currentByLine.get(t.lineId) || 0);
+        const delta = round2(parts[i] - already);
+        if (!delta) { skipped++; return; }
+        out.push({
+          dealId, teamId: t.teamId || '', lineId: t.lineId || '', roleId: t.roleId || '',
+          person: rec.person, date: rec.date, hours: delta, source: 'import', fileName, batchId,
+          allocGroupId: groupId, allocPct: t.pct, sourceHours: delta,
+          note: `דוח מצטבר: ${round2(parts[i])} שעות${targets.length > 1 ? ` (${t.pct}%)` : ''} · דווח קודם ${already}`,
+        });
       });
       void key;
     }
@@ -403,6 +434,13 @@ export function rowsToProgress(rows, mapping, opts) {
       ? { from: out.reduce((m, r) => (r.date < m ? r.date : m), out[0].date), to: out.reduce((m, r) => (r.date > m ? r.date : m), out[0].date) }
       : null,
   };
+}
+
+/** מקבל אלוקציה בכל צורה (מערך / יעד יחיד / null) ומחזיר מערך מנורמל */
+export function asSplits(target) {
+  if (!target) return [];
+  const list = Array.isArray(target) ? target : [{ ...target, pct: 100 }];
+  return normalizeSplits(list);
 }
 
 /**

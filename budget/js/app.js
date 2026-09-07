@@ -6,6 +6,7 @@ import * as db from './db.js';
 import {
   computeDeal, dealReview, uid, num, round2, fmtPct, roundUpHours, sourceLabel,
   DEFAULT_TEAM_NAMES, DEAL_STATUSES, ENTRY_KINDS, ENTRY_STATUSES,
+  normalizeSplits, splitsTotal,
 } from './model.js';
 import * as ui from './ui.js';
 import * as fileStore from './file-store.js';
@@ -124,7 +125,11 @@ function render() {
     const body = ui.el('div', { class: 'tab-body' });
     els.main.append(body);
     if (state.tab === 'budget') ui.renderBudgetTab(body, { snap, rateCard: store.rateCardFor(snap.deal), selected: state.selectedTeams });
-    else if (state.tab === 'progress') ui.renderProgressTab(body, { snap, period: state.progressPeriod, sources: store.dataSourcesOf(snap.deal.id) });
+    else if (state.tab === 'progress') ui.renderProgressTab(body, {
+      snap, period: state.progressPeriod,
+      sources: store.dataSourcesOf(snap.deal.id),
+      allocation: store.allocationBreakdown(snap.deal.id),
+    });
     else if (state.tab === 'actuals') ui.renderActualsTab(body, { snap, filters: state.filters });
     else if (state.tab === 'control') ui.renderControlTab(body, { snap });
     else if (state.tab === 'review') ui.renderReviewTab(body, { snap });
@@ -382,6 +387,43 @@ async function onClick(e) {
         ui.toast('העדכון נמחק');
         render();
       }, 'מחק');
+
+    // ---- אלוקציה במסך הייבוא ----
+    case 'alloc-add': {
+      if (!importCtx) return;
+      const key = target.dataset.personKey;
+      importCtx.peopleAlloc[key] = [...(importCtx.peopleAlloc[key] || []), { teamId: '', lineId: '', pct: 0 }];
+      return renderProgressImportModal();
+    }
+
+    case 'alloc-remove': {
+      if (!importCtx) return;
+      const key = target.dataset.personKey;
+      const list = [...(importCtx.peopleAlloc[key] || [])];
+      list.splice(Number(target.dataset.idx), 1);
+      return setImportAlloc(key, list);
+    }
+
+    case 'alloc-new-member':
+      return openNewMemberModal(target.dataset.personKey);
+
+    // ---- תיקון אלוקציה בדיעבד ----
+    case 'edit-allocation':
+      return openAllocationModal(target.dataset.personKey);
+
+    case 'alloc-form-add': {
+      const form = document.getElementById('alloc-form');
+      const list = form?.querySelector('.alloc-list');
+      if (form && list && form._allocRow) list.append(form._allocRow());
+      return;
+    }
+
+    case 'alloc-row-remove': {
+      const row = target.closest('[data-alloc-row]');
+      const list = row?.parentElement;
+      if (list && list.children.length > 1) row.remove();
+      return;
+    }
 
     case 'delete-source': {
       const key = target.dataset.sourceKey;
@@ -1020,12 +1062,12 @@ function onImportChange(node) {
       const hr = detectHeaderRow(importCtx.sheets[importCtx.sheetIndex].rows);
       importCtx.headerRow = hr < 0 ? 0 : hr;
       importCtx.mapping = guessMapping(importCtx.sheets[importCtx.sheetIndex].rows[importCtx.headerRow] || []);
-      importCtx.peopleLines = {};
+      importCtx.peopleAlloc = {};
       syncProgressPeople();
     } else if (kind === 'headerRow') {
       importCtx.headerRow = Math.max(0, Number(node.value) - 1);
       importCtx.mapping = guessMapping(importCtx.sheets[importCtx.sheetIndex].rows[importCtx.headerRow] || []);
-      importCtx.peopleLines = {};
+      importCtx.peopleAlloc = {};
       syncProgressPeople();
     } else if (kind === 'map') {
       const col = Number(node.dataset.col);
@@ -1036,8 +1078,24 @@ function onImportChange(node) {
       importCtx.cumulative = node.value === '1';
     } else if (kind === 'overlap') {
       importCtx.overlap = node.value;
-    } else if (kind === 'personLine') {
-      importCtx.peopleLines[node.dataset.personKey] = node.value;
+    } else if (kind === 'allocLine') {
+      const key = node.dataset.personKey;
+      const idx = Number(node.dataset.idx);
+      const list = [...(importCtx.peopleAlloc[key] || [])];
+      const [teamId, lineId] = String(node.value || '').split('|');
+      if (!lineId) list.splice(idx, 1);
+      else if (list[idx]) {
+        // שורה שזה עתה קיבלה יעד מקבלת חלק שווה; שורה קיימת שומרת על האחוז שלה
+        const pct = num(list[idx].pct) > 0 ? num(list[idx].pct) : round2(100 / Math.max(1, list.length));
+        list[idx] = { ...list[idx], teamId, lineId, pct };
+      } else list.push({ teamId, lineId, pct: 100 });
+      importCtx.peopleAlloc[key] = balanceSplits(list, lineId ? idx : -1);
+    } else if (kind === 'allocPct') {
+      const key = node.dataset.personKey;
+      const idx = Number(node.dataset.idx);
+      const list = [...(importCtx.peopleAlloc[key] || [])];
+      if (list[idx]) list[idx] = { ...list[idx], pct: Math.max(0, Math.min(100, num(node.value))) };
+      importCtx.peopleAlloc[key] = balanceSplits(list, idx);
     } else if (kind === 'personTeamBulk') {
       assignPeopleToTeam(node.value);
     }
@@ -1080,6 +1138,79 @@ function onImportChange(node) {
   }
 }
 
+/**
+ * הקמת איש צוות חדש מתוך מסך ייבוא דוח השעות — כשבדוח מופיע מישהו שאין לו שורת תקציב.
+ * נפתח מעל מודאל הייבוא ומחזיר אליו (importCtx נשמר).
+ */
+function openNewMemberModal(key) {
+  const snap = currentSnapshot();
+  if (!snap || !importCtx) return;
+  const person = (importCtx.people || []).find((p) => p.key === key);
+  if (!person) return;
+  const roles = store.rateCardFor(snap.deal).roles;
+  const body = ui.renderNewMemberForm({
+    name: person.name, teams: snap.teams, roles,
+    rateHint: person.rateHint || 0,
+    teamId: (importCtx.peopleAlloc[key] || [])[0]?.teamId || snap.teams[0]?.id || '',
+  });
+  const save = btn('צור ושייך', { primary: true, iconName: 'check' });
+  save.addEventListener('click', async () => {
+    const f = Object.fromEntries(new FormData(body).entries());
+    const name = String(f.person || '').trim();
+    if (!name) return ui.toast('נדרש שם', 'error');
+    const created = await store.addTeamMember(f.teamId, {
+      person: name, roleId: f.roleId, rate: f.rate, estHours: f.estHours,
+    });
+    if (!created) return ui.toast('יצירת איש הצוות נכשלה', 'error');
+    const list = [...(importCtx.peopleAlloc[key] || [])].filter((sp) => sp.lineId);
+    list.push({ teamId: created.teamId, lineId: created.lineId, pct: list.length ? round2(100 / (list.length + 1)) : 100 });
+    importCtx.peopleAlloc[key] = balanceSplits(list, list.length - 1);
+    ui.toast(`${name} נוסף כאיש צוות`);
+    renderProgressImportModal();
+  });
+  const cancel = btn('חזרה');
+  cancel.addEventListener('click', () => renderProgressImportModal());
+  openModal({ title: `איש צוות חדש · ${person.name}`, body, actions: [save, cancel] });
+}
+
+/** תיקון אלוקציה בדיעבד: חלוקה מחדש של שעות שכבר דווחו */
+function openAllocationModal(key) {
+  const snap = currentSnapshot();
+  if (!snap) return;
+  const person = store.allocationBreakdown(state.dealId).find((p) => p.key === key);
+  if (!person) return;
+  const stored = store.allocationsOf(state.dealId)[key] || [];
+  const splits = stored.length ? stored : person.splits.map((sp) => ({ teamId: sp.teamId, lineId: sp.lineId, pct: sp.pct }));
+  const scopes = [
+    { id: 'all', label: `כל הדיווחים בעסקה · ${person.hours} שעות` },
+    ...person.periods.map((b) => ({ id: `period:${b}`, label: `תקופת חיוב ${b}` })),
+    ...person.batches.filter((b) => b.id).map((b) => ({ id: `batch:${b.id}`, label: `דוח: ${b.label}` })),
+  ];
+  const body = ui.renderAllocationForm({ person, splits, teams: snap.teams, scopes });
+
+  const save = btn('החל אלוקציה', { primary: true, iconName: 'check' });
+  save.addEventListener('click', async () => {
+    const scope = body.querySelector('[name="scope"]')?.value || 'all';
+    const list = [...body.querySelectorAll('[data-alloc-row]')].map((row) => {
+      const [teamId = '', lineId = ''] = String(row.querySelector('[data-alloc-target]')?.value || '').split('|');
+      return { teamId, lineId, pct: num(row.querySelector('[data-alloc-pct]')?.value) };
+    });
+    const clean = normalizeSplits(list);
+    if (!clean.length) return ui.toast('בחר לפחות שורת תקציב אחת עם אחוז', 'error');
+    const total = splitsTotal(clean);
+    if (Math.abs(total - 100) > 0.01) return ui.toast(`סכום האחוזים הוא ${total}% — צריך 100%`, 'error');
+    const res = await store.reallocatePerson({ dealId: state.dealId, key, splits: clean, scope });
+    closeModal();
+    ui.toast(res.groups
+      ? `${person.name}: ${res.hours} שעות חולקו מחדש ב-${res.groups} דיווחים`
+      : 'לא נמצאו דיווחים בהיקף שנבחר');
+    render();
+  });
+  const cancel = btn('ביטול');
+  cancel.addEventListener('click', closeModal);
+  openModal({ title: `אלוקציה · ${person.name}`, body, actions: [save, cancel], wide: true });
+}
+
 /* ============================================================
    ייבוא דוח שעות למעקב השוטף
    ============================================================ */
@@ -1102,67 +1233,123 @@ async function startProgressImport(file) {
     mapping: guessMapping(sheets[sheetIndex].rows[headerRow < 0 ? 0 : headerRow] || []),
     cumulative: false,
     overlap: 'skip',        // חפיפה עם דיווחים קודמים: skip | replace | add
-    peopleTeams: {}, peopleLines: {},
+    // אלוקציה לכל אדם: [{ teamId, lineId, pct }] — כמה יעדים = פיצול השעות ביניהם
+    peopleTeams: {}, peopleAlloc: {},
   };
   syncProgressPeople();
   renderProgressImportModal();
 }
 
-/** מזהה את האנשים בדוח ומשייך כל אחד לשורת תקציב (לפי הזיכרון, שם השורה או הדרגה) */
+/**
+ * שומר על סכום 100% אחרי שינוי ידני: השארית מתחלקת בין שאר היעדים.
+ * היעד שהמשתמש נגע בו (`fixed`) לא זז — הוא מה שהוא התכוון אליו.
+ */
+function balanceSplits(list, fixed = -1) {
+  const clean = (list || []).filter((sp) => sp && sp.lineId);
+  if (clean.length <= 1) return clean.map((sp) => ({ ...sp, pct: 100 }));
+  const rest = clean.filter((_, i) => i !== fixed);
+  const fixedPct = fixed >= 0 && clean[fixed] ? Math.max(0, Math.min(100, num(clean[fixed].pct))) : 0;
+  const left = round2(100 - fixedPct);
+  const restSum = rest.reduce((s2, sp) => s2 + num(sp.pct), 0);
+  return clean.map((sp, i) => {
+    if (i === fixed) return { ...sp, pct: fixedPct };
+    const share = restSum > 0 ? (num(sp.pct) / restSum) * left : left / rest.length;
+    return { ...sp, pct: round2(share) };
+  });
+}
+
+/** האלוקציה של אדם במסך הייבוא, אחרי שינוי — מרכז אחד לעדכון ורינדור */
+function setImportAlloc(key, list, fixed = -1) {
+  importCtx.peopleAlloc[key] = balanceSplits(list, fixed);
+  renderProgressImportModal();
+}
+
+/** מזהה את האנשים בדוח ובונה לכל אחד אלוקציה לשורות התקציב (לפי מה שנשמר, שם, דרגה או תעריף) */
 function syncProgressPeople() {
   const { sheets, sheetIndex, headerRow, mapping } = importCtx;
   const rows = sheetBody(sheets[sheetIndex].rows, headerRow);
   importCtx.people = collectPeople(rows, mapping);
 
   const snap = currentSnapshot();
-  const remembered = store.peopleTeamIdsFor(state.dealId);
   const memory = store.getPeopleMemory();
-  const norm = (s) => String(s || '').trim().toLowerCase();
+  const rememberedAlloc = store.peopleAllocFor(state.dealId);   // key → [{teamId, roleName, pct}]
+  const dealAlloc = store.allocationsOf(state.dealId);          // key → [{teamId, lineId, pct}]
+  const norm = (v) => String(v || '').trim().toLowerCase();
 
   const lines = [];
-  for (const t of snap.teams) for (const l of t.lines) lines.push({ teamId: t.id, lineId: l.id, roleId: l.roleId, person: l.person, roleName: l.roleName, rate: num(l.rate) });
+  for (const t of snap.teams) for (const l of t.lines) {
+    lines.push({ teamId: t.id, lineId: l.id, roleId: l.roleId, person: l.person, roleName: l.roleName, rate: num(l.rate) });
+  }
+  const validLine = new Set(lines.map((l) => l.lineId));
 
   // מועמדים לזיהוי מקורב: אנשים שיש להם שורת תקציב, ואנשים שכבר מוכרים מהזיכרון
   const lineKeys = new Map();          // personKey → שורה
   for (const l of lines) { const k = personKey(l.person); if (k && !lineKeys.has(k)) lineKeys.set(k, l); }
   const memoryKeys = Object.keys(memory);
 
+  /** השורה המתאימה לאדם בתוך צוות מסוים: לפי שמו, לפי הדרגה, ואז לפי התעריף שבדוח */
+  const lineInTeam = (teamId, p, roleName) => {
+    const pool = lines.filter((l) => l.teamId === teamId);
+    if (!pool.length) return null;
+    const hitKey = fuzzyPersonMatch(p.key, pool.map((l) => personKey(l.person)).filter(Boolean))?.key || '';
+    const byPerson = hitKey ? pool.find((l) => personKey(l.person) === hitKey) : null;
+    const want = roleName || p.roleHint || '';
+    const byRole = want ? pool.find((l) => norm(l.roleName) === norm(want)) : null;
+    let byRate = null;
+    if (p.rateHint > 0) {
+      const near = pool.filter((l) => l.rate > 0 && Math.abs(l.rate - p.rateHint) <= Math.max(1, l.rate * 0.02));
+      if (near.length === 1) [byRate] = near;
+    }
+    return byPerson || byRole || byRate || null;
+  };
+
   const next = {};
   const matches = {};
   for (const p of importCtx.people) {
-    if (importCtx.peopleLines[p.key]) { next[p.key] = importCtx.peopleLines[p.key]; continue; }
+    if ((importCtx.peopleAlloc[p.key] || []).length) { next[p.key] = importCtx.peopleAlloc[p.key]; continue; }
 
-    // 1) שורה שנושאת את שמו — כולל וריאציות כתיב ("עו"ד דנה כהן" / "כהן, דנה" / "ד. כהן")
-    const byName = fuzzyPersonMatch(p.key, [...lineKeys.keys()]);
-    // 2) הזיכרון: הצוות שאליו שויך בעבר + הדרגה שנרשמה לו
-    const memHit = fuzzyPersonMatch(p.key, memoryKeys);
-    const memKey = memHit?.key || (memory[p.legacyKey] ? p.legacyKey : '');
-    const teamId = remembered[memKey] || remembered[p.key] || '';
-    const roleName = memory[memKey]?.roleName || '';
-    // 3) הדרגה שכתובה בדוח עצמו, בתוך הצוות הזכור
-    const wantRole = roleName || p.roleHint || '';
-    const pool = teamId ? lines.filter((l) => l.teamId === teamId) : lines;
-    const byRole = wantRole && teamId
-      ? pool.find((l) => norm(l.roleName) === norm(wantRole))
-      : null;
-    // 4) התעריף שבדוח — מזהה את הדרגה גם בדוח שאין בו עמודת "דרגה"
-    let byRate = null;
-    if (!byRole && p.rateHint > 0) {
-      const near = pool.filter((l) => l.rate > 0 && Math.abs(l.rate - p.rateHint) <= Math.max(1, l.rate * 0.02));
-      if (near.length === 1) byRate = near[0];
+    // 0) אלוקציה שכבר נקבעה בעסקה הזו (כולל תיקון בדיעבד) — היא הקובעת
+    const ownKey = fuzzyPersonMatch(p.key, Object.keys(dealAlloc))?.key || '';
+    const own = normalizeSplits((dealAlloc[ownKey] || []).filter((sp) => validLine.has(sp.lineId)));
+    if (own.length) {
+      next[p.key] = own;
+      matches[p.key] = own.length > 1 ? `לפי האלוקציה שנקבעה בעסקה (${own.map((x) => `${round2(x.pct)}%`).join(' / ')})` : '';
+      continue;
     }
 
-    const hit = (byName ? lineKeys.get(byName.key) : null) || byRole || byRate || null;
-    next[p.key] = hit ? `${hit.teamId}|${hit.lineId}` : '';
+    // 1) אלוקציה זכורה בין כמה צוותים (מייבוא קודם או מעסקה אחרת)
+    const memHit = fuzzyPersonMatch(p.key, memoryKeys);
+    const memKey = memHit?.key || (memory[p.legacyKey] ? p.legacyKey : (memory[p.key] ? p.key : ''));
+    const remembered = rememberedAlloc[memKey] || rememberedAlloc[p.key] || [];
+    if (remembered.length > 1) {
+      const resolved = normalizeSplits(remembered.map((r) => {
+        const line = lineInTeam(r.teamId, p, r.roleName);
+        return line ? { teamId: r.teamId, lineId: line.lineId, roleId: line.roleId, pct: r.pct } : null;
+      }).filter(Boolean));
+      if (resolved.length) {
+        next[p.key] = resolved;
+        matches[p.key] = `לפי האלוקציה הזכורה (${resolved.map((x) => `${round2(x.pct)}%`).join(' / ')})`;
+        continue;
+      }
+    }
+
+    // 2) שורה שנושאת את שמו — כולל וריאציות כתיב ("עו"ד דנה כהן" / "כהן, דנה" / "ד. כהן")
+    const byName = fuzzyPersonMatch(p.key, [...lineKeys.keys()]);
+    // 3) הצוות הזכור, ובתוכו הדרגה שנרשמה לו או הדרגה/התעריף שבדוח
+    const teamId = remembered[0]?.teamId || '';
+    const roleName = memory[memKey]?.roleName || '';
+    const inTeam = teamId ? lineInTeam(teamId, p, roleName) : null;
+
+    const hit = (byName ? lineKeys.get(byName.key) : null) || inTeam || null;
+    next[p.key] = hit ? [{ teamId: hit.teamId, lineId: hit.lineId, roleId: hit.roleId, pct: 100 }] : [];
     if (hit) {
       matches[p.key] = byName && !byName.exact
         ? `זוהה כ"${lineKeys.get(byName.key).person}"`
         : byName ? ''
-          : byRole ? `לפי הדרגה "${wantRole}"${memKey ? ' והצוות הזכור' : ''}`
-            : byRate ? `לפי התעריף בדוח (${p.rateHint.toLocaleString('he-IL')} ₪)` : '';
+          : `לפי ${roleName || p.roleHint ? 'הדרגה' : 'התעריף'} והצוות הזכור`;
     }
   }
-  importCtx.peopleLines = next;
+  importCtx.peopleAlloc = next;
   importCtx.peopleMatch = matches;
 }
 
@@ -1172,7 +1359,7 @@ function assignPeopleToTeam(teamId) {
   // דרך ה-snapshot ולא ה-store: רק שם לשורה יש `rate` אפקטיבי (תעריפון + דריסה)
   const team = currentSnapshot()?.teams.find((t) => t.id === teamId);
   if (!team) return;
-  const norm = (s) => String(s || '').trim().toLowerCase();
+  const norm = (v) => String(v || '').trim().toLowerCase();
   const keys = team.lines.map((l) => personKey(l.person)).filter(Boolean);
   for (const p of importCtx.people || []) {
     const hitKey = fuzzyPersonMatch(p.key, keys)?.key || '';
@@ -1184,25 +1371,25 @@ function assignPeopleToTeam(teamId) {
       ? rated.reduce((best, l) => (Math.abs(num(l.rate) - p.rateHint) < Math.abs(num(best.rate) - p.rateHint) ? l : best))
       : null;
     const hit = byPerson || byRole || byRate || team.lines[0];
-    if (hit) importCtx.peopleLines[p.key] = `${team.id}|${hit.id}`;
+    if (hit) importCtx.peopleAlloc[p.key] = [{ teamId: team.id, lineId: hit.id, roleId: hit.roleId, pct: 100 }];
   }
 }
 
 function progressPreview() {
-  const { sheets, sheetIndex, headerRow, mapping, cumulative, peopleLines, file } = importCtx;
+  const { sheets, sheetIndex, headerRow, mapping, cumulative, peopleAlloc, file } = importCtx;
   const rows = sheetBody(sheets[sheetIndex].rows, headerRow);
   const currentByLine = new Map();
-  for (const [, target] of Object.entries(peopleLines)) {
-    const lineId = String(target || '').split('|')[1];
-    if (lineId && !currentByLine.has(lineId)) currentByLine.set(lineId, store.manualHoursOfLine(lineId));
+  for (const splits of Object.values(peopleAlloc || {})) {
+    for (const sp of splits || []) {
+      if (sp.lineId && !currentByLine.has(sp.lineId)) currentByLine.set(sp.lineId, store.manualHoursOfLine(sp.lineId));
+    }
   }
-  const resolve = (person) => {
-    const target = peopleLines[personKey(person)];
-    if (!target) return null;
-    const [teamId, lineId] = target.split('|');
-    const line = lineId ? store.findLine(lineId) : null;
-    return { teamId, lineId, roleId: line?.line.roleId || '' };
-  };
+  // אלוקציה: אותו אדם יכול להתחלק בין כמה שורות תקציב, ולכן מוחזר מערך יעדים
+  const resolve = (person) => (peopleAlloc[personKey(person)] || []).map((sp) => ({
+    teamId: sp.teamId, lineId: sp.lineId,
+    roleId: store.findLine(sp.lineId)?.line.roleId || sp.roleId || '',
+    pct: sp.pct,
+  }));
   const res = rowsToProgress(rows, mapping, {
     dealId: state.dealId, resolve, cumulative, currentByLine,
     existing: store.progressOf(state.dealId),
@@ -1220,7 +1407,7 @@ function renderProgressImportModal() {
   const res = progressPreview();
   const body = ui.renderProgressImportPreview({
     sheets: importCtx.sheets, sheetIndex: importCtx.sheetIndex, headerRow: importCtx.headerRow,
-    mapping: importCtx.mapping, people: importCtx.people, peopleLines: importCtx.peopleLines,
+    mapping: importCtx.mapping, people: importCtx.people, peopleAlloc: importCtx.peopleAlloc,
     cumulative: importCtx.cumulative, teams: snap.teams, records: res.records,
     unmatched: res.unmatched, skipped: res.skipped, duplicates: res.duplicates,
     dateRange: res.dateRange, overlap: importCtx.overlap || 'skip',
@@ -1255,10 +1442,17 @@ function renderProgressImportModal() {
     if (remember) {
       const teamName = new Map(store.teamsOf(state.dealId).map((t) => [t.id, t.name]));
       await store.rememberPeopleTeams((importCtx.people || []).map((p) => {
-        const [teamId, lineId] = String(importCtx.peopleLines[p.key] || '').split('|');
-        const line = lineId ? store.findLine(lineId) : null;
-        return { key: p.key, name: p.name, teamName: teamName.get(teamId) || '', roleName: line?.line.roleName || '' };
+        const splits = (importCtx.peopleAlloc[p.key] || []).map((sp) => ({
+          teamName: teamName.get(sp.teamId) || '',
+          roleName: store.findLine(sp.lineId)?.line.roleName || '',
+          pct: sp.pct,
+        })).filter((sp) => sp.teamName);
+        return { key: p.key, name: p.name, teamName: splits[0]?.teamName || '', roleName: splits[0]?.roleName || '', splits };
       }));
+    }
+    // האלוקציה נשמרת גם ברמת העסקה — כדי שאפשר יהיה לתקן אותה בדיעבד ולייבא לפיה
+    for (const p of importCtx.people || []) {
+      await store.setAllocation(state.dealId, p.key, importCtx.peopleAlloc[p.key] || []);
     }
     // שמירת קובץ הדוח עצמו בתיקיית העסקה (או בתוך המערכת אם אין תיקייה)
     let doc = null;
@@ -1383,11 +1577,12 @@ function exportProgressCSV() {
         { t: 'sub', text: `${live.length} דיווחים פעילים · ${snap.actualHours} שעות · הופק ב-${stamp()}` },
         { t: 'gap' },
         { t: 'table',
-          head: ['תאריך', 'צוות', 'שורת תקציב', 'עורך דין', 'שעות', 'מקור', 'קובץ', 'תקופת חיוב', 'הערה'],
-          fmt: ['date', 'text', 'text', 'text', 'hours', 'text', 'text', 'text', 'text'],
+          head: ['תאריך', 'צוות', 'שורת תקציב', 'עורך דין', 'שעות', 'אלוקציה', 'שעות בדיווח המקורי', 'מקור', 'קובץ', 'תקופת חיוב', 'הערה'],
+          fmt: ['date', 'text', 'text', 'text', 'hours', 'pct', 'hours', 'text', 'text', 'text', 'text'],
           rows: live.map((p) => [p.date, teamName.get(p.teamId) || '', lineLabel.get(p.lineId) || '', p.person,
-            p.hours, sourceLabel(p.source), p.fileName || '', p.billPeriod || '', p.note || '']),
-          total: ['סה"כ', '', '', '', snap.actualHours, '', '', '', ''] },
+            p.hours, num(p.allocPct || 100) / 100, num(p.sourceHours || p.hours),
+            sourceLabel(p.source), p.fileName || '', p.billPeriod || '', p.note || '']),
+          total: ['סה"כ', '', '', '', snap.actualHours, '', '', '', '', '', ''] },
       ] },
     { name: `סיכום ${periodLabel}`,
       blocks: [
@@ -1398,6 +1593,17 @@ function exportProgressCSV() {
           fmt: ['text', 'hours', 'money', 'hours', 'money', 'pct'],
           rows: periods.map((r) => [r.key, r.hours, r.cost, r.cumulativeHours, r.cumulativeCost,
             snap.budgetCost > 0 ? r.cumulativeCost / snap.budgetCost : '']) },
+      ] },
+    { name: 'אלוקציה לפי אדם',
+      blocks: [
+        { t: 'title', text: 'חלוקת השעות של כל אדם בין הצוותים' },
+        { t: 'gap' },
+        { t: 'table',
+          head: ['עורך דין / עובד', 'צוות', 'שורת תקציב', 'שעות', 'אחוז'],
+          fmt: ['text', 'text', 'text', 'hours', 'pct'],
+          rows: store.allocationBreakdown(snap.deal.id).flatMap((p) => (p.splits.length
+            ? p.splits.map((sp) => [p.name, teamName.get(sp.teamId) || '', lineLabel.get(sp.lineId) || '', sp.hours, sp.pct / 100])
+            : [[p.name, '', '— ללא שיוך —', p.hours, '']])) },
       ] },
     { name: 'מקורות מידע',
       blocks: [

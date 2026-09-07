@@ -235,9 +235,64 @@ export function normalizeProgress(p) {
     note: String(p?.note ?? ''),
     source: p?.source === 'import' ? 'import' : 'manual',
     fileName: String(p?.fileName ?? ''),
+    // הקובץ שממנו הגיע הדיווח (נשמר ב-files/בתיקיית העסקה) — לפתיחה ממסך המקורות
+    fileId: p?.fileId || '',
     batchId: p?.batchId || '',
+    // אלוקציה: אדם אחד יכול להשתייך לכמה צוותים, והשעות שלו מתחלקות ביניהם.
+    // allocGroupId מקשר את כל הרשומות שנוצרו מאותו דיווח מקורי, sourceHours שומר
+    // את הסכום לפני החלוקה — ולכן אפשר לשנות את האלוקציה בדיעבד בלי לאבד מידע.
+    allocGroupId: p?.allocGroupId || '',
+    allocPct: p?.allocPct === null || p?.allocPct === undefined || p?.allocPct === '' ? 100 : num(p.allocPct),
+    sourceHours: p?.sourceHours === null || p?.sourceHours === undefined || p?.sourceHours === ''
+      ? num(p?.hours) : num(p.sourceHours),
     createdAt: p?.createdAt || new Date().toISOString(),
   };
+}
+
+/* ============================================================
+   אלוקציית שעות בין צוותים
+   ============================================================ */
+
+/**
+ * נרמול אלוקציה: יעדים תקפים בלבד (שורת תקציב + אחוז חיובי), איחוד כפילויות
+ * וסכום שמנורמל ל-100%. אלוקציה ריקה = אין שיוך.
+ * @param {Array<{teamId,lineId,pct}>} splits
+ */
+export function normalizeSplits(splits) {
+  const out = [];
+  for (const s of splits || []) {
+    const lineId = String(s?.lineId || '').trim();
+    const pct = num(s?.pct);
+    if (!lineId || pct <= 0) continue;
+    const hit = out.find((x) => x.lineId === lineId);
+    if (hit) { hit.pct = round2(hit.pct + pct); continue; }
+    out.push({ teamId: String(s?.teamId || '').trim(), lineId, roleId: String(s?.roleId || ''), pct: round2(pct) });
+  }
+  return out;
+}
+
+export const splitsTotal = (splits) => round2((splits || []).reduce((s, x) => s + num(x?.pct), 0));
+
+/** אלוקציה של יעד יחיד (100%) — הצורה הרגילה כשאין פיצול */
+export const singleSplit = (teamId, lineId, roleId = '') => (lineId ? [{ teamId, lineId, roleId, pct: 100 }] : []);
+
+/**
+ * מחלק שעות לפי אחוזים בלי לאבד או להמציא שעות: החלוקה מעוגלת לאגורות
+ * ושארית העיגול מתחלקת לפי השאריות הגדולות. הסכום המוחזר שווה בדיוק לקלט.
+ * @returns {number[]} שעות לכל יעד, באותו סדר
+ */
+export function allocateHours(total, pcts) {
+  const list = (pcts || []).map((p) => Math.max(0, num(p)));
+  const sum = list.reduce((a, b) => a + b, 0);
+  if (!list.length || sum <= 0) return list.map(() => 0);
+  const sign = num(total) < 0 ? -1 : 1;
+  const units = Math.round(Math.abs(num(total)) * 100);
+  const raw = list.map((p) => (units * p) / sum);
+  const floored = raw.map((v) => Math.floor(v));
+  let rest = units - floored.reduce((a, b) => a + b, 0);
+  const order = raw.map((v, i) => ({ i, frac: v - Math.floor(v) })).sort((a, b) => b.frac - a.frac);
+  for (let k = 0; rest > 0 && order.length; k++, rest--) floored[order[k % order.length].i] += 1;
+  return floored.map((c) => round2((sign * c) / 100));
 }
 
 /* ============================================================

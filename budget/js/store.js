@@ -6,7 +6,9 @@ import {
   normalizeDeal, normalizeTeam, normalizeEntry, normalizeRateCard, normalizeProgress,
   DEFAULT_ROLES, DEFAULT_TEAM_NAMES, buildTeamFromTemplate, uid, computeDeal,
   roleMap, roleNameMap, normRoleName, resolveLineRole, num, round2,
+  normalizeSplits, splitsTotal, allocateHours,
 } from './model.js';
+import { personKey } from './importer.js';
 
 /* ---------- מטמון בזיכרון ---------- */
 export const cache = {
@@ -358,21 +360,49 @@ export function peopleTeamIdsFor(dealId) {
   return out;
 }
 
-/** שומר/מעדכן שיוכים. entries: [{ key, name, teamName, roleName }] — teamName ריק מוחק מהזיכרון */
+/**
+ * שומר/מעדכן שיוכים. entries: [{ key, name, teamName, roleName, splits }] —
+ * `splits` הוא האלוקציה המלאה ([{teamName, roleName, pct}]) כשהאדם מפוצל בין צוותים;
+ * teamName ריק ו-splits ריק מוחקים אותו מהזיכרון.
+ */
 export async function rememberPeopleTeams(list) {
   const memory = { ...getPeopleMemory() };
   for (const rec of list || []) {
     if (!rec?.key) continue;
-    if (rec.teamName) {
+    const splits = (rec.splits || []).filter((s) => s?.teamName && num(s.pct) > 0);
+    if (rec.teamName || splits.length) {
       memory[rec.key] = {
         name: rec.name || rec.key,
-        teamName: rec.teamName,
-        roleName: rec.roleName || memory[rec.key]?.roleName || '',
+        teamName: rec.teamName || splits[0]?.teamName || '',
+        roleName: rec.roleName || splits[0]?.roleName || memory[rec.key]?.roleName || '',
+        splits: splits.length > 1 ? splits.map((s) => ({ teamName: s.teamName, roleName: s.roleName || '', pct: round2(num(s.pct)) })) : [],
       };
     } else delete memory[rec.key];
   }
   await setSetting('peopleTeams', memory);
   return memory;
+}
+
+/**
+ * האלוקציה הזכורה לכל אדם, מתורגמת לצוותים של עסקה נתונה (לפי **שם** הצוות).
+ * @returns {Object<string, Array<{teamId, roleName, pct}>>}
+ */
+export function peopleAllocFor(dealId) {
+  const memory = getPeopleMemory();
+  const byName = new Map(teamsOf(dealId).map((t) => [String(t.name || '').trim().toLowerCase(), t.id]));
+  const out = {};
+  for (const [key, rec] of Object.entries(memory)) {
+    const splits = Array.isArray(rec?.splits) && rec.splits.length
+      ? rec.splits
+      : (rec?.teamName ? [{ teamName: rec.teamName, roleName: rec.roleName || '', pct: 100 }] : []);
+    const resolved = [];
+    for (const s of splits) {
+      const teamId = byName.get(String(s?.teamName || '').trim().toLowerCase());
+      if (teamId) resolved.push({ teamId, roleName: s.roleName || '', pct: round2(num(s.pct) || 100) });
+    }
+    if (resolved.length) out[key] = resolved;
+  }
+  return out;
 }
 
 /** כל האנשים שהמערכת מכירה: מהזיכרון, משורות התקציב, מעדכוני הביצוע ומהחשבונות */
@@ -424,6 +454,167 @@ export async function splitTeamByPeople(teamId, people) {
   team.lines = [...keep, ...added];
   await saveTeam(team);
   return added.length;
+}
+
+/**
+ * הוספת איש צוות חדש: שורת תקציב על שמו בצוות שנבחר.
+ * משמש כשבדוח שעות מופיע אדם שאין לו שיוך — במקום לוותר על השעות שלו.
+ * @returns {{teamId, lineId}|null}
+ */
+export async function addTeamMember(teamId, { person, roleId, rate, estHours } = {}) {
+  const team = getTeam(teamId);
+  const name = String(person || '').trim();
+  if (!team || !name) return null;
+  const card = rateCardFor(getDeal(team.dealId));
+  const role = roleMap(card).get(roleId) || card.roles[0];
+  const line = {
+    id: uid('ln'),
+    roleId: role?.id || '',
+    roleName: role?.name || '',
+    person: name,
+    estHours: num(estHours),
+    hoursOverride: null,
+    rateOverride: rate === '' || rate === undefined || rate === null ? null : num(rate),
+    manualHours: null, manualUpdatedAt: '', note: '',
+  };
+  team.lines = [...team.lines, line];
+  await saveTeam(team);
+  return { teamId: team.id, lineId: line.id };
+}
+
+/* ============================================================
+   אלוקציית שעות בין צוותים (כולל תיקון בדיעבד)
+   ============================================================ */
+
+/** האלוקציה שנשמרה לעסקה: { [personKey]: [{teamId, lineId, pct}] } */
+export function allocationsOf(dealId) {
+  const all = getSetting('allocations', {});
+  const rec = all && typeof all === 'object' ? all[dealId] : null;
+  return rec && typeof rec === 'object' ? rec : {};
+}
+
+/** שמירת האלוקציה של אדם בעסקה (מערך ריק = מחיקה) */
+export async function setAllocation(dealId, key, splits) {
+  const all = { ...(getSetting('allocations', {}) || {}) };
+  const forDeal = { ...(all[dealId] || {}) };
+  const clean = normalizeSplits(splits);
+  if (clean.length) forDeal[key] = clean; else delete forDeal[key];
+  all[dealId] = forDeal;
+  await setSetting('allocations', all);
+  return clean;
+}
+
+/**
+ * האלוקציה בפועל של כל אדם שדיווח שעות בעסקה — נגזרת מהדיווחים עצמם
+ * (ולא מההגדרה), כי היא מה שנספר בתקציב.
+ * @returns {Array<{key, name, hours, unassignedHours, groups, splits:[{teamId,lineId,hours,pct}], periods, batches}>}
+ */
+export function allocationBreakdown(dealId) {
+  const byPerson = new Map();
+  for (const p of progressOf(dealId)) {
+    const key = personKey(p.person) || '';
+    if (!key) continue;
+    const cur = byPerson.get(key) || {
+      key, name: String(p.person || '').trim(), hours: 0, unassignedHours: 0,
+      byLine: new Map(), groups: new Set(), periods: new Set(), batches: new Map(),
+    };
+    if (String(p.person || '').trim().length > cur.name.length) cur.name = String(p.person).trim();
+    cur.hours = round2(cur.hours + num(p.hours));
+    if (p.lineId) {
+      const hit = cur.byLine.get(p.lineId) || { teamId: p.teamId || '', lineId: p.lineId, hours: 0 };
+      hit.hours = round2(hit.hours + num(p.hours));
+      if (!hit.teamId && p.teamId) hit.teamId = p.teamId;
+      cur.byLine.set(p.lineId, hit);
+    } else cur.unassignedHours = round2(cur.unassignedHours + num(p.hours));
+    cur.groups.add(p.allocGroupId || p.id);
+    if (p.billPeriod) cur.periods.add(p.billPeriod);
+    if (p.source === 'import') cur.batches.set(p.batchId || p.fileName, p.fileName || 'דוח שעות');
+    byPerson.set(key, cur);
+  }
+  return [...byPerson.values()].map((p) => {
+    const total = [...p.byLine.values()].reduce((s, l) => s + l.hours, 0);
+    return {
+      key: p.key, name: p.name, hours: p.hours, unassignedHours: p.unassignedHours,
+      groups: p.groups.size,
+      splits: [...p.byLine.values()]
+        .map((l) => ({ ...l, pct: total > 0 ? round2((l.hours / total) * 100) : 0 }))
+        .sort((a, b) => b.hours - a.hours),
+      periods: [...p.periods].sort(),
+      batches: [...p.batches].map(([id, label]) => ({ id, label })),
+    };
+  }).sort((a, b) => b.hours - a.hours);
+}
+
+/** האם דיווח נכלל בהיקף שנבחר לתיקון: 'all' | 'period:YYYY-MM' | 'batch:<id>' */
+function inAllocScope(p, scope) {
+  if (!scope || scope === 'all') return true;
+  if (scope.startsWith('period:')) return p.billPeriod === scope.slice(7);
+  if (scope.startsWith('batch:')) return p.source === 'import' && (p.batchId || p.fileName) === scope.slice(6);
+  return true;
+}
+
+/**
+ * תיקון אלוקציה **בדיעבד**: מחלק מחדש את השעות שכבר דווחו לאדם, לפי אחוזים חדשים.
+ * העבודה היא ברמת הדיווח המקורי (allocGroupId) — כל דיווח מחולק מחדש בנפרד,
+ * ולכן התאריכים, תקופות החיוב, המקור והקובץ נשמרים במדויק והסך הכולל אינו משתנה.
+ * @param opts { dealId, key, splits:[{teamId,lineId,pct}], scope }
+ * @returns {{groups:number, removed:number, added:number, hours:number}}
+ */
+export async function reallocatePerson({ dealId, key, splits, scope = 'all' }) {
+  const targets = normalizeSplits(splits);
+  if (!targets.length) return { groups: 0, removed: 0, added: 0, hours: 0 };
+  const total = splitsTotal(targets);
+
+  const mine = progressOf(dealId).filter((p) => personKey(p.person) === key && inAllocScope(p, scope));
+  if (!mine.length) return { groups: 0, removed: 0, added: 0, hours: 0 };
+
+  // קיבוץ לפי הדיווח המקורי: רשומות שנוצרו מאותה שורה בדוח חולקו כבר ביניהן
+  const groups = new Map();
+  for (const p of mine) {
+    const gid = p.allocGroupId || p.id;
+    if (!groups.has(gid)) groups.set(gid, []);
+    groups.get(gid).push(p);
+  }
+
+  const doomed = [];
+  const fresh = [];
+  let movedHours = 0;
+  for (const [, recs] of groups) {
+    const rep = recs[0];
+    const base = recs.length === 1 && num(rep.sourceHours) ? num(rep.sourceHours)
+      : round2(recs.reduce((s, r) => s + num(r.hours), 0));
+    if (!base) continue;
+    const gid = uid('alc');
+    const parts = allocateHours(base, targets.map((t) => t.pct));
+    movedHours = round2(movedHours + base);
+    doomed.push(...recs.map((r) => r.id));
+    targets.forEach((t, i) => {
+      if (!parts[i]) return;
+      const line = findLine(t.lineId);
+      fresh.push(normalizeProgress({
+        dealId, teamId: t.teamId || line?.team.id || '', lineId: t.lineId,
+        roleId: line?.line.roleId || '', person: rep.person,
+        date: rep.date, billPeriod: rep.billPeriod,
+        periodFrom: rep.periodFrom, periodTo: rep.periodTo,
+        hours: parts[i], source: rep.source, fileName: rep.fileName,
+        fileId: rep.fileId, batchId: rep.batchId,
+        allocGroupId: gid, allocPct: round2((num(t.pct) / total) * 100), sourceHours: base,
+        note: targets.length > 1
+          ? `אלוקציה ${round2((num(t.pct) / total) * 100)}% מתוך ${base} שעות`
+          : (rep.note && !rep.note.startsWith('אלוקציה') ? rep.note : ''),
+      }));
+    });
+  }
+  if (!fresh.length) return { groups: 0, removed: 0, added: 0, hours: 0 };
+
+  const ids = new Set(doomed);
+  cache.progress = cache.progress.filter((p) => !ids.has(p.id));
+  cache.progress.push(...fresh);
+  await db.removeMany('progress', [...ids]);
+  await db.putMany('progress', fresh);
+  await setAllocation(dealId, key, targets);
+  notify('progress');
+  return { groups: groups.size, removed: ids.size, added: fresh.length, hours: round2(movedHours) };
 }
 
 /* ============================================================

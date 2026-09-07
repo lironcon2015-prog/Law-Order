@@ -102,8 +102,22 @@ CRM אישי לעו"ד M&A, vanilla JS · PWA · offline-first · RTL. חי ב-`
   ואת אחוז הניצול בטאב. כל תא מחושב חדש חייב `data-calc` + שורה ב-`refreshComputed`, אחרת יישאר תקוע.
 - **פוקוס בהקלדה**: החלפת DOM בתוך אירוע `input` מאבדת פוקוס (התו הראשון בלבד נקלט). לכן טבלת הביצוע
   יושבת ב-`.actuals-body` נפרד ו-`renderActualsList` מרנדר רק אותה — סרגל הסינון לא נהרס.
-- **שיוך אנשים לצוותים**: `settings.peopleTeams` = `{ שם מנורמל: { name, teamName } }`. נשמר לפי **שם הצוות**
-  כדי לחול על עסקאות עתידיות; `store.peopleTeamIdsFor(dealId)` מתרגם ל-teamId של העסקה הנוכחית.
+- **שיוך אנשים לצוותים**: `settings.peopleTeams` = `{ שם מנורמל: { name, teamName, roleName, splits[] } }`.
+  נשמר לפי **שם הצוות** כדי לחול על עסקאות עתידיות; `store.peopleTeamIdsFor(dealId)` מתרגם ל-teamId
+  של העסקה הנוכחית, ו-`store.peopleAllocFor(dealId)` מתרגם את `splits` (אלוקציה רב-צוותית) לאותה עסקה.
+- **אלוקציית שעות בין צוותים** (חבר צוות שמשתייך לכמה צוותים):
+  - הדיווח הוא **מקור אחד שמתפצל**: כל רשומה ב-`progress` נושאת `allocGroupId` (מקשר את הרשומות
+    שנוצרו מאותה שורת דוח), `allocPct` ו-`sourceHours` (הסכום לפני החלוקה).
+  - `model.allocateHours(total, pcts)` מחלק לפי אחוזים עם **largest-remainder** על אגורות — הסכום
+    המוחזר שווה בדיוק לקלט (אין שעות שנעלמות או נולדות בעיגול).
+  - `importer.rowsToProgress` מקבל מ-`resolve` **מערך יעדים** ([{teamId,lineId,pct}]) ולא יעד יחיד.
+  - **תיקון בדיעבד**: `store.reallocatePerson({dealId, key, splits, scope})` מקבץ את דיווחי האדם לפי
+    `allocGroupId`, מחשב מחדש לפי האחוזים החדשים ומחליף את הרשומות. `scope` = כל העסקה /
+    `period:YYYY-MM` / `batch:<id>` — כך אפשר לתקן רק תקופה או רק דוח מסוים. הסך הכולל נשמר.
+  - האלוקציה הפעילה נשמרת ב-`settings.allocations[dealId][personKey]` ונטענת בייבוא הבא.
+  - **הקמת איש צוות מהייבוא**: `store.addTeamMember(teamId, {person, roleId, rate})` פותח שורת תקציב
+    חדשה על שמו ומשייך אליה מיד; המודאל נפתח מעל מודאל הייבוא ומחזיר אליו (‏`importCtx` לא נמחק —
+    אסור לקרוא ל-`closeModal` בדרך, היא מאפסת אותו).
 - **ייבוא תקציב**: טבלת תעריפים באותה עמודה של שורות התקציב זוהתה כ"צוות 1" עם תעריפים כשעות.
   כעת שורת דרגה עם מספר יחיד לפני הצוות הראשון (או תחת כותרת "תעריפים") נקראת כתעריף.
 - **סדר צוותים**: `nextTeamOrder` = max+1 (לא `length`) — אחרת אחרי מחיקה נוצרות התנגשויות סדר.
@@ -120,4 +134,7 @@ CRM אישי לעו"ד M&A, vanilla JS · PWA · offline-first · RTL. חי ב-`
 - **grid blowout במובייל** (רשימה 460px על viewport 390): טראק `1fr` לא מוגבל ל-min-content → `grid-template-columns: minmax(0, 1fr)` + `min-width: 0` ל-sidebar/main.
 - header גלש במסכים ≤520px → breakpoint קומפקטי (root בלבד; ל-v2 יש sidebar).
 - **כרטיסים נדחסו ונחתכו ברשימה מלאה**: `.list`/`.lane__cards` הם flex-column גלילים, ו-`overflow:hidden` על `.card`/`.pcard` מאפס את ה-min-height האוטומטי של flex item → הכרטיסים כווצו במקום שהרשימה תגלול. תוקן ב-`flex-shrink: 0` (v1+v2). לקח: באג שתלוי בכמות נתונים — לשחזר עם רשימה שגולשת מגובה החלון, לא עם 4 רשומות דמו.
+- **`normalizeProgress` מסנן שדות לא מוכרים**: `fileId` הוצמד לרשומות הייבוא ב-app.js אבל נמחק בנרמול,
+  ולכן הקישור לקובץ במסך "מקורות המידע" לא עבד. השדה נוסף לנרמול. לקח: כל שדה חדש ברשומה חייב
+  להופיע ב-`normalize*` המתאים, אחרת הוא נעלם בשקט בשמירה.
 - **v2 ≤900px: ה-nav drawer היה תקוע באמצע המסך** — RTL: ‏`inset-inline-end`=left, ולכן `translateX(100%)` דחף לאמצע. תוקן ל-`inset-inline-start` (=ימין). בנוסף: ה-backdrop ישב על `body::after` מחוץ ל-stacking context של `.app` (z-index:1) וכיסה גם את המגירה — הועבר ל-`.app::after` (‏z-39, מגירה z-40) + קליק עליו סוגר (`refs.app` ב-app.js).
