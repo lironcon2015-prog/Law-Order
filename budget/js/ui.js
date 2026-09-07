@@ -2,7 +2,7 @@
 // אייקונים וגרפים הם SVG שנבנה בקוד (ללא קלט משתמש גולמי) ולכן מותר להם innerHTML.
 
 import {
-  fmtMoney, fmtHours, fmtPct, STATUS_LABEL, DEAL_STATUSES, FEE_MODELS,
+  fmtMoney, fmtHours, fmtPct, STATUS_LABEL, DEAL_STATUSES, FEE_MODELS, isOpenDeal,
   ENTRY_KINDS, ENTRY_STATUSES, TEAM_COLORS, num, round2, computePortfolio, burnSeries,
   aggregateTeams, aggregateByKind, progressByPeriod, sourceLabel, dealReview, splitsTotal,
 } from './model.js';
@@ -153,21 +153,35 @@ export function renderDealTabs(container, { deals, snapshots, activeId }) {
    סקירה — כל העסקאות
    ============================================================ */
 
-export function renderOverview(root, { snapshots }) {
+export function renderOverview(root, { snapshots, scope = 'open' }) {
   root.replaceChildren();
-  const list = [...snapshots.values()];
-  if (!list.length) {
+  const all = [...snapshots.values()];
+  if (!all.length) {
     root.append(emptyState('אין עדיין עסקאות', 'צור עסקה ראשונה כדי לבנות תקציב, להעלות חשבונות ולעקוב אחר עמידה בתקציב בזמן אמת.', 'עסקה חדשה', 'new-deal'));
     return;
   }
+  // עסקה שהסתיימה או שהועברה לארכיון אינה "פתוחה" — היא יוצאת מהכרטיסים,
+  // מה-KPI המצטבר **ומההתראות**, כדי שהמספרים יתארו את מה שרואים על המסך.
+  const list = scope === 'all' ? all : all.filter((s) => isOpenDeal(s.deal));
+  const hidden = all.length - list.length;
   const p = computePortfolio(list);
 
   root.append(el('div', { class: 'page-head' }, [
     el('div', {}, [
       el('h1', { class: 'page-title', text: 'סקירת תיק העסקאות' }),
-      el('p', { class: 'page-sub', text: `${p.deals} עסקאות · ${p.over} בחריגה · ${p.risk} בסיכון` }),
+      el('p', { class: 'page-sub', text: `${p.deals} עסקאות · ${p.over} בחריגה · ${p.risk} בסיכון${hidden ? ` · ${hidden} מוסתרות` : ''}` }),
     ]),
     el('div', { class: 'page-actions' }, [
+      el('div', { class: 'seg' }, [
+        el('button', {
+          class: `seg__btn${scope === 'open' ? ' is-on' : ''}`, type: 'button',
+          dataset: { action: 'set-scope', scope: 'open' }, title: 'פעילות ובהמתנה בלבד',
+        }, 'פתוחות'),
+        el('button', {
+          class: `seg__btn${scope === 'all' ? ' is-on' : ''}`, type: 'button',
+          dataset: { action: 'set-scope', scope: 'all' }, title: 'כולל שנסגרו ושבארכיון',
+        }, 'הכל'),
+      ]),
       el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'export-portfolio' } }, [icon('download'), 'ייצוא סקירה לאקסל']),
       el('button', { class: 'btn btn--primary btn--sm', type: 'button', dataset: { action: 'new-deal' } }, [icon('plus'), 'עסקה חדשה']),
     ]),
@@ -180,8 +194,17 @@ export function renderOverview(root, { snapshots }) {
     kpi('שכ"ט מוסכם', fmtMoney(p.agreedFee), { sub: p.agreedFee > 0 ? `רווח גולמי ${fmtMoney(p.agreedFee - p.actualCost)}` : 'לא הוגדר', icon: 'trending' }),
   ]));
 
+  if (!list.length) {
+    root.append(el('div', { class: 'empty' }, [
+      el('h2', { text: 'אין עסקאות פתוחות' }),
+      el('p', { text: `כל ${all.length} העסקאות סגורות או בארכיון. "הכל" יציג גם אותן.` }),
+    ]));
+    return;
+  }
+
   const grid = el('div', { class: 'deal-grid' });
   for (const s of list) {
+    const dealStatus = DEAL_STATUSES.find((x) => x.id === s.deal.status);
     grid.append(el('article', { class: 'dcard', dataset: { action: 'select-deal', id: s.deal.id }, tabindex: '0', role: 'button' }, [
       el('header', { class: 'dcard__head' }, [
         el('div', { class: 'dcard__id' }, [
@@ -208,6 +231,8 @@ export function renderOverview(root, { snapshots }) {
         el('span', { class: 'chip-mini', text: `${s.teams.length} צוותים` }),
         el('span', { class: 'chip-mini', text: `${s.entries.length} רישומים` }),
         s.eac !== null ? el('span', { class: `chip-mini ${s.eacVariance < 0 ? 'chip-mini--warn' : ''}`, text: `תחזית ${money(s.eac, s.deal)}` }) : null,
+        // במצב "הכל" מסמנים במפורש מה כבר לא פעיל
+        isOpenDeal(s.deal) ? null : el('span', { class: 'chip-mini chip-mini--muted', text: dealStatus?.label || s.deal.status }),
       ]),
     ]));
   }
@@ -216,7 +241,10 @@ export function renderOverview(root, { snapshots }) {
   const allAlerts = list.flatMap((s) => s.alerts.filter((a) => a.level === 'over' || a.level === 'risk').map((a) => ({ ...a, deal: s.deal })));
   if (allAlerts.length) {
     root.append(el('section', { class: 'panel' }, [
-      el('h2', { class: 'panel__title' }, [icon('alert'), 'התראות פתוחות']),
+      el('h2', { class: 'panel__title' }, [
+        icon('alert'), 'התראות פתוחות',
+        hidden ? el('span', { class: 'pill pill--info', text: `${hidden} עסקאות שאינן פתוחות אינן נכללות` }) : null,
+      ]),
       el('ul', { class: 'alerts' }, allAlerts.slice(0, 12).map((a) => el('li', { class: `alert alert--${a.level}` }, [
         icon(a.level === 'over' ? 'alert' : 'info'),
         el('span', {}, [el('strong', { text: `${a.deal.name}: ` }), a.text]),

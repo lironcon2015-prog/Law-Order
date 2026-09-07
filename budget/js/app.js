@@ -6,7 +6,7 @@ import * as db from './db.js';
 import {
   computeDeal, dealReview, aggregateByKind, uid, num, round2, fmtPct, fmtHours, roundUpHours, sourceLabel,
   DEFAULT_TEAM_NAMES, DEAL_STATUSES, ENTRY_KINDS, ENTRY_STATUSES,
-  normalizeSplits, splitsTotal,
+  normalizeSplits, splitsTotal, isOpenDeal,
 } from './model.js';
 import * as ui from './ui.js';
 import * as fileStore from './file-store.js';
@@ -23,7 +23,7 @@ import {
    State
    ============================================================ */
 
-const LS = { deal: 'lb_dealId', tab: 'lb_tab', view: 'lb_view', teamSort: 'lb_teamSort', expanded: 'lb_open_' };
+const LS = { deal: 'lb_dealId', tab: 'lb_tab', view: 'lb_view', scope: 'lb_ovScope', teamSort: 'lb_teamSort', expanded: 'lb_open_' };
 
 const state = {
   view: 'overview',        // 'overview' | 'deal' | 'rates'
@@ -35,6 +35,8 @@ const state = {
   expandedTeams: new Set(),   // צוותים שהגיליון שלהם פתוח
   expandedFor: null,          // העסקה שעבורה נקבע הפתיחה האוטומטית
   progressPeriod: 'week',     // תקופת הסיכום במסך המעקב: day | week | month
+  // מסך הסקירה: 'open' = פעילות + בהמתנה (ברירת מחדל) · 'all' = כולל שנסגרו ובארכיון
+  overviewScope: localStorage.getItem('lb_ovScope') === 'all' ? 'all' : 'open',
   teamSort: localStorage.getItem('lb_teamSort') === 'manual' ? 'manual' : 'priority',
 };
 
@@ -169,7 +171,7 @@ function render() {
     return;
   }
 
-  ui.renderOverview(els.main, { snapshots: state.snapshots });
+  ui.renderOverview(els.main, { snapshots: state.snapshots, scope: state.overviewScope });
 }
 
 /** רענון קל: מעדכן רק תאים מחושבים (בזמן הקלדה בגיליון התקציב) */
@@ -769,6 +771,11 @@ async function onClick(e) {
       }
       return;
     }
+
+    case 'set-scope':
+      state.overviewScope = target.dataset.scope === 'all' ? 'all' : 'open';
+      localStorage.setItem(LS.scope, state.overviewScope);
+      return render();
 
     case 'set-period':
       state.progressPeriod = target.dataset.period;
@@ -2412,13 +2419,15 @@ async function startPeopleImport(file) {
 }
 
 function exportPortfolioCSV() {
-  const list = [...state.snapshots.values()];
+  // מייצאים את מה שמוצג על המסך — אחרת הקובץ לא תואם את הסקירה
+  const all = [...state.snapshots.values()];
+  const list = state.overviewScope === 'all' ? all : all.filter((s) => isOpenDeal(s.deal));
   const sum = (f) => round2(list.reduce((a, s) => a + num(f(s)), 0));
   downloadWorkbook(`סקירת תקציבים — ${stamp()}`, [{
     name: 'סקירה',
     blocks: [
       { t: 'title', text: 'סקירת תקציבי עסקאות' },
-      { t: 'sub', text: `${list.length} עסקאות · הופק ב-${stamp()}` },
+      { t: 'sub', text: `${list.length} עסקאות${state.overviewScope === 'all' ? '' : ' פתוחות'} · הופק ב-${stamp()}` },
       { t: 'gap' },
       { t: 'table',
         head: ['עסקה', 'לקוח', 'סטטוס', 'שעות תקציב', 'שעות בפועל', 'תקציב', 'בפועל', 'יתרה', 'ניצול', 'שכ"ט מוסכם', 'רווח גולמי', 'תחזית לסיום'],

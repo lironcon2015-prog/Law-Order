@@ -372,6 +372,7 @@ table { border-collapse: collapse; }
   border: 1px solid var(--line-soft);
 }
 .chip-mini--warn { background: var(--warn-soft); color: var(--warn); border-color: rgba(251,146,60,.3); }
+.chip-mini--muted { background: var(--surface-3); color: var(--text-muted); border-color: var(--line-soft); }
 
 /* ---------- Pills ---------- */
 .pill {

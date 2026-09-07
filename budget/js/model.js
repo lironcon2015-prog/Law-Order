@@ -29,6 +29,10 @@ export const DEAL_STATUSES = [
   { id: 'archived', label: 'ארכיון',  tone: 'muted' },
 ];
 
+/** סטטוסים שנחשבים "עסקה פתוחה" — מה שמוצג בסקירה כברירת מחדל */
+export const OPEN_STATUSES = ['active', 'onhold'];
+export const isOpenDeal = (deal) => OPEN_STATUSES.includes(deal?.status || 'active');
+
 export const FEE_MODELS = [
   { id: 'hourly', label: 'שעתי',            hint: 'חיוב לפי שעות בפועל. התקציב הוא תחזית ובקרה.' },
   { id: 'capped', label: 'שעתי עם תקרה',    hint: 'חיוב לפי שעות עד תקרה מוסכמת. חריגה = הפסד.' },
