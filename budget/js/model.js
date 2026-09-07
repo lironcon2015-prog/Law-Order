@@ -133,7 +133,9 @@ export function normalizeLine(l) {
       ? null : num(l.hoursOverride),
     rateOverride: l?.rateOverride === null || l?.rateOverride === undefined || l?.rateOverride === ''
       ? null : num(l.rateOverride),
-    // חבר הצוות שהשורה מתייחסת אליו (אופציונלי — אפשר כמה שורות לאותה דרגה)
+    // חבר הצוות שהשורה מתייחסת אליו — הפניה לספריית האנשים (מקור אמת יחיד).
+    // `person` נשאר רק כשריד למיגרציה: אחרי ההמרה הוא ריק, והשם נקרא מהספרייה.
+    personId: String(l?.personId ?? ''),
     person: String(l?.person ?? ''),
     // מעקב שוטף: שעות שהוזנו ידנית מדוח פנימי. נפרד לחלוטין מרישומי החשבונות.
     manualHours: l?.manualHours === null || l?.manualHours === undefined || l?.manualHours === ''
@@ -151,12 +153,35 @@ export function normalizeTeam(t, i = 0) {
     lead: String(t?.lead ?? ''),
     color: t?.color || TEAM_COLORS[i % TEAM_COLORS.length],
     order: Number.isFinite(t?.order) ? t.order : i,
+    // סיווג הצוות — 'dd' = בדיקת נאותות. שדה קבוע, לא התאמה לפי שם הצוות.
+    kind: t?.kind === 'dd' ? 'dd' : 'regular',
     // מקדם חריגה ברמת הצוות — null = יורש מהעסקה
     overrunFactor: t?.overrunFactor === null || t?.overrunFactor === undefined || t?.overrunFactor === ''
       ? null : num(t.overrunFactor),
     lines: Array.isArray(t?.lines) ? t.lines.map(normalizeLine) : [],
     createdAt: t?.createdAt || new Date().toISOString(),
     updatedAt: t?.updatedAt || new Date().toISOString(),
+  };
+}
+
+/** רשומת איש צוות בספרייה — מקור האמת היחיד לשם, לתפקיד ולפרטי הקשר */
+export function normalizePerson(p) {
+  const name = String(p?.name ?? '').trim();
+  return {
+    id: p?.id || uid('per'),
+    // מפתח זהות מנורמל (ראה importer.personKey) — לחיפוש ולהתאמת כתיב
+    key: String(p?.key ?? '').trim(),
+    name,
+    title: String(p?.title ?? ''),
+    defaultTeamName: String(p?.defaultTeamName ?? ''),
+    email: String(p?.email ?? '').trim(),
+    phone: String(p?.phone ?? '').trim(),
+    // כתיבים נוספים שנמצאו בדוחות — נתוני זיהוי על אותה רשומה, לא מקור נוסף
+    aliases: Array.isArray(p?.aliases) ? [...new Set(p.aliases.filter(Boolean).map(String))] : [],
+    active: p?.active === false ? false : true,
+    notes: String(p?.notes ?? ''),
+    createdAt: p?.createdAt || new Date().toISOString(),
+    updatedAt: p?.updatedAt || new Date().toISOString(),
   };
 }
 
@@ -410,7 +435,9 @@ export function lineRate(line, role) {
  * מחשב תמונת מצב מלאה של עסקה: תקציב, ביצוע, סטיות, תחזית.
  * @returns {object} snapshot
  */
-export function computeDeal({ deal, teams, entries, rateCard, progress: progressLog }) {
+export function computeDeal({ deal, teams, entries, rateCard, progress: progressLog, people }) {
+  // שם חבר הצוות נקרא מהספרייה בכל רינדור — אין עותק שני של השם על השורה
+  const peopleById = new Map((people || []).map((p) => [p.id, p]));
   const roles = roleMap(rateCard);
   const rolesByName = roleNameMap(rateCard);
   const dealEntries = (entries || []).filter((e) => e.dealId === deal.id);
@@ -423,7 +450,12 @@ export function computeDeal({ deal, teams, entries, rateCard, progress: progress
     const team = dealTeams.find((t) => t.id === rec.teamId);
     if (!team) return '';
     const byPerson = rec.person
-      ? team.lines.find((l) => normPerson(l.person) && normPerson(l.person) === normPerson(rec.person))
+      ? team.lines.find((l) => {
+        const nm = peopleById.get(l.personId);
+        if (!nm) return false;
+        const target = normPerson(rec.person);
+        return normPerson(nm.name) === target || (nm.aliases || []).some((a) => normPerson(a) === target);
+      })
       : null;
     const byRole = rec.roleId ? team.lines.find((l) => l.roleId === rec.roleId) : null;
     return (byPerson || byRole)?.id || '';
@@ -486,6 +518,7 @@ export function computeDeal({ deal, teams, entries, rateCard, progress: progress
           ...line,
           roleId: effRoleId,
           roleName: role?.name || line.roleName || '—',
+          personName: peopleById.get(line.personId)?.name || '',
           // הדרגה כבר לא קיימת בתעריפון (גם לא לפי שם) — מוצג למשתמש כדי שלא ייעלם בשקט
           orphanRole: !role,
           junior: !!role?.junior,
@@ -554,6 +587,7 @@ export function computeDeal({ deal, teams, entries, rateCard, progress: progress
   for (const t of teamRows) for (const l of t.lines) {
     if (!l.junior) { actualSeniorHours += l.actualHours; actualSeniorCost += l.actualCost; }
   }
+  const actualJuniorCost = round2(actualCost - actualSeniorCost);
   const blendedActual = actualSeniorHours > 0 ? round2(actualSeniorCost / actualSeniorHours) : effectiveRate;
 
   const util = budgetCost > 0 ? actualCost / budgetCost : (actualCost > 0 ? Infinity : 0);
@@ -587,9 +621,16 @@ export function computeDeal({ deal, teams, entries, rateCard, progress: progress
 
   // תעריפים אפקטיביים אחרי החלת מקדם התקרה (על התכנון)
   const capF = capBudget.factor;
+  /*
+   * הבלנדד ללא ג'וניור אחרי תקרה — הג'וניורים יוצאים משני צדי השבר, כמו בבלנדד המתוכנן:
+   * עלות הג'וניורים יורדת ממה שנגבה, ושעותיהם אינן במכנה. `blendedRate * capF` היה שגוי
+   * כי הוא מותיר את עלות הג'וניורים בתוך המקדם (תקרה ÷ תקציב *כולל* ג'וניורים) ולכן
+   * "מגלגל" עליהם חלק מההנחה. כשאין תקרה collected = התקציב והנוסחה חוזרת בדיוק לבלנדד המתוכנן.
+   */
+  const seniorCollected = round2(capBudget.collected - juniorCost);
   const effectiveRates = {
     factor: capF,
-    blended: round2(blendedRate * capF),
+    blended: seniorHours > 0 ? round2(seniorCollected / seniorHours) : round2(blendedAll * capF),
     blendedAll: round2(blendedAll * capF),
     roles: (rateCard?.roles || []).map((r) => ({
       roleId: r.id, name: r.name, junior: r.junior,
@@ -614,9 +655,15 @@ export function computeDeal({ deal, teams, entries, rateCard, progress: progress
     seniorHours: round2(actualSeniorHours),
     juniorHours: round2(actualHours - actualSeniorHours),
     blendedAll: actualHours > 0 ? round2(collected / actualHours) : 0,
-    blendedSenior: actualSeniorHours > 0 ? round2(collected / actualSeniorHours) : 0,
+    /*
+     * גם כאן הג'וניורים יוצאים משני הצדדים: עלותם בפועל יורדת מהשכ"ט שנגבה,
+     * ושעותיהם אינן במכנה. בלי זה התקבל מספר גבוה מכל תעריף בתעריפון (השכ"ט
+     * *כולו* חולק בשעות הבכירים בלבד), וזה לא תעריף של דרגה אלא של העסקה.
+     */
+    blendedSenior: actualSeniorHours > 0 ? round2((collected - actualJuniorCost) / actualSeniorHours) : 0,
     // כמה אחוז מהתעריף המתוכנן נשאר בידינו בפועל
-    vsPlanned: blendedRate > 0 && actualSeniorHours > 0 ? round2(collected / actualSeniorHours) / blendedRate - 1 : null,
+    vsPlanned: blendedRate > 0 && actualSeniorHours > 0
+      ? round2((collected - actualJuniorCost) / actualSeniorHours) / blendedRate - 1 : null,
   };
   // התעריף שהתקבל בפועל לשעה, אחרי התקרה
   const realizedRate = actualHours > 0 ? round2(actualCost * capActual.factor / actualHours) : 0;
@@ -769,13 +816,16 @@ export function dealReview(snapshot) {
       if (!num(l.estHours) && !l.actualHours) continue;
       lines.push({
         teamId: t.id, teamName: t.name, teamColor: t.color, lineId: l.id,
-        roleId: l.roleId, roleName: l.roleName, person: l.person, junior: l.junior, rate: l.rate,
+        roleId: l.roleId, roleName: l.roleName, person: l.personName || '', junior: l.junior, rate: l.rate,
         estHours: round2(num(l.estHours)), budgetHours: l.budgetHours, actualHours: l.actualHours,
         budgetCost: l.budgetCost, actualCost: l.actualCost,
         deltaHours: round2(l.actualHours - l.budgetHours),
         deltaCost: round2(l.actualCost - l.budgetCost),
         vsEstimate: requiredFactor(l.estHours, l.actualHours),
         util: l.util,
+        // שיעור השעות של השורה מכלל שעות הצוות — לתכנון ולביצוע
+        shareOfTeamBudget: t.budgetHours > 0 ? l.budgetHours / t.budgetHours : 0,
+        shareOfTeam: t.actualHours > 0 ? l.actualHours / t.actualHours : 0,
       });
     }
   }
@@ -803,24 +853,41 @@ export function dealReview(snapshot) {
   }));
 
   // לפי אדם (חוצה צוותים) — רק כשיש שמות על השורות
+  const teamHours = new Map(snapshot.teams.map((t) => [t.id, { actual: t.actualHours, budget: t.budgetHours, name: t.name }]));
   const peopleMap = new Map();
   for (const l of lines) {
     const name = String(l.person || '').trim();
     if (!name) continue;
-    const cur = peopleMap.get(name) || { name, budgetHours: 0, actualHours: 0, budgetCost: 0, actualCost: 0, teams: new Set() };
+    const cur = peopleMap.get(name)
+      || { name, budgetHours: 0, actualHours: 0, budgetCost: 0, actualCost: 0, teams: new Set(), perTeam: new Map() };
     cur.budgetHours += l.budgetHours; cur.actualHours += l.actualHours;
     cur.budgetCost += l.budgetCost; cur.actualCost += l.actualCost;
     cur.teams.add(l.teamName);
+    // צבירה לפי צוות — "שיעור מהצוות" מוגדר מול הצוות שאליו האדם משויך
+    const inTeam = cur.perTeam.get(l.teamId) || { teamId: l.teamId, team: l.teamName, actualHours: 0, budgetHours: 0 };
+    inTeam.actualHours += l.actualHours; inTeam.budgetHours += l.budgetHours;
+    cur.perTeam.set(l.teamId, inTeam);
     peopleMap.set(name, cur);
   }
-  const people = [...peopleMap.values()].map((p) => ({
-    name: p.name, teams: [...p.teams],
-    budgetHours: round2(p.budgetHours), actualHours: round2(p.actualHours),
-    budgetCost: round2(p.budgetCost), actualCost: round2(p.actualCost),
-    deltaHours: round2(p.actualHours - p.budgetHours),
-    deltaCost: round2(p.actualCost - p.budgetCost),
-    util: p.budgetHours > 0 ? p.actualHours / p.budgetHours : (p.actualHours > 0 ? Infinity : 0),
-  })).sort((a, b) => b.actualHours - a.actualHours);
+  const people = [...peopleMap.values()].map((p) => {
+    const teamShares = [...p.perTeam.values()].map((x) => {
+      const tot = teamHours.get(x.teamId) || { actual: 0, budget: 0 };
+      return {
+        team: x.team,
+        actualHours: round2(x.actualHours), budgetHours: round2(x.budgetHours),
+        share: tot.actual > 0 ? x.actualHours / tot.actual : 0,
+        shareBudget: tot.budget > 0 ? x.budgetHours / tot.budget : 0,
+      };
+    }).sort((a, b) => b.share - a.share);
+    return {
+      name: p.name, teams: [...p.teams], teamShares,
+      budgetHours: round2(p.budgetHours), actualHours: round2(p.actualHours),
+      budgetCost: round2(p.budgetCost), actualCost: round2(p.actualCost),
+      deltaHours: round2(p.actualHours - p.budgetHours),
+      deltaCost: round2(p.actualCost - p.budgetCost),
+      util: p.budgetHours > 0 ? p.actualHours / p.budgetHours : (p.actualHours > 0 ? Infinity : 0),
+    };
+  }).sort((a, b) => b.actualHours - a.actualHours);
 
   const needed = requiredFactor(estHours, actualHours);
   // המלצה למקדם הבא — עיגול כלפי מעלה ל-5%, עם רצפה של המקדם הנוכחי כשלא חרגנו
@@ -877,6 +944,21 @@ export function aggregateTeams(snapshot, teamIds) {
   t.effectiveRate = t.actualHours > 0 ? round2(t.actualCost / t.actualHours) : 0;
   t.shareOfDeal = snapshot.budgetCost > 0 ? t.budgetCost / snapshot.budgetCost : 0;
   return t;
+}
+
+/**
+ * פילוח בדיקת נאותות מול יתר הצוותים.
+ * הסיווג הוא שדה על הצוות (`kind`), ולא התאמה לפי שם — "בדיקת נאותות" הוא שם
+ * צוות אפשרי בכל עסקה, ושם אינו סיווג.
+ */
+export function aggregateByKind(snapshot) {
+  const dd = snapshot.teams.filter((t) => t.kind === 'dd');
+  const rest = snapshot.teams.filter((t) => t.kind !== 'dd');
+  return {
+    hasDD: dd.length > 0,
+    dd: aggregateTeams(snapshot, dd.map((t) => t.id)),
+    regular: aggregateTeams(snapshot, rest.map((t) => t.id)),
+  };
 }
 
 /** סיכום תיק העסקאות (לתצוגת הסקירה) */

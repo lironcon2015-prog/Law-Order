@@ -49,6 +49,46 @@ const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
  * הניקוד מעדיף התאמה מדויקת על מילה שלמה על הכלה — אחרת כותרת כמו "שעות עבודה"
  * חוטפת את שדה ה"תיאור" (בגלל מילת המפתח "עבודה") ומשאירה את התיאור ריק.
  */
+/* ============================================================
+   ייבוא אנשי קשר לספריית אנשי הצוות
+   ============================================================ */
+
+export const CONTACT_FIELDS = [
+  { id: 'name',  label: 'שם',      keys: ['שם מלא', 'שם', 'שם עורך דין', 'עורך דין', 'איש קשר', 'name', 'full name', 'contact'] },
+  { id: 'title', label: 'תפקיד',   keys: ['תפקיד', 'דרגה', 'רמה', 'title', 'role', 'position', 'seniority'] },
+  { id: 'team',  label: 'צוות',    keys: ['צוות', 'מחלקה', 'תחום', 'team', 'department', 'practice', 'group'] },
+  { id: 'email', label: 'דוא"ל',   keys: ['דוא"ל', 'דואל', 'אימייל', 'מייל', 'email', 'e-mail', 'mail'] },
+  { id: 'phone', label: 'טלפון',   keys: ['טלפון', 'נייד', 'סלולרי', 'phone', 'mobile', 'tel', 'cell'] },
+];
+
+/** מיפוי עמודות לאנשי קשר — אותו ניקוד כמו guessMapping, על מילון אחר */
+export function guessContactMapping(headerCells) {
+  return guessByFields(headerCells, CONTACT_FIELDS);
+}
+
+/**
+ * שורות הקובץ → רשומות אנשי קשר. השדה היחיד שחייב הוא שם;
+ * שורה בלי שם מדולגת (ונספרת), כדי שכותרות ושורות ריקות לא ייכנסו לספרייה.
+ */
+export function rowsToContacts(rows, mapping) {
+  const at = (row, field) => (mapping[field] === undefined ? '' : String(row[mapping[field]] ?? '').trim());
+  const out = [];
+  let skipped = 0;
+  for (const row of rows || []) {
+    const name = personDisplay(at(row, 'name'));
+    if (!name) { skipped += 1; continue; }
+    out.push({
+      name,
+      key: personKey(name),
+      title: at(row, 'title'),
+      defaultTeamName: at(row, 'team'),
+      email: at(row, 'email'),
+      phone: at(row, 'phone'),
+    });
+  }
+  return { contacts: out, skipped };
+}
+
 export function guessMapping(headerCells) {
   const cands = [];
   (headerCells || []).forEach((cell, idx) => {
@@ -68,6 +108,35 @@ export function guessMapping(headerCells) {
   });
   cands.sort((a, b) => b.score - a.score);
 
+  const mapping = {};
+  const used = new Set();
+  for (const c of cands) {
+    if (mapping[c.field] !== undefined || used.has(c.idx)) continue;
+    mapping[c.field] = c.idx;
+    used.add(c.idx);
+  }
+  return mapping;
+}
+
+/** אותו ניקוד כמו guessMapping, מעל רשימת שדות אחרת */
+function guessByFields(headerCells, fields) {
+  const cands = [];
+  (headerCells || []).forEach((cell, idx) => {
+    const v = norm(cell);
+    if (!v) return;
+    for (const f of fields) {
+      for (const k of f.keys) {
+        const nk = norm(k);
+        if (!nk) continue;
+        let score = 0;
+        if (v === nk) score = 100 + nk.length;
+        else if (new RegExp(`(^| )${escapeRe(nk)}( |$)`).test(v)) score = 60 + nk.length;
+        else if (v.includes(nk)) score = 30 + nk.length;
+        if (score) cands.push({ field: f.id, idx, score });
+      }
+    }
+  });
+  cands.sort((a, b) => b.score - a.score);
   const mapping = {};
   const used = new Set();
   for (const c of cands) {

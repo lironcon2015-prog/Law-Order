@@ -6,16 +6,24 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { stamp } from './tools/stamp.mjs';
 
 const BUDGET = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(BUDGET, '..');
 const rd = (p) => readFileSync(join(BUDGET, p), 'utf8');
 const b64 = (p) => readFileSync(join(BUDGET, p)).toString('base64');
 
+/* ---------- 0) חותמת גרסה — כדי שכל בילד יידע להציג מתי ומאיזה commit נבנה ---------- */
+const BUILD = stamp({ channel: 'web' });   // version.js לאתר החי
+
 /* ---------- 1) מודולי JS בסדר תלויות ---------- */
-const ORDER = ['model.js', 'db.js', 'xlsx.js', 'xlsx-write.js', 'pdf-table.js', 'charts.js', 'importer.js', 'store.js', 'file-store.js', 'ui.js', 'app.js'];
+const ORDER = ['version.js', 'model.js', 'db.js', 'xlsx.js', 'xlsx-write.js', 'pdf-table.js', 'charts.js', 'importer.js', 'store.js', 'file-store.js', 'ui.js', 'app.js'];
 const SRC = {};
-for (const name of ORDER) SRC[name] = Buffer.from(rd('js/' + name), 'utf8').toString('base64');
+for (const name of ORDER) {
+  // בקובץ האופליין הערוץ הוא 'offline' — כך רואים במסך ההגדרות מאיזה מקור הגרסה
+  const src = name === 'version.js' ? rd('js/' + name).replace("channel: 'web'", "channel: 'offline'") : rd('js/' + name);
+  SRC[name] = Buffer.from(src, 'utf8').toString('base64');
+}
 
 /* ---------- 1ב) ספריות vendor (pdf.js) — נחשפות כ-blob URLs דרך __OFFLINE_VENDOR__ ---------- */
 const VENDOR = {
@@ -75,4 +83,4 @@ html = html.replace('</body>', `  ${bootstrap}\n</body>`);
 const out = join(ROOT, 'LexBudget-Offline.html');
 writeFileSync(out, html, 'utf8');
 const kb = (Buffer.byteLength(html, 'utf8') / 1024).toFixed(0);
-console.log(`✓ ${out}  (${kb} KB)`);
+console.log(`✓ ${out}  (${kb} KB)  ·  ${BUILD.builtAt.slice(0, 16).replace('T', ' ')} · ${BUILD.commit} · ${BUILD.cache}`);

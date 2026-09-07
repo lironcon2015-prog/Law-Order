@@ -2,13 +2,13 @@
 // כל מוטציה מעדכנת את המטמון בזיכרון ומודיעה למאזין (רינדור + סימון "לא מסונכרן").
 
 import * as db from './db.js';
+import { personKey, personDisplay, fuzzyPersonMatch } from './importer.js';
 import {
-  normalizeDeal, normalizeTeam, normalizeEntry, normalizeRateCard, normalizeProgress,
+  normalizeDeal, normalizeTeam, normalizeEntry, normalizeRateCard, normalizeProgress, normalizePerson,
   DEFAULT_ROLES, DEFAULT_TEAM_NAMES, buildTeamFromTemplate, uid, computeDeal,
   roleMap, roleNameMap, normRoleName, resolveLineRole, num, round2,
   normalizeSplits, splitsTotal, allocateHours,
 } from './model.js';
-import { personKey } from './importer.js';
 
 /* ---------- מטמון בזיכרון ---------- */
 export const cache = {
@@ -17,6 +17,7 @@ export const cache = {
   entries: [],
   progress: [],
   rateCards: [],
+  people: [],
   settings: {},
   healedDeals: 0,   // עסקאות ששורות התקציב שלהן חוברו מחדש לתעריפון בטעינה
   loaded: false,
@@ -37,9 +38,9 @@ function notify(kind) {
    ============================================================ */
 
 export async function loadAll() {
-  const [deals, teams, entries, rateCards, settings, progress] = await Promise.all([
+  const [deals, teams, entries, rateCards, settings, progress, people] = await Promise.all([
     db.getAll('deals'), db.getAll('teams'), db.getAll('entries'),
-    db.getAll('rateCards'), db.getAll('settings'), db.getAll('progress'),
+    db.getAll('rateCards'), db.getAll('settings'), db.getAll('progress'), db.getAll('people'),
   ]);
   cache.deals = (deals || []).map(normalizeDeal).sort((a, b) => a.order - b.order);
   cache.teams = (teams || []).map(normalizeTeam);
@@ -47,7 +48,9 @@ export async function loadAll() {
   cache.rateCards = (rateCards || []).map(normalizeRateCard);
   cache.settings = Object.fromEntries((settings || []).map((s) => [s.key, s.value]));
   cache.progress = (progress || []).map(normalizeProgress);
+  cache.people = (people || []).map(normalizePerson);
   await migrateManualHours();
+  await migratePeopleDirectory();
 
   if (!cache.rateCards.length) {
     const card = normalizeRateCard({ name: 'תעריפון המשרד', isDefault: true, roles: DEFAULT_ROLES });
@@ -147,6 +150,233 @@ async function migrateManualHours() {
     cache.progress.push(...records);
     await db.putMany('progress', records);
   }
+  if (dirtyTeams.length) await db.putMany('teams', dirtyTeams);
+}
+
+/* ============================================================
+   ספריית אנשי הצוות — מקור האמת היחיד לשמות
+   ============================================================ */
+
+export function peopleList({ includeInactive = false } = {}) {
+  return cache.people
+    .filter((p) => includeInactive || p.active)
+    .sort((a, b) => a.name.localeCompare(b.name, 'he'));
+}
+
+export function personById(id) {
+  return id ? cache.people.find((p) => p.id === id) || null : null;
+}
+
+/** שם לתצוגה של שורת תקציב — תמיד מהספרייה, לעולם לא מטקסט ששמור על השורה */
+export function personNameOf(id) {
+  return personById(id)?.name || '';
+}
+
+/** התאמה לפי מפתח זהות או לפי alias — הבסיס לחיפוש בחלון הבחירה ולייבוא */
+export function findPersonByName(name) {
+  const key = personKey(name);
+  if (!key) return null;
+  return cache.people.find((p) => p.key === key)
+    || cache.people.find((p) => (p.aliases || []).some((a) => personKey(a) === key))
+    || null;
+}
+
+export async function savePerson(patch) {
+  const existing = patch.id ? personById(patch.id) : null;
+  const name = String(patch.name ?? existing?.name ?? '').trim();
+  const person = normalizePerson({
+    ...(existing || {}), ...patch,
+    name, key: personKey(name) || existing?.key || '',
+    updatedAt: new Date().toISOString(),
+  });
+  const i = cache.people.findIndex((p) => p.id === person.id);
+  if (i >= 0) cache.people[i] = person; else cache.people.push(person);
+  await db.put('people', person);
+  notify('people');
+  return person;
+}
+
+/** כתיב נוסף שנמצא בדוח — נשמר על הרשומה הקיימת ולא יוצר רשומה חדשה */
+export async function rememberAlias(personId, spelling) {
+  const person = personById(personId);
+  const raw = String(spelling || '').trim();
+  if (!person || !raw) return person;
+  const key = personKey(raw);
+  if (!key || key === person.key || (person.aliases || []).some((a) => personKey(a) === key)) return person;
+  return savePerson({ ...person, aliases: [...person.aliases, raw] });
+}
+
+/** כמה שורות תקציב (בכל העסקאות) משויכות לאדם */
+export function personUsage(personId) {
+  const teams = cache.teams.filter((t) => t.lines.some((l) => l.personId === personId));
+  const lines = teams.reduce((n, t) => n + t.lines.filter((l) => l.personId === personId).length, 0);
+  return { deals: new Set(teams.map((t) => t.dealId)).size, teams: teams.length, lines };
+}
+
+/**
+ * מחיקה מותרת רק כשאף שורה לא מפנה לאדם — אחרת נשארות שורות עם personId יתום.
+ * במקום מחיקה: סימון `active: false`, שמעלים אותו מחלונות הבחירה ומשאיר את ההיסטוריה.
+ */
+export async function deletePerson(personId) {
+  const usage = personUsage(personId);
+  if (usage.lines) return { ok: false, usage };
+  cache.people = cache.people.filter((p) => p.id !== personId);
+  await db.remove('people', personId);
+  notify('people');
+  return { ok: true, usage };
+}
+
+/** מיזוג כפילויות: כל ההפניות עוברות לרשומה השורדת, והכתיבים נשמרים כ-aliases */
+export async function mergePeople(keepId, dropId) {
+  const keep = personById(keepId); const drop = personById(dropId);
+  if (!keep || !drop || keepId === dropId) return null;
+  const dirty = [];
+  for (const team of cache.teams) {
+    let changed = false;
+    for (const line of team.lines) if (line.personId === dropId) { line.personId = keepId; changed = true; }
+    if (changed) dirty.push(team);
+  }
+  if (dirty.length) await db.putMany('teams', dirty);
+  const merged = await savePerson({
+    ...keep,
+    title: keep.title || drop.title,
+    defaultTeamName: keep.defaultTeamName || drop.defaultTeamName,
+    email: keep.email || drop.email,
+    phone: keep.phone || drop.phone,
+    aliases: [...new Set([...keep.aliases, ...drop.aliases, drop.name])],
+  });
+  cache.people = cache.people.filter((p) => p.id !== dropId);
+  await db.remove('people', dropId);
+  notify('people');
+  return { merged, movedLines: dirty.reduce((n, t) => n + t.lines.filter((l) => l.personId === keepId).length, 0) };
+}
+
+/**
+ * הצעות מיזוג — זוגות ששמותיהם קרובים מספיק (אותה לוגיקה של התאמת שמות בייבוא).
+ * מוצג כהתראה במסך הספרייה; המיזוג עצמו תמיד בידי המשתמש.
+ */
+export function suggestPeopleMerges() {
+  const list = cache.people;
+  const out = [];
+  for (let i = 0; i < list.length; i++) {
+    for (let j = i + 1; j < list.length; j++) {
+      const a = list[i]; const b = list[j];
+      if (!a.key || !b.key) continue;
+      if (a.key === b.key || fuzzyPersonMatch(a.key, [b.key])?.key === b.key) out.push([a, b]);
+    }
+  }
+  return out.slice(0, 12);
+}
+
+/** מי משויך לעסקה, ומאיזה מקור — לייצוא אנשי הקשר של העסקה */
+export function dealContacts(dealId) {
+  const found = new Map();
+  const add = (person, source, hours = 0, teamName = '') => {
+    if (!person) return;
+    const cur = found.get(person.id) || { person, sources: new Set(), hours: 0, teams: new Set() };
+    cur.sources.add(source);
+    cur.hours = round2(cur.hours + hours);
+    if (teamName) cur.teams.add(teamName);
+    found.set(person.id, cur);
+  };
+  for (const team of teamsOf(dealId)) {
+    for (const line of team.lines) {
+      if (!line.personId) continue;
+      add(personById(line.personId), 'שורת תקציב', manualHoursOfLine(line.id), team.name);
+    }
+    if (String(team.lead || '').trim()) add(findPersonByName(team.lead), 'אחראי צוות', 0, team.name);
+  }
+  for (const rec of progressOf(dealId)) if (rec.person) add(findPersonByName(rec.person), 'דיווח שעות', 0);
+  for (const e of entriesOf(dealId)) if (e.person) add(findPersonByName(e.person), 'חשבון', 0);
+  return [...found.values()]
+    .map((x) => ({ ...x, sources: [...x.sources], teams: [...x.teams] }))
+    .sort((a, b) => b.hours - a.hours || a.person.name.localeCompare(b.person.name, 'he'));
+}
+
+/** החלת ייבוא אנשי קשר. מחזיר סיכום, ושומר עותק קודם לביטול. */
+export async function applyContactsImport(decisions) {
+  const before = cache.people.map((p) => ({ ...p, aliases: [...p.aliases] }));
+  let created = 0; let updated = 0;
+  for (const d of decisions || []) {
+    if (d.action === 'skip') continue;
+    if (d.action === 'create') {
+      await savePerson({ name: d.contact.name, title: d.contact.title, defaultTeamName: d.contact.defaultTeamName,
+        email: d.contact.email, phone: d.contact.phone });
+      created += 1;
+    } else if (d.action === 'update' && d.personId) {
+      const person = personById(d.personId);
+      if (!person) continue;
+      const pick = (cur, next) => (d.fillEmptyOnly ? (cur || next || '') : (next || cur || ''));
+      await savePerson({
+        ...person,
+        title: pick(person.title, d.contact.title),
+        defaultTeamName: pick(person.defaultTeamName, d.contact.defaultTeamName),
+        email: pick(person.email, d.contact.email),
+        phone: pick(person.phone, d.contact.phone),
+        aliases: d.contact.name && d.contact.name !== person.name
+          ? [...new Set([...person.aliases, d.contact.name])] : person.aliases,
+      });
+      updated += 1;
+    }
+  }
+  return { created, updated, before };
+}
+
+/** ביטול ייבוא — החזרת הספרייה למצב שלפני ההחלה */
+export async function restorePeople(snapshot) {
+  cache.people = (snapshot || []).map(normalizePerson);
+  await db.replaceAll('people', cache.people);
+  notify('people');
+}
+
+/**
+ * מיגרציה לספרייה: כל שם שהוקלד עד היום כטקסט חופשי הופך לרשומה אחת לפי `personKey`
+ * (כתיבים שונים של אותו אדם מתאחדים, והכתיב הנוסף נשמר כ-alias), השורות מקבלות
+ * `personId`, והשדה הישן מתרוקן. `settings.peopleTeams` נקרא כאן לצורך התפקיד/הצוות
+ * ההתחלתיים — ומכאן ואילך `defaultTeamName` שברשומה הוא המקור.
+ */
+async function migratePeopleDirectory() {
+  const memory = getPeopleMemory();
+  const byKey = new Map(cache.people.map((p) => [p.key, p]));
+  const created = [];
+  const ensure = (rawName, hints = {}) => {
+    const name = personDisplay(rawName);
+    const key = personKey(name);
+    if (!key) return null;
+    let person = byKey.get(key);
+    if (!person) {
+      person = normalizePerson({
+        name, key,
+        title: hints.title || '',
+        defaultTeamName: hints.teamName || '',
+      });
+      byKey.set(key, person);
+      cache.people.push(person);
+      created.push(person);
+    }
+    // כתיב שונה מזה שנשמר — נרשם כ-alias כדי שהתאמות עתידיות יזהו אותו
+    const raw = String(rawName || '').trim();
+    if (raw && raw !== person.name && !person.aliases.some((a) => a === raw)) {
+      person.aliases.push(raw);
+      if (!created.includes(person)) created.push(person);
+    }
+    return person;
+  };
+
+  for (const rec of Object.values(memory)) ensure(rec?.name, { teamName: rec?.teamName, title: rec?.roleName });
+
+  const dirtyTeams = [];
+  for (const team of cache.teams) {
+    let changed = false;
+    for (const line of team.lines) {
+      if (line.personId || !String(line.person || '').trim()) continue;
+      const person = ensure(line.person, { teamName: team.name, title: line.roleName });
+      if (person) { line.personId = person.id; line.person = ''; changed = true; }
+    }
+    if (changed) dirtyTeams.push(team);
+  }
+
+  if (created.length) await db.putMany('people', created);
   if (dirtyTeams.length) await db.putMany('teams', dirtyTeams);
 }
 
@@ -318,7 +548,8 @@ export async function setLineManualTotal(lineId, total, { date, note } = {}) {
   if (!delta) return null;
   return addProgress({
     dealId: line.team.dealId, teamId: line.team.id, lineId,
-    roleId: line.line.roleId, person: line.line.person,
+    // השם מגיע מספריית האנשים; `line.person` נשאר רק לשורות שטרם עברו מיגרציה
+    roleId: line.line.roleId, person: personNameOf(line.line.personId) || line.line.person,
     hours: delta, source: 'manual',
     date: date || new Date().toISOString().slice(0, 10),
     note: note || (current === 0 ? 'הזנה ידנית' : 'עדכון מצטבר'),
@@ -431,20 +662,21 @@ export async function splitTeamByPeople(teamId, people) {
   if (!team) return 0;
   const card = rateCardFor(getDeal(team.dealId));
   const byId = roleMap(card);
-  const existing = new Set(team.lines.map((l) => String(l.person || '').trim().toLowerCase()).filter(Boolean));
+  // הפריסה עובדת על מזהים מהספרייה — אין יצירת שם חופשי בשום מסלול
+  const existing = new Set(team.lines.map((l) => l.personId).filter(Boolean));
 
   const added = [];
   for (const p of people || []) {
-    const name = String(p.name || '').trim();
-    if (!name || existing.has(name.toLowerCase())) continue;
+    const person = personById(p.personId);
+    if (!person || existing.has(person.id)) continue;
     const role = byId.get(p.roleId) || card.roles[0];
     added.push({
       id: uid('ln'), roleId: role?.id || '', roleName: role?.name || '',
-      person: name, estHours: 0, hoursOverride: null,
+      personId: person.id, person: '', estHours: 0, hoursOverride: null,
       rateOverride: p.rate === '' || p.rate === undefined || p.rate === null ? null : num(p.rate),
       manualHours: null, manualUpdatedAt: '', note: '',
     });
-    existing.add(name.toLowerCase());
+    existing.add(person.id);
   }
   if (!added.length) return 0;
 
@@ -459,19 +691,27 @@ export async function splitTeamByPeople(teamId, people) {
 /**
  * הוספת איש צוות חדש: שורת תקציב על שמו בצוות שנבחר.
  * משמש כשבדוח שעות מופיע אדם שאין לו שיוך — במקום לוותר על השעות שלו.
- * @returns {{teamId, lineId}|null}
+ * השם נרשם **בספריית האנשים** (מקור האמת היחיד): אדם קיים מזוהה לפי מפתח או alias
+ * והכתיב שבדוח נשמר לו כ-alias; אדם חדש נוצר בספרייה. השורה מחזיקה `personId` בלבד.
+ * @returns {{teamId, lineId, personId}|null}
  */
-export async function addTeamMember(teamId, { person, roleId, rate, estHours } = {}) {
+export async function addTeamMember(teamId, { person, personId, roleId, rate, estHours } = {}) {
   const team = getTeam(teamId);
   const name = String(person || '').trim();
-  if (!team || !name) return null;
+  if (!team || (!name && !personId)) return null;
+
+  let record = personId ? personById(personId) : findPersonByName(name);
+  if (!record) record = await savePerson({ name: personDisplay(name) || name });
+  else if (name) await rememberAlias(record.id, name);
+
   const card = rateCardFor(getDeal(team.dealId));
   const role = roleMap(card).get(roleId) || card.roles[0];
   const line = {
     id: uid('ln'),
     roleId: role?.id || '',
     roleName: role?.name || '',
-    person: name,
+    personId: record.id,
+    person: '',
     estHours: num(estHours),
     hoursOverride: null,
     rateOverride: rate === '' || rate === undefined || rate === null ? null : num(rate),
@@ -479,7 +719,7 @@ export async function addTeamMember(teamId, { person, roleId, rate, estHours } =
   };
   team.lines = [...team.lines, line];
   await saveTeam(team);
-  return { teamId: team.id, lineId: line.id };
+  return { teamId: team.id, lineId: line.id, personId: record.id };
 }
 
 /* ============================================================
@@ -518,7 +758,10 @@ export function allocationBreakdown(dealId) {
       key, name: String(p.person || '').trim(), hours: 0, unassignedHours: 0,
       byLine: new Map(), groups: new Set(), periods: new Set(), batches: new Map(),
     };
-    if (String(p.person || '').trim().length > cur.name.length) cur.name = String(p.person).trim();
+    // השם לתצוגה מגיע מספריית האנשים כשהיא מכירה את הכתיב שבדוח (מקור אמת יחיד)
+    const known = findPersonByName(p.person)?.name || '';
+    if (known) cur.name = known;
+    else if (String(p.person || '').trim().length > cur.name.length) cur.name = String(p.person).trim();
     cur.hours = round2(cur.hours + num(p.hours));
     if (p.lineId) {
       const hit = cur.byLine.get(p.lineId) || { teamId: p.teamId || '', lineId: p.lineId, hours: 0 };
@@ -747,7 +990,7 @@ export function entriesOf(dealId) {
 export function snapshotOf(dealId) {
   const deal = getDeal(dealId);
   if (!deal) return null;
-  return computeDeal({ deal, teams: cache.teams, entries: cache.entries, rateCard: rateCardFor(deal), progress: cache.progress });
+  return computeDeal({ deal, teams: cache.teams, entries: cache.entries, rateCard: rateCardFor(deal), progress: cache.progress, people: cache.people });
 }
 
 export async function saveDeal(patch) {
@@ -918,11 +1161,31 @@ export async function addTeam(dealId, name) {
 export async function deleteTeam(teamId) {
   // רישומי ביצוע ששויכו לצוות עוברים ל"ללא שיוך" ולא נמחקים
   const orphans = cache.entries.filter((e) => e.teamId === teamId);
+  const entryIds = orphans.map((e) => e.id);
   for (const e of orphans) { e.teamId = ''; e.roleId = e.roleId || ''; }
   cache.teams = cache.teams.filter((t) => t.id !== teamId);
   await Promise.all([db.remove('teams', teamId), db.putMany('entries', orphans)]);
   notify('team');
-  return orphans.length;
+  return { count: orphans.length, entryIds };
+}
+
+/** ביטול מחיקת צוות — מחזיר את הצוות ומחבר אליו בחזרה את רישומי הביצוע */
+export async function restoreTeam(team, entryIds = []) {
+  const restored = await saveTeam(team);
+  const back = cache.entries.filter((e) => entryIds.includes(e.id));
+  for (const e of back) e.teamId = restored.id;
+  if (back.length) await db.putMany('entries', back);
+  notify('team');
+  return restored;
+}
+
+/** סדר השורות בתוך צוות (גרירה בגיליון) */
+export async function reorderLines(teamId, orderedIds) {
+  const team = getTeam(teamId);
+  if (!team) return null;
+  const rank = new Map(orderedIds.map((id, i) => [id, i]));
+  const lines = [...team.lines].sort((a, b) => (rank.get(a.id) ?? 99) - (rank.get(b.id) ?? 99));
+  return saveTeam({ ...team, lines });
 }
 
 export async function reorderTeams(dealId, orderedIds) {
@@ -1029,6 +1292,7 @@ export async function collectBackup() {
     entries: cache.entries,
     progress: cache.progress,
     rateCards: cache.rateCards,
+    people: cache.people,
     settings: Object.entries(cache.settings).map(([key, value]) => ({ key, value })),
   };
 }
@@ -1046,6 +1310,8 @@ export async function applyBackup(d) {
     await db.replaceAll('entries', (d.entries || []).map(normalizeEntry));
     await db.replaceAll('progress', (d.progress || []).map(normalizeProgress));
     if (Array.isArray(d.rateCards) && d.rateCards.length) await db.replaceAll('rateCards', d.rateCards.map(normalizeRateCard));
+    // גיבוי ישן שאין בו ספרייה: loadAll יבנה אותה מהשמות שבשורות (migratePeopleDirectory)
+    await db.replaceAll('people', (d.people || []).map(normalizePerson));
     if (Array.isArray(d.settings)) await db.replaceAll('settings', d.settings);
     await loadAll();
   } finally {

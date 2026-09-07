@@ -4,9 +4,10 @@
 import {
   fmtMoney, fmtHours, fmtPct, STATUS_LABEL, DEAL_STATUSES, FEE_MODELS,
   ENTRY_KINDS, ENTRY_STATUSES, TEAM_COLORS, num, round2, computePortfolio, burnSeries,
-  aggregateTeams, progressByPeriod, sourceLabel, dealReview, splitsTotal,
+  aggregateTeams, aggregateByKind, progressByPeriod, sourceLabel, dealReview, splitsTotal,
 } from './model.js';
 import { barCompare, donut, burnLine, gauge, miniBar } from './charts.js';
+import { BUILD } from './version.js';
 import { TARGET_FIELDS } from './importer.js';
 
 /* ---------- אייקונים (Lucide-style, סטטי) ---------- */
@@ -37,6 +38,7 @@ export const ICONS = {
   filter: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>',
   search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>',
   clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+  grip: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>',
   refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/></svg>',
 };
 
@@ -242,24 +244,13 @@ export function renderDealHeader(root, { snap, tab }) {
         ]),
       ]),
       el('div', { class: 'page-actions' }, [
+        el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'export-deal' }, title: 'ייצוא התקציב לאקסל מעוצב' }, [icon('download'), 'ייצוא לאקסל']),
         el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'add-entry' } }, [icon('plus'), 'רישום ביצוע']),
         el('button', { class: 'btn btn--primary btn--sm', type: 'button', dataset: { action: 'import-entries' } }, [icon('upload'), 'העלאת חשבונות']),
       ]),
     ]),
-    el('div', { class: 'strip' }, [
-      stripItem('תקציב', money(snap.budgetCost, d), '', 'strip-budget'),
-      stripItem('שעות תקציב', fmtHours(snap.budgetHours), '', 'strip-budget-hours'),
-      stripItem('בוצע בפועל', money(snap.actualCost, d), snap.status === 'over' ? 'neg' : '', 'strip-actual'),
-      stripItem('שעות בפועל', fmtHours(snap.actualHours), snap.status === 'over' ? 'neg' : '', 'strip-actual-hours'),
-      stripItem('יתרה', money(snap.remainingCost, d), snap.remainingCost < 0 ? 'neg' : 'pos', 'strip-remaining'),
-      stripItem('ניצול', fmtPct(snap.util), snap.status === 'over' ? 'neg' : '', 'strip-util'),
-      stripItem('בלנדד מתוכנן', money(snap.blendedRate, d), '', 'strip-blended'),
-      stripItem('בלנדד בפועל', money(snap.blendedActual, d), '', 'strip-blended-actual'),
-      snap.capBudget.applies
-        ? stripItem('בלנדד אחרי תקרה', money(snap.effectiveRates.blended, d), 'neg', 'strip-blended-eff')
-        : null,
-      snap.hasFee ? stripItem('שכ"ט מוסכם', money(snap.agreedFee, d), '', 'strip-fee') : null,
-    ]),
+    dealBand(snap),
+    factsRow(snap),
     el('nav', { class: 'subtabs', role: 'tablist' }, [
       subtab('budget', 'תקציב', 'target', tab),
       subtab('progress', 'דיווח ומעקב', 'clock', tab),
@@ -272,12 +263,93 @@ export function renderDealHeader(root, { snap, tab }) {
   root.append(head);
 }
 
-function stripItem(label, value, tone = '', calcKey = '') {
-  return el('div', { class: `strip__item ${tone ? `strip__item--${tone}` : ''}`.trim() }, [
-    el('span', { class: 'strip__label', text: label }),
-    calcKey
-      ? el('span', { class: 'strip__value num', dataset: { calc: calcKey }, text: value })
-      : el('span', { class: 'strip__value num', text: value }),
+/**
+ * הפס העליון = שלוש שאלות בלבד, בשלושה גדלים: כמה נשרף · כמה נשאר · לאן זה הולך.
+ * כל שאר המדדים יורדים לשורת העובדות (factsRow) — כדי שתהיה רמה ראשונה אחת.
+ */
+function dealBand(snap) {
+  const d = snap.deal;
+  const eacOver = snap.eacVariance !== null && snap.eacVariance < 0;
+
+  const cell = (cls, label, valueNode, subNode) => el('div', { class: `hero3__cell ${cls}`.trim() }, [
+    el('span', { class: 'hero3__label', text: label }),
+    valueNode,
+    subNode || null,
+  ]);
+
+  const main = el('div', { class: 'hero3__cell hero3__cell--main' }, [
+    el('span', { class: 'hero3__label', text: 'ניצול התקציב' }),
+    el('span', { class: 'hero3__val num', dataset: { calc: 'hero-util' }, text: fmtPct(snap.util) }),
+    el('span', { class: 'hero3__bar', dataset: { calc: 'hero-bar', html: '1' }, html: miniBar(snap.util, snap.status) }),
+    el('span', {
+      class: 'hero3__sub num', dataset: { calc: 'hero-util-sub' },
+      text: `${fmtHours(snap.actualHours)} מתוך ${fmtHours(snap.budgetHours)} שעות · ${money(snap.actualCost, d)} מתוך ${money(snap.budgetCost, d)}`,
+    }),
+  ]);
+
+  const remaining = cell('', 'יתרה',
+    el('span', {
+      class: `hero3__mid num ${snap.remainingCost < 0 ? 'neg' : 'pos'}`,
+      dataset: { calc: 'hero-remaining' }, text: money(snap.remainingCost, d),
+    }),
+    el('span', { class: 'hero3__sub num', dataset: { calc: 'hero-remaining-sub' }, text: `${fmtHours(snap.remainingHours)} שעות נותרו` }));
+
+  // התחזית היא המספר שדורש פעולה — ולכן היא תא נפרד ולא עוד פריט ברצועה
+  const forecast = snap.eac === null
+    ? cell('', 'תעריף בלנדד (ללא ג\'וניור)',
+      el('span', { class: 'hero3__mid num', dataset: { calc: 'hero-blended' }, text: money(snap.blendedRate, d) }),
+      el('span', { class: 'hero3__sub', text: 'אין עדיין דיווח ביצוע לתחזית' }))
+    : cell(`hero3__cell--risk${eacOver ? ' is-over' : ''}`, 'תחזית לסיום',
+      el('span', { class: `hero3__mid num ${eacOver ? 'warn' : 'pos'}`, dataset: { calc: 'hero-eac' }, text: money(snap.eac, d) }),
+      el('span', {
+        class: 'hero3__sub num', dataset: { calc: 'hero-eac-sub' },
+        text: `${money(Math.abs(snap.eacVariance), d)} ${eacOver ? 'מעל התקציב' : 'מתחת לתקציב'} · ${snap.eacBasis}`,
+      }));
+
+  const map = teamMap(snap);
+  return el('div', { class: `band ${map ? '' : 'band--solo'}`.trim() }, [
+    el('div', { class: 'hero3' }, [main, remaining, forecast]),
+    map,
+  ]);
+}
+
+/** מפת התקציב — רוחב המקטע הוא חלקו של הצוות. פרופורציה שמספר לא מעביר. */
+function teamMap(snap) {
+  const teams = snap.teams.filter((t) => t.budgetCost > 0).sort((a, b) => b.budgetCost - a.budgetCost);
+  if (teams.length < 2) return null;
+  const total = snap.budgetCost || 1;
+  return el('section', { class: 'tmap' }, [
+    el('div', { class: 'tmap__head' }, [
+      el('span', { class: 'tmap__title', text: `מפת התקציב · ${snap.teams.length} צוותים` }),
+      el('span', { class: 'tmap__hint', text: 'רוחב = חלק מהתקציב' }),
+    ]),
+    el('div', { class: 'tmap__stack' }, teams.map((t) => el('button', {
+      class: `tmap__seg${t.status === 'over' ? ' tmap__seg--over' : ''}`, type: 'button',
+      style: `flex:${t.budgetCost};background:${t.color}`,
+      title: `${t.name} · ${money(t.budgetCost, snap.deal)}`,
+      dataset: { action: 'focus-team', teamId: t.id },
+    }, [el('span', { class: 'num', text: fmtPct(t.budgetCost / total) })]))),
+    el('div', { class: 'tmap__legend' }, teams.map((t) => el('span', { class: 'tmap__key' }, [
+      el('i', { style: `background:${t.color}` }), t.name,
+    ]))),
+  ]);
+}
+
+/** רמה שנייה — כל המדדים הנגזרים, בגודל אחיד וקטן. מחליף את פאנל "סיכום העסקה". */
+function factsRow(snap) {
+  const d = snap.deal;
+  const item = (label, value, key, tone = '') => el('div', { class: 'frow__item' }, [
+    el('span', { class: 'frow__label', text: label }),
+    calcCell(key, value, `frow__val ${tone}`.trim()),
+  ]);
+  return el('div', { class: 'frow' }, [
+    item('שעות תקציב', fmtHours(snap.budgetHours), 'f-budget-hours'),
+    item('שעות מוערכות', fmtHours(snap.estHours), 'f-est-hours'),
+    item('תעריף בלנדד (ללא ג\'וניור)', money(snap.blendedRate, d), 'f-blended'),
+    item('תעריף ממוצע כולל', money(snap.blendedAll, d), 'f-blended-all'),
+    item('בלנדד בפועל', money(snap.blendedActual, d), 'f-blended-actual'),
+    snap.capBudget.applies ? item('בלנדד אחרי תקרה', money(snap.effectiveRates.blended, d), 'f-blended-eff', 'neg') : null,
+    snap.hasFee ? item('שכ"ט מוסכם', money(snap.agreedFee, d), 'f-fee') : null,
   ]);
 }
 
@@ -293,7 +365,7 @@ function subtab(id, label, iconName, active) {
    טאב תקציב — הגיליון החי
    ============================================================ */
 
-export function renderBudgetTab(root, { snap, rateCard, selected = new Set() }) {
+export function renderBudgetTab(root, { snap, rateCard, selected = new Set(), expanded = new Set(), sort = 'priority' }) {
   const d = snap.deal;
 
   if (!snap.teams.length) {
@@ -317,14 +389,42 @@ export function renderBudgetTab(root, { snap, rateCard, selected = new Set() }) 
     checked: selected.size === snap.teams.length ? 'checked' : null,
   });
   allBox.indeterminate = selected.size > 0 && selected.size < snap.teams.length;
+  const sortBtn = (id, label, title) => el('button', {
+    class: `segbtn${sort === id ? ' is-on' : ''}`, type: 'button', title,
+    'aria-pressed': String(sort === id), dataset: { action: 'set-team-sort', sort: id },
+  }, [label]);
+
   wrap.append(el('div', { class: 'pickbar' }, [
     el('label', { class: 'inline-check' }, [allBox, el('span', { text: 'סמן את כל הצוותים' })]),
     el('span', { class: 'pickbar__hint', text: selected.size ? `${selected.size} צוותים מסומנים` : 'סמן צוותים כדי לקבל חישוב מצרפי' }),
     selected.size ? el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'clear-picks' } }, [icon('close'), 'נקה סימון']) : null,
+    el('div', { class: 'seg' }, [
+      el('span', { class: 'seg__label', text: 'מיון' }),
+      sortBtn('priority', 'לפי דחיפות', 'צוותים שחרגו או בסיכון עולים לראש הרשימה'),
+      sortBtn('manual', 'הסדר שלי', 'הסדר שקבעת בגרירה'),
+    ]),
   ]));
 
-  for (const team of snap.teams) {
-    wrap.append(renderTeamCard(team, { snap, rateCard, selected }));
+  const section = (label, list, tone) => {
+    if (!list.length) return;
+    wrap.append(el('div', { class: `tsec ${tone ? `tsec--${tone}` : ''}`.trim(), text: `${label} · ${list.length}` }));
+    wrap.append(teamListHead());
+    const list_ = el('div', { class: 'tlist', dataset: { droplist: 'teams' } });
+    for (const team of list) {
+      for (const node of renderTeamRow(team, { snap, rateCard, selected, expanded })) list_.append(node);
+    }
+    wrap.append(list_);
+  };
+
+  if (sort === 'manual') {
+    // הסדר שנקבע בגרירה — רשימה אחת, בלי קיבוץ שדורס אותו
+    section('צוותים', snap.teams);
+  } else {
+    // הצוותים שדורשים טיפול עולים לראש הרשימה — העין מוצאת אותם בלי לסרוק
+    const needsWork = snap.teams.filter((t) => t.status === 'over' || t.status === 'risk');
+    const onTrack = snap.teams.filter((t) => !(t.status === 'over' || t.status === 'risk'));
+    section('דורש טיפול', needsWork, 'alert');
+    section(needsWork.length ? 'בתוואי' : 'צוותים', onTrack);
   }
 
   wrap.append(el('div', { class: 'team-add-row' }, [
@@ -353,31 +453,23 @@ export function renderBudgetTab(root, { snap, rateCard, selected = new Set() }) 
     ]));
   }
 
+  // בדיקת נאותות מול יתר הצוותים
+  const dd = ddSplitPanel(snap);
+  if (dd) wrap.append(dd);
+
   // תעריפים אפקטיביים אחרי תקרת שכ"ט
   const capPanel = renderCapPanel(snap);
   if (capPanel) wrap.append(capPanel);
 
-  // סיכום העסקה
-  wrap.append(el('section', { class: 'panel panel--total' }, [
-    el('h2', { class: 'panel__title' }, [icon('layers'), 'סיכום תקציב העסקה']),
-    el('div', { class: 'totals' }, [
-      totalItem('סה"כ תקציב', money(snap.budgetCost, d), 'total-budget'),
-      totalItem('שעות תקציב', fmtHours(snap.budgetHours), 'total-hours'),
-      totalItem('שעות מוערכות', fmtHours(snap.estHours), 'total-est'),
-      totalItem('בוצע בפועל', money(snap.actualCost, d), 'total-actual', 'שעות שדווחו (מכל המקורות) × תעריפי התכנון.'),
-      totalItem('יתרה', money(snap.remainingCost, d), 'total-remaining'),
-      totalItem('תעריף בלנדד (ללא ג\'וניור)', money(snap.blendedRate, d), 'total-blended',
-        'עלות הדרגות שאינן ג\'וניור חלקי שעות אותן דרגות.'),
-      totalItem('תעריף ממוצע כולל', money(snap.blendedAll, d), 'total-blended-all', 'התקציב חלקי כל שעות התקציב.'),
-      snap.hasFee ? totalItem('שכ"ט מוסכם', money(snap.agreedFee, d)) : null,
-    ]),
-    snap.baselineDelta ? el('div', { class: `baseline ${snap.baselineDelta.delta > 0 ? 'baseline--up' : ''}` }, [
+  // סיכום העסקה חי בפס העליון (dealBand + factsRow) — כאן נשאר רק מה שאין שם
+  if (snap.baselineDelta) {
+    wrap.append(el('div', { class: `baseline ${snap.baselineDelta.delta > 0 ? 'baseline--up' : ''}` }, [
       icon('flag'),
       el('span', { text: `מול תקציב הבסיס (${new Date(snap.baselineDelta.capturedAt).toLocaleDateString('he-IL')}): ` }),
       el('strong', { class: 'num', text: `${snap.baselineDelta.delta >= 0 ? '+' : ''}${money(snap.baselineDelta.delta, d)}` }),
       el('span', { class: 'num', text: snap.baselineDelta.pct === null ? '' : ` (${fmtPct(snap.baselineDelta.pct, 1)})` }),
-    ]) : null,
-  ]));
+    ]));
+  }
 
   root.append(wrap);
 }
@@ -451,7 +543,7 @@ function renderCapPanel(snap) {
       fact('שעות שדווחו בפועל', fmtHours(snap.realized.hours)),
       fact('תעריף בפועל (תקרה ÷ שעות)', money(snap.realized.blendedAll, d),
         snap.realized.blendedAll < snap.blendedAll ? 'neg' : 'pos'),
-      fact('תעריף בפועל ללא ג\'וניורים', money(snap.realized.blendedSenior, d),
+      fact('תעריף בפועל ללא ג\'וניורים (בניכוי עלותם)', money(snap.realized.blendedSenior, d),
         snap.realized.blendedSenior < snap.blendedRate ? 'neg' : 'pos'),
     ]) : null,
     el('div', { class: 'btable-wrap' }, el('table', { class: 'btable btable--rates' }, [
@@ -466,7 +558,10 @@ function renderCapPanel(snap) {
           el('td', { class: `num ${r.effective < r.rate ? 'neg' : ''}`, text: money(r.effective - r.rate, d) }),
         ])),
         el('tr', { class: 'row--total' }, [
-          el('td', { text: 'בלנדד (ללא ג\'וניור)' }),
+          el('td', {}, [
+            el('span', { text: 'בלנדד (ללא ג\'וניור)' }),
+            el('span', { class: 'sub', text: '(שכ״ט − עלות הג\'וניורים) ÷ שעות הבכירים' }),
+          ]),
           el('td', { class: 'num', text: money(snap.blendedRate, d) }),
           el('td', { class: 'num td-strong', text: money(snap.effectiveRates.blended, d) }),
           el('td', { class: `num ${snap.effectiveRates.blended < snap.blendedRate ? 'neg' : ''}`, text: money(snap.effectiveRates.blended - snap.blendedRate, d) }),
@@ -489,60 +584,262 @@ function totalItem(label, value, calcKey, hint) {
   ]);
 }
 
-function renderTeamCard(team, { snap, rateCard, selected = new Set() }) {
-  const d = snap.deal;
-  const card = el('section', { class: 'team', dataset: { teamId: team.id }, style: `--team-color:${team.color}` });
+/** כותרות העמודות של רשימת הצוותים — פעם אחת מעל הרשימה, לא תווית בכל שורה */
+function teamListHead() {
+  const c = (text) => el('span', { class: 'trow__head-cell', text });
+  return el('div', { class: 'trow trow--head' }, [
+    el('span', {}), el('span', {}), el('span', {}), c('צוות'), c('ניצול שעות'),
+    c('בוצע / תקציב'), c('עלות בפועל'), c('יתרה'), el('span', {}), el('span', {}),
+  ]);
+}
 
-  card.append(el('header', { class: 'team__head' }, [
-    el('label', { class: 'team__pick', title: 'סימון הצוות לחישוב מצרפי' }, [
+/**
+ * צוות = שורה אחת ברשימה; הגיליון נפתח מתחתיה.
+ * כך רואים את כל הצוותים במסך אחד, והפרופורציה ביניהם נקראת בלי לקרוא מספרים.
+ */
+function renderTeamRow(team, { snap, rateCard, selected = new Set(), expanded = new Set() }) {
+  const d = snap.deal;
+  const isOpen = expanded.has(team.id);
+  const share = snap.budgetCost > 0 ? team.budgetCost / snap.budgetCost : 0;
+
+  const cell = (calcKey, value, tone = '') => el('div', { class: 'trow__cell' }, [
+    calcCell(calcKey, value, `trow__val ${tone}`.trim()),
+  ]);
+
+  const row = el('div', {
+    class: `trow${isOpen ? ' trow--open' : ''}${team.status === 'over' ? ' trow--alert' : ''}`,
+    dataset: { teamId: team.id, action: 'toggle-team' },
+    style: `--team-color:${team.color}`,
+  }, [
+    el('span', { class: 'trow__rail' }),
+    // ידית גרירה: השורה נעשית draggable רק בלחיצה עליה, אחרת אי אפשר לסמן טקסט בשדות
+    el('button', {
+      class: 'trow__grip', type: 'button', html: ICONS.grip,
+      title: 'גרירה לשינוי סדר · Alt+↑ / Alt+↓',
+      'aria-label': `שינוי מיקום הצוות ${team.name}`,
+      dataset: { grip: 'team', teamId: team.id },
+    }),
+    el('label', { class: 'trow__pick', title: 'סימון הצוות לחישוב מצרפי' }, [
       el('input', {
         type: 'checkbox', dataset: { pick: 'team', teamId: team.id },
         checked: selected.has(team.id) ? 'checked' : null,
         'aria-label': `סימון הצוות ${team.name} לחישוב מצרפי`,
       }),
     ]),
-    el('span', { class: 'team__swatch' }),
-    el('input', {
-      class: 'team__name', value: team.name, 'aria-label': 'שם הצוות',
-      dataset: { field: 'name', teamId: team.id },
-    }),
-    el('div', { class: 'team__stats' }, [
-      el('span', { class: 'team__stat' }, [el('span', { class: 'lbl', text: 'תקציב' }), calcCell(`team-budget-${team.id}`, money(team.budgetCost, d))]),
-      el('span', { class: 'team__stat team__stat--manual' }, [
-        el('span', { class: 'lbl', text: 'בפועל' }),
-        calcCell(`team-actual-${team.id}`, money(team.actualCost, d)),
+    el('div', { class: 'trow__id' }, [
+      el('input', {
+        class: 'trow__name', value: team.name, 'aria-label': 'שם הצוות',
+        dataset: { field: 'name', teamId: team.id },
+      }),
+      // הצ'יפ יושב בתוך בלוק הזהות ולא כעמודה נפרדת — עמודה נוספת הייתה מזיזה
+      // את כל המספרים בשורות שיש בהן צ'יפ (כל שורה היא grid נפרד)
+      el('span', { class: 'trow__sub' }, [
+        el('span', { class: 'trow__meta num', dataset: { calc: `team-share-${team.id}` }, text: `${fmtPct(share)} מהתקציב · ${money(team.budgetCost, d)}` }),
+        team.kind === 'dd'
+          ? el('span', { class: 'chip-mini chip-mini--dd', title: 'צוות בדיקת נאותות — מופרד בכל החיתוכים ובייצואים', text: 'בדיקת נאותות' })
+          : null,
       ]),
-      el('span', { class: 'team__stat' }, [el('span', { class: 'lbl', text: 'יתרה' }), calcCell(`team-remaining-${team.id}`, money(team.remainingCost, d), team.remainingCost < 0 ? 'neg' : '')]),
-      el('span', { class: 'team__stat' }, [el('span', { class: 'lbl', text: 'שעות' }), calcCell(`team-hours-live-${team.id}`, `${fmtHours(team.actualHours)} / ${fmtHours(team.budgetHours)}`)]),
-      statusPill(team.status, `${STATUS_LABEL[team.status]} · ${fmtPct(team.util)}`, `team-status-${team.id}`),
     ]),
-    el('div', { class: 'team__tools' }, [
+    el('div', { class: 'trow__bar', title: fmtPct(team.util), dataset: { calc: `team-bar-${team.id}`, html: '1' }, html: miniBar(team.util, team.status) }),
+    cell(`team-hours-live-${team.id}`, `${fmtHours(team.actualHours)} / ${fmtHours(team.budgetHours)}`),
+    cell(`team-actual-${team.id}`, money(team.actualCost, d), 'quiet'),
+    cell(`team-remaining-${team.id}`, money(team.remainingCost, d), team.remainingCost < 0 ? 'neg' : ''),
+    statusPill(team.status, `${STATUS_LABEL[team.status]} · ${fmtPct(team.util)}`, `team-status-${team.id}`),
+    el('div', { class: 'trow__tools' }, [
       el('button', { class: 'iconbtn', type: 'button', title: 'שכפל צוות', dataset: { action: 'duplicate-team', teamId: team.id }, html: ICONS.copy }),
       el('button', { class: 'iconbtn iconbtn--danger', type: 'button', title: 'מחק צוות', dataset: { action: 'delete-team', teamId: team.id }, html: ICONS.trash }),
+      el('span', { class: 'trow__chev', 'aria-hidden': 'true', text: isOpen ? '▲' : '▼' }),
     ]),
-  ]));
+  ]);
 
-  card.append(el('div', { class: 'team__bar', title: fmtPct(team.util), dataset: { calc: `team-bar-${team.id}`, html: '1' }, html: miniBar(team.util, team.status) }));
+  if (!isOpen) return [row];
+  return [row, el('div', { class: `tsheet${team.status === 'over' ? ' tsheet--alert' : ''}`, dataset: { teamBody: team.id } }, [
+    el('div', { class: 'btable-wrap' }, teamSheet(team, { snap, rateCard })),
+    sheetLegend(),
+    el('div', { class: 'team__foot' }, [
+      el('button', { class: 'btn-add-row btn-add-row--sm', type: 'button', dataset: { action: 'add-line', teamId: team.id } }, [icon('plus'), 'הוסף שורה']),
+      el('button', { class: 'btn-add-row btn-add-row--sm', type: 'button', dataset: { action: 'split-by-person', teamId: team.id }, title: 'שורה לכל עורך דין — לתמחור לפי אדם' }, [icon('users'), 'פרוס לפי אנשי צוות']),
+      el('label', { class: 'inline-field' }, [
+        el('span', { text: 'מקדם חריגה לצוות' }),
+        el('input', {
+          class: 'cellinput is-input cellinput--sm num', type: 'number', step: '0.05', min: '0', max: '2',
+          value: String(team.overrunFactor === null ? '' : team.overrunFactor),
+          placeholder: String(snap.deal.overrunFactor),
+          title: 'ריק = ירושה מהעסקה',
+          dataset: { field: 'overrunFactor', teamId: team.id },
+        }),
+      ]),
+      el('label', { class: 'inline-field' }, [
+        el('span', { text: 'אחראי' }),
+        el('input', { class: 'cellinput is-input cellinput--sm', value: team.lead, placeholder: 'שם', dataset: { field: 'lead', teamId: team.id } }),
+      ]),
+      el('label', { class: 'inline-check inline-check--dd', title: 'הצוות ייחשב לבדיקת נאותות ויופרד בכל החיתוכים ובייצואים לאקסל' }, [
+        el('input', {
+          type: 'checkbox', checked: team.kind === 'dd' ? 'checked' : null,
+          dataset: { field: 'kind', teamId: team.id },
+        }),
+        el('span', { text: 'צוות בדיקת נאותות' }),
+      ]),
+    ]),
+  ])];
+}
 
-  const table = el('table', { class: 'btable' });
+/*
+ * שדה מחושב מול שדה הזנה — כלל בכל הגיליון:
+ * ערך מחושב מוצג כטקסט ולא כשדה, כדי שאי אפשר יהיה להקליד לתוכו בטעות.
+ * דריסה ידנית היא פעולה מפורשת (כפתור), והתא הדרוס מסומן באזהרה עם דרך אחת
+ * לחזור לחישוב — כך אף פעם לא נשארים עם ערך "תקוע" בלי לדעת.
+ */
+function calcValue(key, text, title) {
+  return el('span', { class: 'calcnum num', dataset: { calc: key }, title: title || null, text });
+}
+
+function overrideBtn(action, teamId, lineId, title) {
+  return el('button', {
+    class: 'ovr-btn', type: 'button', tabindex: '-1', title,
+    'aria-label': title, dataset: { action, teamId, lineId }, html: ICONS.edit,
+  });
+}
+
+function resetBtn(action, teamId, lineId, title) {
+  return el('button', {
+    class: 'ovr-reset', type: 'button', tabindex: '-1', title,
+    'aria-label': title, dataset: { action, teamId, lineId }, html: ICONS.refresh,
+  });
+}
+
+/** שעות התקציב: מחושב = מוערכות × (1 + מקדם חריגה), מעוגל כלפי מעלה */
+function planHoursCell(line, team) {
+  if (line.hoursOverride === null) {
+    return el('span', { class: 'calcwrap' }, [
+      calcValue(`line-plan-${line.id}`, fmtHours(line.budgetHours),
+        'שעות תקציב — מחושב: שעות מוערכות × (1 + מקדם חריגה), מעוגל כלפי מעלה. לשינוי — ערוך את "מוערכות".'),
+      overrideBtn('override-hours', team.id, line.id, 'דריסה ידנית של שעות התקציב'),
+    ]);
+  }
+  return el('span', { class: 'calcwrap calcwrap--override' }, [
+    el('input', {
+      class: 'cellinput cellinput--plan-h is-override num', type: 'number', step: '1', min: '0',
+      value: String(line.budgetHours),
+      title: 'שעות התקציב נדרסו ידנית — הן לא מתעדכנות משעות מוערכות או ממקדם החריגה.',
+      dataset: { field: 'hoursOverride', teamId: team.id, lineId: line.id, auto: '0' },
+    }),
+    resetBtn('reset-hours', team.id, line.id, 'החזר לחישוב אוטומטי'),
+  ]);
+}
+
+/** התעריף מגיע מהתעריפון; דריסה חלה על השורה הזו בלבד */
+function rateCell(line, team, deal) {
+  if (line.rateOverride === null) {
+    return el('span', { class: 'calcwrap' }, [
+      calcValue(`line-rate-${line.id}`, money(line.rate, deal), 'תעריף מהתעריפון של העסקה. לשינוי גורף — מסך התעריפונים.'),
+      overrideBtn('override-rate', team.id, line.id, 'דריסת תעריף לשורה זו'),
+    ]);
+  }
+  return el('span', { class: 'calcwrap calcwrap--override' }, [
+    el('input', {
+      class: 'cellinput is-override num', type: 'number', step: '10', min: '0', value: String(line.rate),
+      title: 'התעריף נדרס ידנית בשורה זו — הוא לא מתעדכן מהתעריפון.',
+      dataset: { field: 'rateOverride', teamId: team.id, lineId: line.id, auto: '0' },
+    }),
+    resetBtn('reset-rate', team.id, line.id, 'החזר לתעריף מהתעריפון'),
+  ]);
+}
+
+/**
+ * הפרדת בדיקת נאותות מול יתר הצוותים — אותו רכיב במסך התקציב, בבקרה ובתחקיר,
+ * כדי שהחיתוך ייראה זהה בכל מקום.
+ */
+export function ddSplitPanel(snap) {
+  const k = aggregateByKind(snap);
+  if (!k.hasDD) return null;
+  const d = snap.deal;
+  const col = (label, agg, cls) => el('div', { class: `ddcol ${cls}`.trim() }, [
+    el('div', { class: 'ddcol__head' }, [
+      el('span', { class: 'ddcol__title', text: label }),
+      el('span', { class: 'ddcol__count num', text: `${agg.count} צוותים` }),
+    ]),
+    el('div', { class: 'facts' }, [
+      fact('תקציב', money(agg.budgetCost, d)),
+      fact('שעות תקציב', fmtHours(agg.budgetHours)),
+      fact('בוצע בפועל', money(agg.actualCost, d)),
+      fact('שעות בפועל', fmtHours(agg.actualHours)),
+      fact('יתרה', money(agg.remainingCost, d), agg.remainingCost < 0 ? 'neg' : ''),
+      fact('ניצול', fmtPct(agg.util), agg.util > 1 ? 'neg' : ''),
+      fact('בלנדד (ללא ג\'וניור)', money(agg.blendedRate, d)),
+      fact('חלק מתקציב העסקה', fmtPct(agg.shareOfDeal)),
+    ]),
+  ]);
+  return el('section', { class: 'panel panel--dd' }, [
+    el('h2', { class: 'panel__title' }, [icon('layers'), 'בדיקת נאותות מול יתר הצוותים']),
+    el('p', { class: 'panel__hint', text: 'הפילוח לפי סיווג הצוות (מסומן בגיליון הצוות). מופיע גם בייצואים לאקסל.' }),
+    el('div', { class: 'ddsplit' }, [
+      col('בדיקת נאותות', k.dd, 'ddcol--dd'),
+      col('יתר הצוותים', k.regular, ''),
+    ]),
+  ]);
+}
+
+/** "% מהצוות" לאדם — מספר אחד כשהוא בצוות אחד, ורשימה קצרה כשהוא חוצה צוותים */
+function shareText(teamShares = []) {
+  if (!teamShares.length) return '—';
+  if (teamShares.length === 1) return fmtPct(teamShares[0].share);
+  return teamShares.map((t) => fmtPct(t.share)).join(' · ');
+}
+
+/** מקרא — מה מזינים ומה מחושב. בלעדיו המשתמש לומד את זה רק בטעויות */
+function sheetLegend() {
+  const item = (mark, text, cls = '') => el('span', { class: `lgnd__item ${cls}`.trim() }, [
+    mark ? el('span', { class: 'lgnd__mark', text: mark }) : el('span', { class: 'lgnd__mark th-mark--in' }),
+    text,
+  ]);
+  return el('div', { class: 'lgnd' }, [
+    item('', 'שדה הזנה', 'lgnd__item--in'),
+    item('ƒ', 'מחושב — לא ניתן להקלדה'),
+    item('⚠', 'נדרס ידנית', 'lgnd__item--ovr'),
+  ]);
+}
+
+/** פער השעות של שורה — מוצג רק כשיש חריגה, כדי שדיו יופיע רק איפה שיש בעיה */
+function overText(actual, budget) {
+  const delta = round2(actual - budget);
+  return delta > 0.05 ? `+${fmtHours(delta)} ש׳` : '—';
+}
+
+/**
+ * הגיליון בשלוש רמות בולטוּת:
+ * עוגן (שעות בוצע/תקציב + מד) ← תוצר מחושב (₪) ← קלט תכנון (מוערכות/תעריף).
+ */
+function teamSheet(team, { snap, rateCard }) {
+  const d = snap.deal;
+  const maxHours = Math.max(1, ...team.lines.map((l) => l.budgetHours || 0));
+  const table = el('table', { class: 'btable btable--sheet' });
+
   table.append(el('thead', {}, [
-    // שתי שורות כותרת: קיבוץ לפי מקור הנתונים (תכנון / מעקב ידני / חשבונות)
     el('tr', { class: 'btable__groups' }, [
-      el('th', { colspan: '6', text: 'תכנון' }),
-      el('th', { colspan: '4', class: 'grp grp--manual', text: 'ביצוע בפועל (כל מקורות הדיווח)' }),
+      el('th', { colspan: '4', text: 'ביצוע מול תקציב' }),
+      el('th', { colspan: '3', class: 'grp grp--money', text: 'כסף נגזר' }),
+      el('th', { colspan: '2', class: 'grp grp--plan', text: 'קלט תכנון' }),
       el('th', { class: 'th-tools' }),
     ]),
     el('tr', {}, [
       el('th', { class: 'th-role', text: 'דרגה' }),
-      el('th', { class: 'th-person', text: 'חבר צוות', title: 'אופציונלי — אפשר כמה שורות לאותה דרגה, אחת לכל עורך דין' }),
-      el('th', { text: 'שעות מוערכות', title: 'ההערכה הראשונית של הצוות' }),
-      el('th', { text: 'שעות תקציב', title: 'מעוגל כלפי מעלה: מוערך × (1 + מקדם חריגה)' }),
-      el('th', { text: 'תעריף' }),
-      el('th', { text: 'תקציב ₪' }),
-      el('th', { class: 'grp--manual', text: 'שעות בפועל', title: 'סך השעות שדווחו לשורה — ידנית או מדוח/חשבון שיובא' }),
-      el('th', { class: 'grp--manual', text: 'עלות ₪', title: 'שעות בפועל × תעריף התכנון' }),
-      el('th', { class: 'grp--manual', text: 'יתרה ₪' }),
-      el('th', { class: 'grp--manual', text: 'ניצול' }),
+      el('th', { class: 'th-anchor' }, [
+        'שעות · בוצע מתוך תקציב',
+        el('span', { class: 'th-mark th-mark--in', title: 'השעות שבוצעו — שדה הזנה' }),
+        el('span', { class: 'th-mark', title: 'שעות התקציב — מחושב', text: 'ƒ' }),
+      ]),
+      el('th', { class: 'th-util' }, ['ניצול', el('span', { class: 'th-mark', text: 'ƒ' })]),
+      el('th', { class: 'th-delta' }, ['חריגה', el('span', { class: 'th-mark', text: 'ƒ' })]),
+      el('th', { class: 'col-sep' }, ['תקציב ₪', el('span', { class: 'th-mark', text: 'ƒ' })]),
+      el('th', { title: 'שעות בפועל × תעריף התכנון' }, ['עלות בפועל ₪', el('span', { class: 'th-mark', text: 'ƒ' })]),
+      el('th', {}, ['יתרה ₪', el('span', { class: 'th-mark', text: 'ƒ' })]),
+      el('th', { class: 'th-plan', title: 'ההערכה הראשונית של הצוות' }, [
+        'מוערכות', el('span', { class: 'th-mark th-mark--in' }),
+      ]),
+      el('th', { class: 'th-plan', title: 'מהתעריפון — ניתן לדרוס לשורה בודדת' }, [
+        'תעריף', el('span', { class: 'th-mark', text: 'ƒ' }),
+      ]),
       el('th', { class: 'th-tools' }),
     ]),
   ]));
@@ -551,98 +848,106 @@ function renderTeamCard(team, { snap, rateCard, selected = new Set() }) {
   for (const line of team.lines) {
     tbody.append(el('tr', { class: `bline bline--${line.status}`, dataset: { lineId: line.id, teamId: team.id } }, [
       el('td', { class: 'td-role' }, [
+        el('button', {
+          class: 'trow__grip line__grip', type: 'button', html: ICONS.grip, tabindex: '-1',
+          title: 'גרירה לשינוי סדר השורות · Alt+↑ / Alt+↓',
+          'aria-label': `שינוי מיקום השורה ${line.roleName || ''}`,
+          dataset: { grip: 'line', lineId: line.id, teamId: team.id },
+        }),
         el('select', {
-          class: `cellinput cellinput--role${line.orphanRole ? ' cellinput--orphan' : ''}`,
+          class: `cellinput is-input cellinput--role${line.orphanRole ? ' cellinput--orphan' : ''}`,
           title: line.orphanRole ? 'הדרגה אינה קיימת בתעריפון הנוכחי — התעריף מוקפא בשורה. בחר דרגה מהתעריפון כדי לחבר מחדש.' : null,
           dataset: { field: 'roleId', teamId: team.id, lineId: line.id },
         }, [
-          // דרגה שנעלמה מהתעריפון (הוחלף/נמחק) — מוצגת כדי שהשורה לא תיראה כדרגה אחרת
           line.orphanRole
             ? el('option', { value: line.roleId, selected: 'selected', text: `${line.roleName && line.roleName !== '—' ? line.roleName : 'דרגה שהוסרה'} · לא בתעריפון` })
             : null,
           ...rateCard.roles.map((r) => el('option', { value: r.id, selected: r.id === line.roleId ? 'selected' : null, text: r.name })),
         ]),
+        // השם נבחר מהספרייה בלבד. הקלדה בתא פותחת את החלון עם הטקסט כשאילתת חיפוש,
+        // כדי לא לאבד את מהירות ההקלדה שהייתה כאן קודם.
+        el('button', {
+          class: `cellinput is-input cellinput--person${line.personName ? '' : ' is-empty'}`,
+          type: 'button', title: 'בחירת חבר צוות מהספרייה',
+          dataset: { action: 'open-person-picker', teamId: team.id, lineId: line.id },
+        }, [line.personName || 'בחר חבר צוות…']),
       ]),
-      el('td', { class: 'td-person' }, [el('input', {
-        class: 'cellinput', value: line.person || '', placeholder: 'שם (אופציונלי)',
-        dataset: { field: 'person', teamId: team.id, lineId: line.id },
-      })]),
-      el('td', {}, [el('input', {
-        class: 'cellinput num', type: 'number', step: '0.5', min: '0', value: String(line.estHours),
+
+      // ---- העוגן: מה שהעין צריכה למצוא ראשון ----
+      el('td', { class: 'td-anchor' }, [
+        el('div', { class: 'anchor__nums' }, [
+          el('input', {
+            class: 'cellinput is-input cellinput--done num', type: 'number', step: '0.25', min: '0',
+            value: line.actualHours ? String(line.actualHours) : '', placeholder: '0',
+            title: line.lastReportAt
+              ? `סך השעות שדווחו. דיווח אחרון: ${line.lastReportAt}. שינוי כאן נרשם כעדכון מתוארך בטאב "דיווח ומעקב".`
+              : 'סך השעות שבוצעו עד היום. כל שינוי נרשם כעדכון מתוארך בטאב "דיווח ומעקב".',
+            dataset: { field: 'manualHours', teamId: team.id, lineId: line.id },
+          }),
+          el('span', { class: 'anchor__sep', text: '/' }),
+          planHoursCell(line, team),
+        ]),
+        // אורך המד יחסי לגודל השורה — כך רואים גם ניצול וגם משקל
+        el('div', {
+          class: 'anchor__track', dataset: { calc: `line-bar-${line.id}`, html: '1' },
+          style: `width:${Math.max(34, Math.round((line.budgetHours / maxHours) * 100))}%`,
+          html: miniBar(line.util, line.status),
+        }),
+      ]),
+      el('td', { class: 'td-util' }, [
+        el('span', { class: `num pct pct--${line.status}`, dataset: { calc: `line-util-${line.id}` }, text: fmtPct(line.util) }),
+      ]),
+      el('td', { class: 'td-delta' }, [
+        calcCell(`line-delta-${line.id}`, overText(line.actualHours, line.budgetHours),
+          line.actualHours > line.budgetHours ? 'delta' : 'delta delta--none'),
+      ]),
+
+      // ---- תוצר מחושב ----
+      el('td', { class: 'td-strong col-sep' }, [calcCell(`line-cost-${line.id}`, money(line.budgetCost, d))]),
+      el('td', {}, [calcCell(`line-actual-cost-${line.id}`, money(line.actualCost, d))]),
+      el('td', {}, [calcCell(`line-remaining-${line.id}`, money(line.remainingCost, d), line.remainingCost < 0 ? 'neg' : '')]),
+
+      // ---- קלט תכנון ----
+      el('td', { class: 'td-plan' }, [el('input', {
+        class: 'cellinput is-input num', type: 'number', step: '0.5', min: '0', value: String(line.estHours),
+        title: 'שעות מוערכות — שדה הזנה. שעות התקציב נגזרות ממנו.',
         dataset: { field: 'estHours', teamId: team.id, lineId: line.id },
       })]),
-      el('td', {}, [el('input', {
-        class: 'cellinput cellinput--calc num', type: 'number', step: '1', min: '0',
-        value: String(line.budgetHours),
-        placeholder: String(line.budgetHours),
-        title: 'ניתן לדרוס ידנית. ריק = חישוב אוטומטי לפי המקדם.',
-        dataset: { field: 'hoursOverride', teamId: team.id, lineId: line.id, auto: line.hoursOverride === null ? '1' : '0' },
-      })]),
-      el('td', {}, [el('input', {
-        class: 'cellinput num', type: 'number', step: '10', min: '0', value: String(line.rate),
-        title: 'תעריף מהתעריפון. שינוי כאן = דריסה לשורה זו בלבד.',
-        dataset: { field: 'rateOverride', teamId: team.id, lineId: line.id, auto: line.rateOverride === null ? '1' : '0' },
-      })]),
-      el('td', { class: 'td-strong' }, [calcCell(`line-cost-${line.id}`, money(line.budgetCost, d))]),
-      // ---- מעקב ידני ----
-      el('td', { class: 'grp--manual' }, [el('input', {
-        class: 'cellinput cellinput--manual num', type: 'number', step: '0.25', min: '0',
-        value: line.actualHours ? String(line.actualHours) : '',
-        placeholder: '0',
-        title: line.lastReportAt
-          ? `סך השעות שדווחו. דיווח אחרון: ${line.lastReportAt}. שינוי כאן נרשם כעדכון מתוארך בטאב "דיווח ומעקב".`
-          : 'סך השעות שבוצעו עד היום. כל שינוי נרשם כעדכון מתוארך בטאב "דיווח ומעקב".',
-        dataset: { field: 'manualHours', teamId: team.id, lineId: line.id },
-      })]),
-      el('td', { class: 'grp--manual' }, [calcCell(`line-actual-cost-${line.id}`, money(line.actualCost, d))]),
-      el('td', { class: 'grp--manual' }, [calcCell(`line-remaining-${line.id}`, money(line.remainingCost, d), line.remainingCost < 0 ? 'neg' : '')]),
-      el('td', { class: 'td-util grp--manual' }, [
-        el('span', { class: `num pct pct--${line.status}`, dataset: { calc: `line-util-${line.id}` }, text: fmtPct(line.util) }),
-        el('span', { class: 'mbar-wrap', dataset: { calc: `line-bar-${line.id}`, html: '1' }, html: miniBar(line.util, line.status) }),
-      ]),
+      el('td', { class: 'td-plan td-rate' }, [rateCell(line, team, d)]),
       el('td', { class: 'td-tools' }, [
-        el('button', { class: 'iconbtn iconbtn--danger', type: 'button', title: 'מחק שורה', dataset: { action: 'delete-line', teamId: team.id, lineId: line.id }, html: ICONS.trash }),
+        // מחוץ לסדר ה-Tab: מקש Tab צריך לזרום בין תאי הנתונים, לא דרך כפתורי המחיקה
+        el('button', { class: 'iconbtn iconbtn--danger', type: 'button', tabindex: '-1', title: 'מחק שורה', dataset: { action: 'delete-line', teamId: team.id, lineId: line.id }, html: ICONS.trash }),
       ]),
     ]));
   }
   table.append(tbody);
 
   table.append(el('tfoot', {}, el('tr', {}, [
-    el('td', { class: 'td-role', text: 'סה"כ' }),
+    el('td', { class: 'td-role', text: 'סה"כ הצוות' }),
+    el('td', { class: 'td-anchor' }, [
+      el('div', { class: 'anchor__nums anchor__nums--total' }, [
+        calcCell(`team-actual-hours-${team.id}`, fmtHours(team.actualHours), 'anchor__done'),
+        el('span', { class: 'anchor__sep', text: '/' }),
+        calcCell(`team-hours-${team.id}`, fmtHours(team.budgetHours), 'anchor__plan'),
+      ]),
+      el('div', { class: 'anchor__track', dataset: { calc: `team-foot-bar-${team.id}`, html: '1' }, html: miniBar(team.util, team.status) }),
+    ]),
+    el('td', { class: 'td-util' }, [
+      el('span', { class: `num pct pct--${team.status}`, dataset: { calc: `team-util-${team.id}` }, text: fmtPct(team.util) }),
+    ]),
+    el('td', { class: 'td-delta' }, [
+      calcCell(`team-delta-${team.id}`, overText(team.actualHours, team.budgetHours),
+        team.actualHours > team.budgetHours ? 'delta' : 'delta delta--none'),
+    ]),
+    el('td', { class: 'td-strong col-sep' }, [calcCell(`team-cost-${team.id}`, money(team.budgetCost, d))]),
+    el('td', {}, [calcCell(`team-actual-cost-${team.id}`, money(team.actualCost, d))]),
+    el('td', {}, [calcCell(`team-rem-${team.id}`, money(team.remainingCost, d), team.remainingCost < 0 ? 'neg' : '')]),
+    el('td', { class: 'td-plan' }, [calcCell(`team-est-${team.id}`, fmtHours(team.estHours))]),
     el('td', {}, ''),
-    el('td', {}, [calcCell(`team-est-${team.id}`, fmtHours(team.estHours))]),
-    el('td', {}, [calcCell(`team-hours-${team.id}`, fmtHours(team.budgetHours))]),
-    el('td', {}, ''),
-    el('td', { class: 'td-strong' }, [calcCell(`team-cost-${team.id}`, money(team.budgetCost, d))]),
-    el('td', { class: 'grp--manual' }, [calcCell(`team-actual-hours-${team.id}`, fmtHours(team.actualHours))]),
-    el('td', { class: 'grp--manual td-strong' }, [calcCell(`team-actual-cost-${team.id}`, money(team.actualCost, d))]),
-    el('td', { class: 'grp--manual' }, [calcCell(`team-rem-${team.id}`, money(team.remainingCost, d), team.remainingCost < 0 ? 'neg' : '')]),
-    el('td', { class: 'td-util grp--manual' }, [el('span', { class: `num pct pct--${team.status}`, dataset: { calc: `team-util-${team.id}` }, text: fmtPct(team.util) })]),
     el('td', {}, ''),
   ])));
 
-  card.append(el('div', { class: 'btable-wrap' }, table));
-
-  card.append(el('div', { class: 'team__foot' }, [
-    el('button', { class: 'btn-add-row btn-add-row--sm', type: 'button', dataset: { action: 'add-line', teamId: team.id } }, [icon('plus'), 'הוסף שורה']),
-    el('button', { class: 'btn-add-row btn-add-row--sm', type: 'button', dataset: { action: 'split-by-person', teamId: team.id }, title: 'שורה לכל עורך דין — לתמחור לפי אדם' }, [icon('users'), 'פרוס לפי אנשי צוות']),
-    el('label', { class: 'inline-field' }, [
-      el('span', { text: 'מקדם חריגה לצוות' }),
-      el('input', {
-        class: 'cellinput cellinput--sm num', type: 'number', step: '0.05', min: '0', max: '2',
-        value: String(team.overrunFactor === null ? '' : team.overrunFactor),
-        placeholder: String(snap.deal.overrunFactor),
-        title: 'ריק = ירושה מהעסקה',
-        dataset: { field: 'overrunFactor', teamId: team.id },
-      }),
-    ]),
-    el('label', { class: 'inline-field' }, [
-      el('span', { text: 'אחראי' }),
-      el('input', { class: 'cellinput cellinput--sm', value: team.lead, placeholder: 'שם', dataset: { field: 'lead', teamId: team.id } }),
-    ]),
-  ]));
-
-  return card;
+  return table;
 }
 
 /* ============================================================
@@ -768,7 +1073,7 @@ export function renderProgressTab(root, { snap, period = 'week', sources = [], a
   const teamName = new Map(snap.teams.map((t) => [t.id, t.name]));
   const lineLabel = new Map();
   for (const t of snap.teams) for (const l of t.lines) {
-    lineLabel.set(l.id, l.person ? `${l.person} · ${l.roleName}` : l.roleName);
+    lineLabel.set(l.id, l.personName ? `${l.personName} · ${l.roleName}` : l.roleName);
   }
 
   root.append(el('div', { class: 'toolbar' }, [
@@ -861,7 +1166,7 @@ export function renderProgressTab(root, { snap, period = 'week', sources = [], a
   // אלוקציה בין צוותים — איך השעות של כל אדם מתחלקות, ותיקון בדיעבד
   if (allocation.length) {
     const lineName = new Map();
-    for (const t of snap.teams) for (const l of t.lines) lineName.set(l.id, l.person ? `${l.person} · ${l.roleName}` : l.roleName);
+    for (const t of snap.teams) for (const l of t.lines) lineName.set(l.id, l.personName ? `${l.personName} · ${l.roleName}` : l.roleName);
     const split = allocation.filter((p) => p.splits.length > 1).length;
     root.append(el('section', { class: 'panel' }, [
       el('h2', { class: 'panel__title' }, [
@@ -947,7 +1252,7 @@ export function renderProgressForm(record, { snap }) {
     for (const l of t.lines) {
       lineOptions.push(el('option', {
         value: `${t.id}|${l.id}`,
-        text: `${t.name} · ${l.person ? `${l.person} (${l.roleName})` : l.roleName}`,
+        text: `${t.name} · ${l.personName ? `${l.personName} (${l.roleName})` : l.roleName}`,
         selected: p.lineId === l.id ? 'selected' : null,
       }));
     }
@@ -1013,6 +1318,9 @@ export function renderReviewTab(root, { snap }) {
     ]),
   ]));
 
+  const ddPanel = ddSplitPanel(snap);
+  if (ddPanel) root.append(ddPanel);
+
   /* --- 3. מוקדי החריגה --- */
   root.append(el('section', { class: 'panel' }, [
     el('h2', { class: 'panel__title' }, [icon('alert'), 'מוקדי החריגה']),
@@ -1021,6 +1329,7 @@ export function renderReviewTab(root, { snap }) {
       el('thead', {}, el('tr', {}, [
         el('th', { text: 'צוות' }), el('th', { text: 'דרגה / אדם' }),
         el('th', { text: 'הוערך' }), el('th', { text: 'תוקצב' }), el('th', { text: 'בפועל' }),
+        el('th', { text: '% מהצוות', title: 'שיעור השעות שבוצעו בשורה מכלל השעות שבוצעו באותו צוות' }),
         el('th', { text: 'Δ שעות' }), el('th', { text: 'Δ ₪' }), el('th', { text: 'ניצול' }), el('th', { text: 'מקדם שנדרש' }),
       ])),
       el('tbody', {}, r.hotspots.map((l) => el('tr', {}, [
@@ -1029,6 +1338,7 @@ export function renderReviewTab(root, { snap }) {
         el('td', { class: 'num', text: fmtHours(l.estHours) }),
         el('td', { class: 'num', text: fmtHours(l.budgetHours) }),
         el('td', { class: 'num td-strong', text: fmtHours(l.actualHours) }),
+        el('td', { class: 'num', text: fmtPct(l.shareOfTeam) }),
         el('td', { class: `num ${tone(l.deltaHours)}`, text: `${sign(l.deltaHours)}${fmtHours(l.deltaHours)}` }),
         el('td', { class: `num ${tone(l.deltaCost)}`, text: `${sign(l.deltaCost)}${money(l.deltaCost, d)}` }),
         el('td', { class: `num pct pct--${statusOfUtil(l.util)}`, text: fmtPct(l.util) }),
@@ -1069,13 +1379,21 @@ export function renderReviewTab(root, { snap }) {
       el('div', { class: 'btable-wrap' }, el('table', { class: 'btable' }, [
         el('thead', {}, el('tr', {}, [
           el('th', { text: 'עורך דין' }), el('th', { text: 'צוותים' }),
-          el('th', { text: 'תוקצב' }), el('th', { text: 'בפועל' }), el('th', { text: 'Δ שעות' }), el('th', { text: 'Δ ₪' }), el('th', { text: 'ניצול' }),
+          el('th', { text: 'תוקצב' }), el('th', { text: 'בפועל' }),
+          el('th', { text: '% מהצוות', title: 'שיעור השעות של האדם מכלל השעות שבוצעו באותו צוות. אדם בכמה צוותים — שיעור לכל צוות.' }),
+          el('th', { text: 'Δ שעות' }), el('th', { text: 'Δ ₪' }), el('th', { text: 'ניצול' }),
         ])),
         el('tbody', {}, r.people.map((x) => el('tr', {}, [
           el('td', { text: x.name }),
           el('td', { class: 'muted', text: x.teams.join(' · ') }),
           el('td', { class: 'num', text: fmtHours(x.budgetHours) }),
           el('td', { class: 'num td-strong', text: fmtHours(x.actualHours) }),
+          el('td', {}, [
+            el('span', { class: 'num', text: shareText(x.teamShares) }),
+            x.teamShares.length > 1
+              ? el('span', { class: 'sub', text: x.teamShares.map((t) => `${t.team} ${fmtPct(t.share)}`).join(' · ') })
+              : null,
+          ]),
           el('td', { class: `num ${tone(x.deltaHours)}`, text: `${sign(x.deltaHours)}${fmtHours(x.deltaHours)}` }),
           el('td', { class: `num ${tone(x.deltaCost)}`, text: `${sign(x.deltaCost)}${money(x.deltaCost, d)}` }),
           el('td', { class: `num pct pct--${statusOfUtil(x.util)}`, text: fmtPct(x.util) }),
@@ -1124,7 +1442,7 @@ export function lineOptionsFor(teams, selected, { emptyLabel = '— ללא שי�
     ...teams.map((t) => el('optgroup', { label: t.name },
       t.lines.map((l) => el('option', {
         value: `${t.id}|${l.id}`,
-        text: `${t.name} · ${l.person ? `${l.person} (${l.roleName})` : l.roleName}`,
+        text: `${t.name} · ${l.personName ? `${l.personName} (${l.roleName})` : l.roleName}`,
         selected: `${t.id}|${l.id}` === selected ? 'selected' : null,
       })))),
   ];
@@ -1379,20 +1697,29 @@ export function renderProgressImportPreview({
 /** טופס פריסת צוות לשורות לפי אנשים */
 export function renderSplitForm({ team, roles, people }) {
   const form = el('form', { class: 'modal-form', id: 'split-form' }, [
-    el('p', { class: 'modal-text', text: `כל שם ייצור שורה נפרדת בצוות "${team.name}", עם דרגה משלו ואפשרות לתעריף אישי. שורות דרגה ריקות שלא דווח עליהן יוסרו.` }),
+    el('p', { class: 'modal-text', text: `כל איש צוות ייצור שורה נפרדת בצוות "${team.name}", עם דרגה משלו ואפשרות לתעריף אישי. שורות דרגה ריקות שלא דווח עליהן יוסרו. מי שאינו ברשימה — להוסיף קודם במסך "אנשי צוות".` }),
   ]);
   const list = el('div', { class: 'split-list' });
 
-  const row = (name = '', roleId = '') => el('div', { class: 'split-row', dataset: { personRow: '1' } }, [
-    el('input', { class: 'input', placeholder: 'שם עורך הדין', value: name, dataset: { personName: '1' } }),
+  // הבחירה היא מהספרייה בלבד (select של אנשים), לא הקלדה חופשית
+  const row = (personId = '', roleId = '') => el('div', { class: 'split-row', dataset: { personRow: '1' } }, [
+    el('select', { class: 'select', dataset: { personPick: '1' } }, [
+      el('option', { value: '', text: '— בחר איש צוות —' }),
+      ...people.map((p) => el('option', {
+        value: p.id, selected: p.id === personId ? 'selected' : null,
+        text: [p.name, p.title].filter(Boolean).join(' · '),
+      })),
+    ]),
     el('select', { class: 'select', dataset: { personRole: '1' } },
       roles.map((r) => el('option', { value: r.id, text: `${r.name} · ${r.rate}₪`, selected: r.id === roleId ? 'selected' : null }))),
     el('input', { class: 'input num', type: 'number', step: '10', min: '0', placeholder: 'תעריף אישי (רשות)', dataset: { personRate: '1' } }),
   ]);
 
   const roleByName = new Map(roles.map((r) => [String(r.name).trim().toLowerCase(), r.id]));
-  for (const p of people) list.append(row(p.name, roleByName.get(String(p.roleName || '').trim().toLowerCase()) || ''));
-  for (let i = people.length; i < Math.max(3, people.length + 2); i++) list.append(row());
+  // אנשים שכבר משויכים לצוות הזה בספרייה — מוצעים ראשונים
+  const suggested = people.filter((p) => String(p.defaultTeamName || '').trim() === String(team.name || '').trim());
+  for (const p of suggested) list.append(row(p.id, roleByName.get(String(p.title || '').trim().toLowerCase()) || ''));
+  for (let i = suggested.length; i < Math.max(3, suggested.length + 2); i++) list.append(row());
 
   form.append(list);
   const add = el('button', { class: 'btn-add-row btn-add-row--sm', type: 'button' }, [icon('plus'), 'הוסף שורה']);
@@ -1437,6 +1764,8 @@ export function filterEntries(entries, filters = {}) {
 
 export function renderControlTab(root, { snap }) {
   const d = snap.deal;
+  const ddPanel = ddSplitPanel(snap);
+  if (ddPanel) root.append(ddPanel);
 
   if (snap.alerts.length) {
     root.append(el('section', { class: 'panel' }, [
@@ -1630,9 +1959,43 @@ export function renderDealSettings(root, { snap, rateCards }) {
       el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'duplicate-deal' } }, [icon('copy'), 'שכפל כתבנית']),
       el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'sync-team-roles' } }, [icon('refresh'), 'סנכרן דרגות מהתעריפון']),
       el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'export-deal' } }, [icon('download'), 'ייצוא העסקה לאקסל']),
+      el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'export-deal-contacts' }, title: 'מזהה לבד מי משויך לעסקה' }, [icon('users'), 'ייצוא אנשי קשר']),
       el('button', { class: 'btn btn--danger btn--sm', type: 'button', dataset: { action: 'delete-deal' } }, [icon('trash'), 'מחק עסקה']),
     ]),
   ]));
+
+  root.append(renderBuildPanel());
+}
+
+/**
+ * חותמת הגרסה — מאיזה בילד רץ מה שאתה רואה עכשיו.
+ * מאפשר להשוות בשנייה בין קובץ אופליין לאתר החי, ובין שני קבצים, בלי לנחש.
+ */
+export function renderBuildPanel() {
+  const when = BUILD.builtAt ? BUILD.builtAt.slice(0, 16).replace('T', ' ') : '—';
+  const channel = BUILD.channel === 'offline' ? 'קובץ אופליין' : 'אתר / PWA';
+  return el('section', { class: 'panel panel--build' }, [
+    el('h2', { class: 'panel__title' }, [icon('info'), 'גרסה']),
+    el('p', { class: 'panel__hint', text: 'החותמת נכתבת אוטומטית בכל בנייה. השוו אותה בין הקובץ שבידכם לאתר החי — המאוחר יותר הוא המעודכן.' }),
+    el('div', { class: 'buildinfo' }, [
+      el('div', { class: 'buildinfo__item' }, [
+        el('span', { class: 'lbl', text: 'נבנה בתאריך' }),
+        el('span', { class: 'num', text: when }),
+      ]),
+      el('div', { class: 'buildinfo__item' }, [
+        el('span', { class: 'lbl', text: 'מקור' }),
+        el('span', { text: channel }),
+      ]),
+      el('div', { class: 'buildinfo__item' }, [
+        el('span', { class: 'lbl', text: 'commit' }),
+        el('span', { class: 'num', text: BUILD.commit || '—' }),
+      ]),
+      el('div', { class: 'buildinfo__item' }, [
+        el('span', { class: 'lbl', text: 'גרסת cache' }),
+        el('span', { class: 'num', text: BUILD.cache || '—' }),
+      ]),
+    ]),
+  ]);
 }
 
 function field(label, control, hint) {
@@ -1646,6 +2009,224 @@ function field(label, control, hint) {
 /* ============================================================
    תעריפונים (מסך גלובלי)
    ============================================================ */
+
+/* ============================================================
+   ספריית אנשי הצוות — מסך משותף לכל העסקאות
+   ============================================================ */
+
+export function renderPeopleView(root, { people, usageOf, dupes = [] }) {
+  root.replaceChildren();
+  root.append(el('div', { class: 'page-head' }, [
+    el('div', {}, [
+      el('h1', { class: 'page-title', text: 'אנשי צוות' }),
+      el('p', { class: 'page-sub', text: 'מקור האמת היחיד לשמות: כל שם שמופיע בעסקה נבחר מכאן. שינוי כאן משתקף בכל העסקאות ובכל הייצואים.' }),
+    ]),
+    el('div', { class: 'page-actions' }, [
+      el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'people-template' }, title: 'קובץ עם העמודות שהייבוא מצפה להן' }, [icon('download'), 'תבנית אקסל']),
+      el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'import-people' } }, [icon('upload'), 'ייבוא מאקסל']),
+      el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'export-people' } }, [icon('download'), 'ייצוא אנשי קשר']),
+      el('button', { class: 'btn btn--primary btn--sm', type: 'button', dataset: { action: 'new-person' } }, [icon('plus'), 'איש צוות חדש']),
+    ]),
+  ]));
+
+  if (dupes.length) {
+    root.append(el('section', { class: 'panel panel--dd' }, [
+      el('h2', { class: 'panel__title' }, [icon('alert'), `שמות דומים — ${dupes.length} זוגות`]),
+      el('p', { class: 'panel__hint', text: 'ייתכן שאותו אדם נרשם פעמיים. מיזוג מעביר את כל השורות לרשומה שנשארת ושומר את הכתיב השני כזיהוי נוסף.' }),
+      el('ul', { class: 'alerts alerts--compact' }, dupes.map(([a, b]) => el('li', { class: 'alert alert--watch' }, [
+        icon('users'),
+        el('span', { text: `${a.name} · ${b.name}` }),
+        el('div', { class: 'toolbar__spacer' }),
+        el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'merge-people', keepId: a.id, dropId: b.id } }, `השאר "${a.name}"`),
+        el('button', { class: 'btn btn--ghost btn--sm', type: 'button', dataset: { action: 'merge-people', keepId: b.id, dropId: a.id } }, `השאר "${b.name}"`),
+      ]))),
+    ]));
+  }
+
+  if (!people.length) {
+    root.append(el('div', { class: 'empty' }, [
+      el('h2', { text: 'אין עדיין אנשי צוות' }),
+      el('p', { text: 'אפשר להוסיף ידנית, לייבא מאקסל, או פשוט להזין שם בגיליון של עסקה — הוא ייווצר כאן.' }),
+    ]));
+    return;
+  }
+
+  const table = el('table', { class: 'btable btable--people-dir' });
+  table.append(el('thead', {}, el('tr', {}, [
+    el('th', { class: 'th-pick' }, [el('input', { type: 'checkbox', dataset: { pick: 'people-all' }, 'aria-label': 'סמן הכל' })]),
+    el('th', { text: 'שם' }), el('th', { text: 'תפקיד' }), el('th', { text: 'צוות' }),
+    el('th', { text: 'דוא"ל' }), el('th', { text: 'טלפון' }),
+    el('th', { text: 'בשימוש' }), el('th', { text: 'פעיל' }), el('th', { class: 'th-tools' }),
+  ])));
+
+  const tbody = el('tbody');
+  for (const person of people) {
+    const use = usageOf(person.id);
+    tbody.append(el('tr', { class: person.active ? '' : 'is-inactive', dataset: { personId: person.id } }, [
+      el('td', { class: 'td-pick' }, [el('input', {
+        type: 'checkbox', dataset: { pick: 'person', personId: person.id },
+        'aria-label': `סימון ${person.name}`,
+      })]),
+      el('td', {}, [
+        el('input', { class: 'cellinput is-input', value: person.name, dataset: { pfield: 'name', personId: person.id }, 'aria-label': 'שם' }),
+        person.aliases.length ? el('span', { class: 'sub', text: `ידוע גם כ: ${person.aliases.join(' · ')}` }) : null,
+      ]),
+      el('td', {}, [el('input', { class: 'cellinput is-input', value: person.title, placeholder: 'שותף / עו״ד', dataset: { pfield: 'title', personId: person.id }, 'aria-label': 'תפקיד' })]),
+      el('td', {}, [el('input', { class: 'cellinput is-input', value: person.defaultTeamName, placeholder: 'צוות ברירת מחדל', dataset: { pfield: 'defaultTeamName', personId: person.id }, 'aria-label': 'צוות' })]),
+      el('td', {}, [el('input', { class: 'cellinput is-input ltr', type: 'email', value: person.email, placeholder: 'name@firm.co.il', dataset: { pfield: 'email', personId: person.id }, 'aria-label': 'דוא״ל' })]),
+      el('td', {}, [el('input', { class: 'cellinput is-input ltr', value: person.phone, placeholder: '050-0000000', dataset: { pfield: 'phone', personId: person.id }, 'aria-label': 'טלפון' })]),
+      el('td', { class: 'num muted', title: `${use.lines} שורות תקציב`, text: use.deals ? `${use.deals} עסקאות` : '—' }),
+      el('td', {}, [el('label', { class: 'inline-check--dd' }, [el('input', {
+        type: 'checkbox', checked: person.active ? 'checked' : null,
+        dataset: { pfield: 'active', personId: person.id }, 'aria-label': 'פעיל',
+      })])]),
+      el('td', { class: 'td-tools' }, [
+        el('button', {
+          class: 'iconbtn iconbtn--danger', type: 'button', tabindex: '-1',
+          title: use.lines ? 'משויך לשורות תקציב — אפשר לסמן כלא פעיל' : 'מחק',
+          dataset: { action: 'delete-person', personId: person.id }, html: ICONS.trash,
+        }),
+      ]),
+    ]));
+  }
+  table.append(tbody);
+  root.append(el('section', { class: 'panel' }, [el('div', { class: 'btable-wrap' }, table)]));
+}
+
+/** טופס איש צוות — לחלון "חדש" ולעריכה מלאה */
+export function renderPersonForm(person = {}) {
+  const form = el('form', { class: 'form form--grid', id: 'person-form' }, [
+    field('שם מלא', el('input', { class: 'input', name: 'name', value: person.name || '', required: 'required', placeholder: 'לדוגמה: דנה כהן' })),
+    field('תפקיד', el('input', { class: 'input', name: 'title', value: person.title || '', placeholder: 'שותף / עו״ד / מתמחה' })),
+    field('צוות ברירת מחדל', el('input', { class: 'input', name: 'defaultTeamName', value: person.defaultTeamName || '', placeholder: 'לדוגמה: קורפורייט' })),
+    field('דוא"ל', el('input', { class: 'input ltr', type: 'email', name: 'email', value: person.email || '', placeholder: 'name@firm.co.il' })),
+    field('טלפון', el('input', { class: 'input ltr', name: 'phone', value: person.phone || '', placeholder: '050-0000000' })),
+  ]);
+  if (person.id) form.append(el('input', { type: 'hidden', name: 'id', value: person.id }));
+  return form;
+}
+
+/**
+ * חלון בחירת איש צוות — הדרך היחידה לשייך שם לשורה.
+ * מחפש לפי מפתח זהות (כך ש"כהן" מוצא גם "עו״ד דנה כהן"), ומציע הקמה כשאין התאמה.
+ */
+export function renderPersonPicker({ people, query = '', currentId = '' }) {
+  const wrap = el('div', { class: 'picker' });
+  wrap.append(el('input', {
+    class: 'input picker__search', id: 'person-search', value: query,
+    placeholder: 'חיפוש לפי שם…', autocomplete: 'off', dataset: { pickerSearch: '1' },
+  }));
+  const list = el('div', { class: 'picker__list', id: 'person-picker-list' });
+  wrap.append(list);
+  renderPersonPickerList(list, { people, query, currentId });
+  return wrap;
+}
+
+export function renderPersonPickerList(list, { people, query = '', currentId = '' }) {
+  list.replaceChildren();
+  if (!people.length) {
+    list.append(el('div', { class: 'picker__empty' }, [
+      el('p', { text: query ? `לא נמצא "${query}" בספריית אנשי הצוות.` : 'הספרייה ריקה.' }),
+      el('button', { class: 'btn btn--primary btn--sm', type: 'button', dataset: { action: 'new-person-from-picker', name: query } },
+        [icon('plus'), query ? `הקם את "${query}" כאיש צוות` : 'הקם איש צוות חדש']),
+    ]));
+    return;
+  }
+  for (const person of people) {
+    list.append(el('button', {
+      class: `picker__item${person.id === currentId ? ' is-current' : ''}`, type: 'button',
+      dataset: { action: 'pick-person', personId: person.id },
+    }, [
+      el('span', { class: 'picker__name', text: person.name }),
+      el('span', { class: 'picker__meta', text: [person.title, person.defaultTeamName].filter(Boolean).join(' · ') }),
+    ]));
+  }
+  list.append(el('button', {
+    class: 'picker__new', type: 'button', dataset: { action: 'new-person-from-picker', name: query },
+  }, [icon('plus'), query ? `לא זה? הקם את "${query}" כאיש צוות` : 'איש צוות חדש…']));
+}
+
+/** בחירת אנשי הקשר לייצוא מתוך העסקה — עם מקור השיוך לכל אחד */
+export function renderDealContactsForm({ rows, dealName }) {
+  const form = el('form', { class: 'modal-form', id: 'deal-contacts-form' }, [
+    el('p', { class: 'modal-text', text: `אלה האנשים שהמערכת מזהה כמשויכים ל"${dealName}". בטל סימון למי שלא צריך להיכנס לרשימה.` }),
+  ]);
+  const table = el('table', { class: 'btable' });
+  table.append(el('thead', {}, el('tr', {}, [
+    el('th', { class: 'th-pick' }), el('th', { text: 'שם' }), el('th', { text: 'תפקיד' }),
+    el('th', { text: 'צוות בעסקה' }), el('th', { text: 'מקור השיוך' }), el('th', { text: 'שעות' }),
+    el('th', { text: 'דוא"ל' }),
+  ])));
+  table.append(el('tbody', {}, rows.map((r) => el('tr', {}, [
+    el('td', { class: 'td-pick' }, [el('input', {
+      type: 'checkbox', checked: 'checked',
+      dataset: { contactPick: '1', personId: r.person.id }, 'aria-label': `כלול את ${r.person.name}`,
+    })]),
+    el('td', { class: 'td-strong', text: r.person.name }),
+    el('td', { text: r.person.title || '—' }),
+    el('td', { text: r.teams.join(' · ') || '—' }),
+    el('td', { class: 'muted', text: r.sources.join(' · ') }),
+    el('td', { class: 'num', text: r.hours ? fmtHours(r.hours) : '—' }),
+    el('td', { class: 'ltr muted', text: r.person.email || '—' }),
+  ]))));
+  form.append(el('div', { class: 'btable-wrap' }, table));
+  return form;
+}
+
+/** תצוגה מקדימה לייבוא אנשי קשר — סטטוס לכל שורה והחלטה לכל שורה */
+export function renderContactsImportPreview({ rows, header, mapping, fileName, skipped }) {
+  const STATUS = {
+    create: { label: 'חדש', tone: 'ok' },
+    same:   { label: 'קיים · זהה', tone: 'draft' },
+    update: { label: 'קיים · עדכון', tone: 'watch' },
+    fuzzy:  { label: 'התאמה מקורבת', tone: 'risk' },
+  };
+  const form = el('form', { class: 'modal-form', id: 'contacts-import-form' }, [
+    el('p', { class: 'modal-text', text: `${fileName} · ${rows.length} שורות${skipped ? ` · ${skipped} שורות בלי שם דולגו` : ''}` }),
+    el('p', { class: 'panel__hint', text: `עמודות שזוהו: ${TARGET_CONTACT_LABELS(mapping, header)}` }),
+  ]);
+
+  form.append(field('עדכון רשומות קיימות', el('select', { class: 'select', dataset: { importMode: '1' } }, [
+    el('option', { value: 'fill', text: 'השלמת שדות ריקים בלבד (מומלץ)' }),
+    el('option', { value: 'full', text: 'עדכון מלא — הקובץ דורס את הקיים' }),
+  ])));
+
+  const table = el('table', { class: 'btable' });
+  table.append(el('thead', {}, el('tr', {}, [
+    el('th', { text: 'שם בקובץ' }), el('th', { text: 'סטטוס' }), el('th', { text: 'הרשומה בספרייה' }),
+    el('th', { text: 'תפקיד' }), el('th', { text: 'צוות' }), el('th', { text: 'דוא"ל' }), el('th', { text: 'טלפון' }),
+    el('th', { text: 'פעולה' }),
+  ])));
+  table.append(el('tbody', {}, rows.map((r, i) => {
+    const st = STATUS[r.status];
+    const options = r.status === 'create'
+      ? [['create', 'צור חדש'], ['skip', 'דלג']]
+      : r.status === 'same'
+        ? [['skip', 'דלג'], ['update', 'עדכן בכל זאת']]
+        : [['update', r.status === 'fuzzy' ? `עדכן את "${r.match.name}"` : 'עדכן'], ['create', 'צור רשומה נפרדת'], ['skip', 'דלג']];
+    return el('tr', {}, [
+      el('td', { class: 'td-strong', text: r.contact.name }),
+      el('td', {}, [el('span', { class: `pill pill--${st.tone}`, text: st.label })]),
+      el('td', { class: 'muted', text: r.match?.name || '—' }),
+      el('td', { text: r.contact.title || '—' }),
+      el('td', { text: r.contact.defaultTeamName || '—' }),
+      el('td', { class: 'ltr', text: r.contact.email || '—' }),
+      el('td', { class: 'ltr', text: r.contact.phone || '—' }),
+      el('td', {}, [el('select', { class: 'select select--sm', dataset: { rowAction: String(i) } },
+        options.map(([v, label], k) => el('option', { value: v, text: label, selected: k === 0 ? 'selected' : null })))]),
+    ]);
+  })));
+  form.append(el('div', { class: 'btable-wrap btable-wrap--map' }, table));
+  return form;
+}
+
+function TARGET_CONTACT_LABELS(mapping, header) {
+  const names = { name: 'שם', title: 'תפקיד', team: 'צוות', email: 'דוא"ל', phone: 'טלפון' };
+  const found = Object.entries(mapping)
+    .filter(([, idx]) => idx !== undefined)
+    .map(([field, idx]) => `${names[field] || field} ← "${String(header[idx] ?? '').trim()}"`);
+  return found.length ? found.join(' · ') : 'לא זוהו עמודות — ודא שיש שורת כותרת';
+}
 
 export function renderRatesView(root, { rateCards, deals }) {
   root.replaceChildren();
@@ -1964,6 +2545,39 @@ export function toast(message, tone = '') {
   }, 3200);
 }
 
+/**
+ * טוסט עם ביטול — לפעולות שמוחקות מידע. נשאר על המסך יותר זמן מטוסט רגיל,
+ * ומציג ספירה לאחור כדי שיהיה ברור כמה זמן נשאר לבטל.
+ */
+export function undoToast(message, onUndo, seconds = 8) {
+  let node = document.getElementById('toast');
+  if (!node) {
+    node = el('div', { class: 'toast', id: 'toast', role: 'status', 'aria-live': 'polite' });
+    document.body.append(node);
+  }
+  clearTimeout(toastTimer);
+  clearInterval(undoToast._tick);
+
+  let left = seconds;
+  const counter = el('span', { class: 'toast__count num', text: String(left) });
+  const undoBtn = el('button', { class: 'toast__undo', type: 'button' }, [icon('refresh'), 'בטל']);
+  node.className = 'toast toast--undo';
+  node.replaceChildren(icon('trash'), el('span', { text: message }), undoBtn, counter);
+  node.classList.remove('gone');
+
+  const close = () => {
+    clearInterval(undoToast._tick);
+    node.classList.add('gone');
+    setTimeout(() => node.remove(), 320);
+  };
+  undoBtn.addEventListener('click', async () => { close(); await onUndo(); });
+  undoToast._tick = setInterval(() => {
+    left -= 1;
+    counter.textContent = String(Math.max(0, left));
+    if (left <= 0) close();
+  }, 1000);
+}
+
 /* ============================================================
    עדכון תאים מחושבים ללא רינדור מלא (שמירה על פוקוס בהקלדה)
    ============================================================ */
@@ -1987,7 +2601,16 @@ export function refreshComputed(snap, selected = new Set()) {
     if (node) { node.innerHTML = miniBar(util, status); node.title = fmtPct(util); }
   };
 
+  const setDelta = (key, actual, budget) => {
+    const node = document.querySelector(`[data-calc="${CSS.escape(key)}"]`);
+    if (!node) return;
+    const over = actual > budget + 0.05;
+    node.textContent = overText(actual, budget);
+    node.className = `num delta${over ? '' : ' delta--none'}`;
+  };
+
   for (const team of snap.teams) {
+    const share = snap.budgetCost > 0 ? team.budgetCost / snap.budgetCost : 0;
     set(`team-budget-${team.id}`, money(team.budgetCost, d));
     set(`team-cost-${team.id}`, money(team.budgetCost, d));
     set(`team-hours-${team.id}`, fmtHours(team.budgetHours));
@@ -1996,40 +2619,61 @@ export function refreshComputed(snap, selected = new Set()) {
     set(`team-actual-cost-${team.id}`, money(team.actualCost, d));
     set(`team-actual-hours-${team.id}`, fmtHours(team.actualHours));
     set(`team-hours-live-${team.id}`, `${fmtHours(team.actualHours)} / ${fmtHours(team.budgetHours)}`);
+    set(`team-share-${team.id}`, `${fmtPct(share)} מהתקציב · ${money(team.budgetCost, d)}`);
     set(`team-remaining-${team.id}`, money(team.remainingCost, d), team.remainingCost < 0);
     set(`team-rem-${team.id}`, money(team.remainingCost, d), team.remainingCost < 0);
     set(`team-util-${team.id}`, fmtPct(team.util));
+    setDelta(`team-delta-${team.id}`, team.actualHours, team.budgetHours);
     setStatus(`team-status-${team.id}`, team.status, `${STATUS_LABEL[team.status]} · ${fmtPct(team.util)}`);
     setBar(`team-bar-${team.id}`, team.util, team.status);
+    setBar(`team-foot-bar-${team.id}`, team.util, team.status);
+    const maxHours = Math.max(1, ...team.lines.map((l) => l.budgetHours || 0));
     for (const line of team.lines) {
       set(`line-cost-${line.id}`, money(line.budgetCost, d));
       set(`line-actual-cost-${line.id}`, money(line.actualCost, d));
       set(`line-remaining-${line.id}`, money(line.remainingCost, d), line.remainingCost < 0);
+      setDelta(`line-delta-${line.id}`, line.actualHours, line.budgetHours);
       const util = document.querySelector(`[data-calc="line-util-${CSS.escape(line.id)}"]`);
       if (util) { util.textContent = fmtPct(line.util); util.className = `num pct pct--${line.status}`; }
       setBar(`line-bar-${line.id}`, line.util, line.status);
-      const input = document.querySelector(`input[data-field="hoursOverride"][data-line-id="${CSS.escape(line.id)}"]`);
-      if (input && input.dataset.auto === '1' && document.activeElement !== input) input.value = String(line.budgetHours);
+      // רוחב המד יחסי לגודל השורה — צריך להתעדכן גם כששעות התקציב משתנות תוך כדי הקלדה
+      const track = document.querySelector(`[data-calc="line-bar-${CSS.escape(line.id)}"]`);
+      if (track) track.style.width = `${Math.max(34, Math.round((line.budgetHours / maxHours) * 100))}%`;
+      set(`line-plan-${line.id}`, fmtHours(line.budgetHours));
+      set(`line-rate-${line.id}`, money(line.rate, d));
+      /*
+       * תיבת השעות שדווחו מציגה את הסך המאוחד מכל המקורות — ולכן היא חייבת
+       * להתיישר בחזרה מול המודל אחרי כל חישוב. בלי זה נשאר בה מה שהוקלד
+       * (או ריק, אחרי מחיקה) בזמן שהשורה כבר מציגה מספר אחר.
+       */
+      const done = document.querySelector(`input[data-field="manualHours"][data-line-id="${CSS.escape(line.id)}"]`);
+      if (done && document.activeElement !== done) done.value = line.actualHours ? String(line.actualHours) : '';
     }
   }
 
-  set('total-budget', money(snap.budgetCost, d));
-  set('total-hours', fmtHours(snap.budgetHours));
-  set('total-est', fmtHours(snap.estHours));
-  set('total-actual', money(snap.actualCost, d));
-  set('total-remaining', money(snap.remainingCost, d), snap.remainingCost < 0);
-  set('total-blended', money(snap.blendedRate, d));
-  set('total-blended-all', money(snap.blendedAll, d));
+  // הפס העליון
+  set('hero-util', fmtPct(snap.util));
+  setBar('hero-bar', snap.util, snap.status);
+  set('hero-util-sub', `${fmtHours(snap.actualHours)} מתוך ${fmtHours(snap.budgetHours)} שעות · ${money(snap.actualCost, d)} מתוך ${money(snap.budgetCost, d)}`);
+  set('hero-remaining', money(snap.remainingCost, d));
+  const heroRem = document.querySelector('[data-calc="hero-remaining"]');
+  if (heroRem) heroRem.className = `hero3__mid num ${snap.remainingCost < 0 ? 'neg' : 'pos'}`;
+  set('hero-remaining-sub', `${fmtHours(snap.remainingHours)} שעות נותרו`);
+  set('hero-blended', money(snap.blendedRate, d));
+  if (snap.eac !== null) {
+    const eacOver = snap.eacVariance !== null && snap.eacVariance < 0;
+    set('hero-eac', money(snap.eac, d));
+    const eacNode = document.querySelector('[data-calc="hero-eac"]');
+    if (eacNode) eacNode.className = `hero3__mid num ${eacOver ? 'warn' : 'pos'}`;
+    set('hero-eac-sub', `${money(Math.abs(snap.eacVariance), d)} ${eacOver ? 'מעל התקציב' : 'מתחת לתקציב'} · ${snap.eacBasis}`);
+  }
 
-  set('strip-budget', money(snap.budgetCost, d));
-  set('strip-budget-hours', fmtHours(snap.budgetHours));
-  set('strip-actual', money(snap.actualCost, d));
-  set('strip-actual-hours', fmtHours(snap.actualHours));
-  set('strip-remaining', money(snap.remainingCost, d));
-  set('strip-util', fmtPct(snap.util));
-  set('strip-blended', money(snap.blendedRate, d));
-  set('strip-blended-actual', money(snap.blendedActual, d));
-  set('strip-blended-eff', money(snap.effectiveRates.blended, d));
+  set('f-budget-hours', fmtHours(snap.budgetHours));
+  set('f-est-hours', fmtHours(snap.estHours));
+  set('f-blended', money(snap.blendedRate, d));
+  set('f-blended-all', money(snap.blendedAll, d));
+  set('f-blended-actual', money(snap.blendedActual, d));
+  set('f-blended-eff', money(snap.effectiveRates.blended, d));
 
   if (selected.size) {
     const agg = aggregateTeams(snap, selected);
