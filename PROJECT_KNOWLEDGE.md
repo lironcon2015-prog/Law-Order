@@ -134,6 +134,12 @@ CRM אישי לעו"ד M&A, vanilla JS · PWA · offline-first · RTL. חי ב-`
 - **grid blowout במובייל** (רשימה 460px על viewport 390): טראק `1fr` לא מוגבל ל-min-content → `grid-template-columns: minmax(0, 1fr)` + `min-width: 0` ל-sidebar/main.
 - header גלש במסכים ≤520px → breakpoint קומפקטי (root בלבד; ל-v2 יש sidebar).
 - **כרטיסים נדחסו ונחתכו ברשימה מלאה**: `.list`/`.lane__cards` הם flex-column גלילים, ו-`overflow:hidden` על `.card`/`.pcard` מאפס את ה-min-height האוטומטי של flex item → הכרטיסים כווצו במקום שהרשימה תגלול. תוקן ב-`flex-shrink: 0` (v1+v2). לקח: באג שתלוי בכמות נתונים — לשחזר עם רשימה שגולשת מגובה החלון, לא עם 4 רשומות דמו.
+- **`VersionError: the requested version (3) is less than the existing version (4)`** — קובץ אופליין/ענף
+  אחר יצר את `lexBudgetDB` בגרסה גבוהה יותר, ו-IndexedDB **אוסר הורדת גרסה**, ולכן הבילד הישן
+  נחסם לגמרי. תוקן ב-`budget/js/db.js`: `openDB` תופס `VersionError`, נפתח **בגרסה הקיימת**
+  (`indexedDB.open` בלי מספר), ורק אם חסר store נדרש מעלה גרסה בשלב אחד. בנוסף `DB_VERSION`
+  יושר ל-4 ונוצר store `people` כדי שהסכימה תהיה זהה בין ענפים. **לקח:** מספר גרסת DB הוא
+  מרחב גלובלי חוצה-ענפים — אף פעם לא להוריד אותו, ולא להניח שהמסד במכשיר נוצר בקוד הזה.
 - **`normalizeProgress` מסנן שדות לא מוכרים**: `fileId` הוצמד לרשומות הייבוא ב-app.js אבל נמחק בנרמול,
   ולכן הקישור לקובץ במסך "מקורות המידע" לא עבד. השדה נוסף לנרמול. לקח: כל שדה חדש ברשומה חייב
   להופיע ב-`normalize*` המתאים, אחרת הוא נעלם בשקט בשמירה.
