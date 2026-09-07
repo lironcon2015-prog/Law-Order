@@ -313,6 +313,11 @@ CRM אישי לעו"ד M&A, vanilla JS · PWA · offline-first · RTL. חי ב-`
 - **grid blowout במובייל** (רשימה 460px על viewport 390): טראק `1fr` לא מוגבל ל-min-content → `grid-template-columns: minmax(0, 1fr)` + `min-width: 0` ל-sidebar/main.
 - header גלש במסכים ≤520px → breakpoint קומפקטי (root בלבד; ל-v2 יש sidebar).
 - **כרטיסים נדחסו ונחתכו ברשימה מלאה**: `.list`/`.lane__cards` הם flex-column גלילים, ו-`overflow:hidden` על `.card`/`.pcard` מאפס את ה-min-height האוטומטי של flex item → הכרטיסים כווצו במקום שהרשימה תגלול. תוקן ב-`flex-shrink: 0` (v1+v2). לקח: באג שתלוי בכמות נתונים — לשחזר עם רשימה שגולשת מגובה החלון, לא עם 4 רשומות דמו.
+- **`tools/repo-audit.mjs` + SessionStart hook**: בדיקה אוטומטית בפתיחת כל סשן — ענפים עם עבודה
+  שלא מוזגה ל-main (עם כמה main מקדים אותם, כדי להבחין בין עבודה חסרה לענף נטוש), DB_VERSION
+  שירד מתחת לגרסה שקיימת בענף אחר, וקובץ אופליין ישן מהקוד. נולד משתי טעויות אמיתיות באותו סשן.
+  **מלכודת שכבר נפלתי בה:** `execSync` רץ דרך `/bin/sh`, ולכן `--format=%(refname:short)`
+  בלי גרשיים הוא שגיאת תחביר — הפקודה נכשלה בשקט והבדיקה החזירה "הכל מוזג".
 - **חותמת גרסה**: `budget/tools/stamp.mjs` כותב את `budget/js/version.js` (תאריך, commit, גרסת SW,
   ערוץ web/offline) והוא מוצג במסך ההגדרות. נולד מהשאלה "איך אני יודע איזה קובץ מעודכן" — בלי חותמת
   שני בילדים נראים זהים. הסקריפט רץ אוטומטית מתוך `build-offline.mjs`, ולכן החותמת תמיד מתעדכנת.
