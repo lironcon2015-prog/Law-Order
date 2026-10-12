@@ -244,3 +244,152 @@
 [data-skin="ledger"] .searchbox { background: #ffffff; }
 [data-skin="ledger"] * { scrollbar-color: rgba(20,22,28,.2) transparent; }
 .skin-switch .skin-switch__reset { margin-inline-start: 6px; border-inline-start: 1px solid rgba(255,255,255,.15); border-radius: 0 999px 999px 0; opacity: .75; }
+
+/* ============================================================
+   "קיים משודרג" — סבב 2: שקט. אותו מבנה ואותה שפה (שחור-זהב), אבל:
+   (א) פחות קופסאות — הפרדה ברווח ובקו דק במקום מסגרת סביב כל דבר
+   (ב) צבע רק לחריגה — מה שתקין אפור, כך שהעין נמשכת רק לבעיה
+   (ג) משקל אחד בולט בכל אזור — השאר במשקל רגיל
+   (ד) כלים מופיעים בריחוף — לא 5 אייקונים על כל שורה
+   (ה) זהב רק לפעולה ראשית ולמיקום (טאב פעיל)
+   ============================================================ */
+[data-skin="refined"] {
+  --surface-1: #121216;
+  --surface-2: #17171c;
+  --line:      rgba(255,255,255,.07);
+  --line-soft: rgba(255,255,255,.045);
+  --calm-bar:  rgba(255,255,255,.28);
+}
+[data-skin="refined"] body { background: #0b0b0e; background-image: none; }
+[data-skin="refined"] :is(.bg-glow, .bg-grain, .bg-vignette) { display: none; }
+[data-skin="refined"] .main { padding: 26px 36px 90px; }
+
+/* סרגל עליון: רקע אחד, טאבים כטקסט */
+[data-skin="refined"] .topbar { background: #0b0b0e; backdrop-filter: none; -webkit-backdrop-filter: none; border-bottom-color: var(--line-soft); }
+[data-skin="refined"] .brand__logo { box-shadow: none; }
+[data-skin="refined"] .brand__name { background: none; color: var(--text-strong); -webkit-background-clip: border-box; background-clip: border-box; }
+[data-skin="refined"] .brand__sub { letter-spacing: .06em; }
+[data-skin="refined"] .dtab { border-color: transparent; background: transparent; color: var(--text-muted); font-weight: 600; }
+[data-skin="refined"] .dtab:hover { background: var(--surface-2); border-color: transparent; }
+[data-skin="refined"] .dtab[aria-selected="true"] { background: var(--surface-2); border-color: var(--line); color: var(--text-strong); box-shadow: none; }
+[data-skin="refined"] .dtab[aria-selected="true"] .dtab__util { color: var(--text-muted); }
+[data-skin="refined"] .dtab--add { border: 1px dashed var(--line); }
+[data-skin="refined"] .topbar__actions .btn--ghost { border-color: transparent; color: var(--text-muted); }
+[data-skin="refined"] .topbar__actions .btn--ghost:hover { color: var(--text-strong); background: var(--surface-2); }
+
+/* כותרת העסקה: שם גדול, מטא-דאטה כשורת טקסט אחת */
+[data-skin="refined"] .page-title { font-size: 1.9rem; font-weight: 700; }
+[data-skin="refined"] .deal-head__meta { gap: 0; margin-top: 8px; }
+[data-skin="refined"] .deal-head__meta .chip-mini { background: none; border: 0; padding: 0; font-size: .86rem; font-weight: 500; color: var(--text-muted); }
+[data-skin="refined"] .deal-head__meta .chip-mini + .chip-mini::before { content: '·'; margin: 0 9px; color: var(--text-faint); }
+[data-skin="refined"] .page-actions .btn--ghost { border-color: transparent; color: var(--text-secondary); }
+[data-skin="refined"] .page-actions .btn--ghost:hover { background: var(--surface-2); color: var(--text-strong); }
+
+/* הפס העליון: בלי קופסאות. מספר אחד מוביל, השאר בדיו אחיד */
+[data-skin="refined"] .band { gap: 40px; margin-top: 26px; }
+[data-skin="refined"] .hero3 { border: 0; background: none; box-shadow: none; gap: 0; border-radius: 0; }
+[data-skin="refined"] .hero3__cell, [data-skin="refined"] .hero3__cell--main, [data-skin="refined"] .hero3__cell--risk.is-over {
+  background: none; box-shadow: none; padding: 2px 26px;
+}
+[data-skin="refined"] .hero3__cell:first-child { padding-inline-start: 0; }
+[data-skin="refined"] .hero3__cell + .hero3__cell { border-inline-start: 1px solid var(--line); }
+[data-skin="refined"] .hero3__val { font-size: 3.2rem; font-weight: 600; }
+[data-skin="refined"] .hero3__mid { font-size: 1.5rem; font-weight: 500; }
+[data-skin="refined"] .hero3__mid.pos, [data-skin="refined"] .hero3__mid.warn { color: var(--text-strong); }
+[data-skin="refined"] .hero3__mid.neg { color: var(--negative); }
+[data-skin="refined"] .hero3__sub { color: var(--text-muted); }
+[data-skin="refined"] .tmap { border: 0; background: none; box-shadow: none; padding: 2px 0; gap: 12px; }
+[data-skin="refined"] .tmap__stack { height: 30px; border-radius: 6px; gap: 3px; }
+[data-skin="refined"] .tmap__seg { font-weight: 700; font-size: .72rem; filter: saturate(.75) brightness(.92); }
+[data-skin="refined"] .tmap__seg--over { box-shadow: none; outline: 2px solid var(--negative); outline-offset: -2px; }
+[data-skin="refined"] .tmap__hint { display: none; }
+
+/* המדדים הנגזרים: שורת טקסט שקטה, בלי מסגרת */
+[data-skin="refined"] .frow { border: 0; background: none; padding: 18px 0 0; margin-top: 22px; border-top: 1px solid var(--line-soft); border-radius: 0; }
+[data-skin="refined"] .frow__item { border: 0; padding: 0 0 0 34px; flex: 0 1 auto; }
+[data-skin="refined"] .frow__item:first-child { padding-inline-start: 0; }
+[data-skin="refined"] .frow__val { font-weight: 500; color: var(--text-secondary); font-size: 1rem; }
+
+/* טאבים פנימיים: טקסט בלבד */
+[data-skin="refined"] .subtabs { margin-top: 34px; border-bottom-color: var(--line-soft); }
+[data-skin="refined"] .subtab svg { display: none; }
+[data-skin="refined"] .subtab { padding: 10px 2px 12px; margin-inline-end: 26px; font-size: .97rem; }
+
+/* רשימת הצוותים: רשימה ולא ערימת כרטיסים */
+[data-skin="refined"] .pickbar { border: 0; background: none; padding: 0; margin-bottom: 0; }
+[data-skin="refined"] .pickbar__hint { display: none; }
+[data-skin="refined"] .segbtn { background: none; border-color: transparent; }
+[data-skin="refined"] .segbtn.is-on { background: var(--surface-2); border-color: var(--line); color: var(--text-strong); }
+[data-skin="refined"] .tsec { color: var(--text-faint); margin: 26px 0 4px; }
+[data-skin="refined"] .tsec--alert { color: var(--negative); }
+[data-skin="refined"] .trow {
+  background: none; border: 0; border-bottom: 1px solid var(--line-soft); border-radius: 0; margin-bottom: 0; min-height: 58px;
+}
+[data-skin="refined"] .trow:hover { background: var(--surface-1); }
+[data-skin="refined"] .trow--head { border-bottom: 1px solid var(--line); }
+[data-skin="refined"] .trow--head:hover { background: none; }
+[data-skin="refined"] .trow--alert { border-color: var(--line-soft); }
+[data-skin="refined"] .trow--open { background: var(--surface-1); border-bottom-color: transparent; border-radius: 10px 10px 0 0; }
+[data-skin="refined"] .trow__rail { margin-block: 16px; width: 3px; }
+[data-skin="refined"] .trow__name { font-weight: 600; font-size: 1rem; }
+[data-skin="refined"] .trow__val { font-weight: 500; color: var(--text-primary); }
+[data-skin="refined"] .trow__meta { color: var(--text-faint); }
+/* כלים: רק בריחוף (תיבת סימון מסומנת נשארת גלויה) */
+[data-skin="refined"] .trow :is(.trow__grip, .trow__pick, .trow__tools .iconbtn) { opacity: 0; transition: opacity var(--t-fast); }
+[data-skin="refined"] .trow:hover :is(.trow__grip, .trow__pick, .trow__tools .iconbtn),
+[data-skin="refined"] .trow--open :is(.trow__pick, .trow__tools .iconbtn),
+[data-skin="refined"] .trow__pick:has(input:checked) { opacity: 1; }
+[data-skin="refined"] .trow__tools .iconbtn { border-color: transparent; }
+/* סטטוס: "תקין" לא צריך תווית; חריגה/סיכון — טקסט צבעוני עם נקודה, בלי רקע */
+[data-skin="refined"] .trow .pill--ok { visibility: hidden; }
+[data-skin="refined"] .pill { background: none; border: 0; padding: 0; font-weight: 700; }
+[data-skin="refined"] .pill::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+[data-skin="refined"] .pill--watch { color: var(--gold); }
+/* סרגלי ניצול: תקין = אפור; רק סיכון/חריגה בצבע */
+[data-skin="refined"] .mbar { height: 5px; background: rgba(255,255,255,.06); }
+[data-skin="refined"] .mbar__fill[style*="#34d399"] { background: var(--calm-bar) !important; }
+[data-skin="refined"] .mbar__over { display: none; }
+[data-skin="refined"] .pct--ok { color: var(--text-muted); font-weight: 600; }
+
+/* הגיליון הפתוח: המשך של השורה, לא קופסה נוספת */
+[data-skin="refined"] .tsheet { background: var(--surface-1); border: 0; border-radius: 0 0 10px 10px; padding: 4px 18px 6px; margin-bottom: 14px; }
+[data-skin="refined"] .tsheet--alert { border: 0; }
+[data-skin="refined"] .btable--sheet .btable__groups th { color: var(--text-faint); font-size: .72rem; }
+[data-skin="refined"] .btable--sheet tbody td:first-child { border-inline-start-width: 2px; }
+[data-skin="refined"] .btable--sheet tbody tr.bline--watch td:first-child { border-inline-start-color: transparent; }
+[data-skin="refined"] .btable--sheet .td-tools .iconbtn { opacity: 0; border-color: transparent; }
+[data-skin="refined"] .btable--sheet tr:hover .td-tools .iconbtn { opacity: 1; }
+[data-skin="refined"] .anchor__done, [data-skin="refined"] .cellinput--done { font-weight: 600; font-size: 1.1rem; }
+[data-skin="refined"] .tsheet .is-input { background: rgba(255,255,255,.035); border-color: transparent; border-block-end-color: rgba(255,255,255,.14); }
+[data-skin="refined"] .pct--watch { color: var(--text-secondary); }
+[data-skin="refined"] .btable td { color: var(--text-secondary); }
+[data-skin="refined"] .btable tfoot td { background: none; }
+[data-skin="refined"] .lgnd { opacity: .7; }
+[data-skin="refined"] .team__foot { border-top-color: var(--line-soft); }
+
+/* כפתורי "הוסף": קישור שקט, לא כפתור זהב מקווקו */
+[data-skin="refined"] .btn-add-row { background: none; border: 0; color: var(--text-muted); padding: 6px 4px; }
+[data-skin="refined"] .btn-add-row:hover { background: none; color: var(--gold-bright); }
+
+/* פאנלים: משטח אחד בלי מסגרת, כותרת בלי אייקון */
+[data-skin="refined"] .panel { border: 0; box-shadow: none; background: var(--surface-1); padding: 22px 24px; }
+[data-skin="refined"] :is(.panel--total, .panel--agg, .panel--manual, .panel--dd, .panel--cap-on) { border: 0; background: var(--surface-1); }
+[data-skin="refined"] .panel__title svg { display: none; }
+[data-skin="refined"] .panel__title .pill { margin-inline-start: 6px; }
+[data-skin="refined"] .ddcol, [data-skin="refined"] .ddcol--dd { background: none; border: 0; border-inline-start: 2px solid var(--line); border-radius: 0; padding: 2px 16px; }
+[data-skin="refined"] .ddcol--dd { border-inline-start-color: var(--info); }
+[data-skin="refined"] .ddcol--dd .ddcol__title { color: var(--text-strong); }
+[data-skin="refined"] .fact--neg .fact__value { color: var(--negative); }
+[data-skin="refined"] .fact--pos .fact__value { color: var(--text-strong); }
+[data-skin="refined"] .kpi { border: 0; background: var(--surface-1); }
+[data-skin="refined"] .kpi__ic { display: none; }
+[data-skin="refined"] .kpi--pos .kpi__value { color: var(--text-strong); }
+[data-skin="refined"] .dcard { border: 0; background: var(--surface-1); }
+[data-skin="refined"] .dcard:hover { box-shadow: none; background: var(--surface-2); }
+[data-skin="refined"] .dcard__foot .chip-mini { background: none; border-color: transparent; padding: 0; }
+[data-skin="refined"] .dcard__foot { gap: 14px; }
+[data-skin="refined"] .alert { background: none; border: 0; border-bottom: 1px solid var(--line-soft); border-radius: 0; padding: 11px 2px; }
+[data-skin="refined"] .alert--watch svg { color: var(--text-muted); }
+[data-skin="refined"] .cbar__fill--budget { border-color: rgba(255,255,255,.25); }
+[data-skin="refined"] .dropzone { background: none; }
+[data-skin="refined"] .input, [data-skin="refined"] .select { background: var(--surface-2); box-shadow: none; }
