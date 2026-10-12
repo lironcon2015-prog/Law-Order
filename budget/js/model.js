@@ -37,17 +37,17 @@ export const FEE_MODELS = [
   { id: 'hourly', label: 'שעתי',            hint: 'חיוב לפי שעות בפועל. התקציב הוא תחזית ובקרה.' },
   { id: 'capped', label: 'שעתי עם תקרה',    hint: 'חיוב לפי שעות עד תקרה מוסכמת. חריגה = הפסד.' },
   { id: 'fixed',  label: 'פיקס (Fixed Fee)', hint: 'שכ"ט קבוע. הרווחיות = שכ"ט פחות עלות בפועל.' },
-  { id: 'retainer', label: 'ריטיינר',        hint: 'סכום חודשי קבוע לאורך תקופת העסקה.' },
+  { id: 'retainer', label: 'ריטיינר',        hint: 'הסכום שמוזן הוא חודשי — מוכפל במספר חודשי העסקה לפי תאריכי הפתיחה והסיום.' },
 ];
 
-/** סוגי רישום ביצוע */
-export const ENTRY_KINDS = [
+/** סוגי רישום בחשבונות (נתונים ישנים — טאב החשבונות בוטל; נשמר לנרמול בלבד) */
+const ENTRY_KINDS = [
   { id: 'hours',       label: 'שעות',      hint: 'שעות עבודה × תעריף' },
   { id: 'invoice',     label: 'חשבון',     hint: 'חשבון/חשבונית שהתקבלה' },
   { id: 'disbursement', label: 'הוצאה',    hint: 'אגרות, מומחים, נסיעות' },
 ];
 
-export const ENTRY_STATUSES = [
+const ENTRY_STATUSES = [
   { id: 'draft',    label: 'טיוטה',  tone: 'muted' },
   { id: 'approved', label: 'מאושר',  tone: 'gold' },
   { id: 'billed',   label: 'חויב',   tone: 'info' },
@@ -65,6 +65,15 @@ export const num = (v) => {
   const n = typeof v === 'number' ? v : parseFloat(String(v ?? '').replace(/[^\d.\-]/g, ''));
   return Number.isFinite(n) ? n : 0;
 };
+
+/**
+ * תאריך מקומי (YYYY-MM-DD). `toISOString` מחזיר תאריך ב-UTC, ובשעון ישראל זה יום אחורה
+ * בין חצות ל-03:00 — וגם הזיז את תחילת השבוע בסיכום השבועי לשבת.
+ */
+export function localISO(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+export const todayISO = () => localISO();
 
 export const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 
@@ -227,7 +236,7 @@ export function normalizeEntry(e) {
     // עורך הדין / העובד שביצע — מגיע מפירוט השעות ומשמש לשיוך אוטומטי לצוות
     person: String(e?.person ?? '').trim(),
     kind: ENTRY_KINDS.some((k) => k.id === e?.kind) ? e.kind : 'hours',
-    date: e?.date || new Date().toISOString().slice(0, 10),
+    date: e?.date || todayISO(),
     description: String(e?.description ?? ''),
     supplier: String(e?.supplier ?? ''),
     docNumber: String(e?.docNumber ?? ''),
@@ -238,6 +247,10 @@ export function normalizeEntry(e) {
     status: ENTRY_STATUSES.some((s) => s.id === e?.status) ? e.status : 'approved',
     fileId: e?.fileId || '',
     fileName: String(e?.fileName ?? ''),
+    lineId: e?.lineId || '',
+    billPeriod: e?.billPeriod || '',
+    periodFrom: e?.periodFrom || '',
+    periodTo: e?.periodTo || '',
     source: e?.source === 'import' ? 'import' : 'manual',
     createdAt: e?.createdAt || new Date().toISOString(),
   };
@@ -255,14 +268,15 @@ export function normalizeProgress(p) {
     lineId: p?.lineId || '',
     roleId: p?.roleId || '',
     person: String(p?.person ?? ''),
-    date: p?.date || new Date().toISOString().slice(0, 10),
+    date: p?.date || todayISO(),
     // תקופת החיוב שאליה הדוח מתייחס (YYYY-MM) — זהות הדיווח כשהיא קיימת
     billPeriod: p?.billPeriod || '',
     periodFrom: p?.periodFrom || '',
     periodTo: p?.periodTo || '',
     hours: num(p?.hours),
     note: String(p?.note ?? ''),
-    source: p?.source === 'import' ? 'import' : 'manual',
+    // מקור: הזנה ידנית / דוח שעות / חשבון — לפי דירוג הוודאות (EXEC_SOURCES)
+    source: p?.source === 'import' || p?.source === 'invoice' ? p.source : 'manual',
     fileName: String(p?.fileName ?? ''),
     // הקובץ שממנו הגיע הדיווח (נשמר ב-files/בתיקיית העסקה) — לפתיחה ממסך המקורות
     fileId: p?.fileId || '',
@@ -302,8 +316,6 @@ export function normalizeSplits(splits) {
 
 export const splitsTotal = (splits) => round2((splits || []).reduce((s, x) => s + num(x?.pct), 0));
 
-/** אלוקציה של יעד יחיד (100%) — הצורה הרגילה כשאין פיצול */
-export const singleSplit = (teamId, lineId, roleId = '') => (lineId ? [{ teamId, lineId, roleId, pct: 100 }] : []);
 
 /**
  * מחלק שעות לפי אחוזים בלי לאבד או להמציא שעות: החלוקה מעוגלת לאגורות
@@ -380,12 +392,6 @@ export function reconcileExecution(records) {
 
 export const normPerson = (s) => String(s ?? '').trim().toLowerCase().replace(/["'׳״]/g, '').replace(/\s+/g, ' ');
 
-/** סכום נטו של רישום (ללא מע"מ) — נשמר לתאימות; לא בשימוש בחישוב התקציב */
-export function entryNet(entry, vatRate) {
-  const a = num(entry.amount);
-  return entry.vatIncluded ? round2(a / (1 + num(vatRate))) : a;
-}
-
 /* ============================================================
    מנוע החישוב
    ============================================================ */
@@ -449,8 +455,19 @@ export function computeDeal({ deal, teams, entries, rateCard, progress: progress
   // שיוך רשומה לשורת תקציב כשהיא הגיעה בלי lineId (חשבונות ישנים, ייבוא לפי דרגה):
   // קודם לפי שם האדם בתוך הצוות, אחרת לפי הדרגה.
   const dealTeams = (teams || []).filter((t) => t.dealId === deal.id);
+  const liveTeamIds = new Set(dealTeams.map((t) => t.id));
+  const liveLineIds = new Set(dealTeams.flatMap((t) => t.lines.map((l) => l.id)));
+  /*
+   * דיווח שהשורה או הצוות שלו נמחקו לא נעלם: הוא נספר כ"ללא שיוך" (בצוות, אם הצוות קיים)
+   * ומופיע בהתראה. ביטול המחיקה מחזיר את השורה, והדיווח מתחבר אליה שוב מעצמו.
+   */
+  const orphanOf = (rec) => {
+    if (rec.teamId && !liveTeamIds.has(rec.teamId)) return { ...rec, teamId: '', lineId: '', orphan: true };
+    if (rec.lineId && !liveLineIds.has(rec.lineId)) return { ...rec, lineId: '', orphan: true };
+    return rec;
+  };
   const resolveLineId = (rec) => {
-    if (rec.lineId) return rec.lineId;
+    if (rec.lineId || rec.orphan) return rec.lineId;
     const team = dealTeams.find((t) => t.id === rec.teamId);
     if (!team) return '';
     const byPerson = rec.person
@@ -472,10 +489,12 @@ export function computeDeal({ deal, teams, entries, rateCard, progress: progress
     ...dealEntries.filter((e) => num(e.hours) > 0).map((e) => ({
       id: e.id, dealId: e.dealId, teamId: e.teamId, lineId: e.lineId || '', roleId: e.roleId,
       person: e.person, date: e.date, hours: num(e.hours), source: 'invoice',
-      periodFrom: e.periodFrom || e.date, periodTo: e.periodTo || e.date,
+      billPeriod: e.billPeriod || '',
+      periodFrom: e.periodFrom || (e.billPeriod ? `${e.billPeriod}-01` : e.date),
+      periodTo: e.periodTo || (e.billPeriod ? monthEndISO(e.billPeriod) : e.date),
       note: e.description, fileName: e.fileName, fileId: e.fileId, entryId: e.id,
     })),
-  ].map((r) => ({ ...r, lineId: resolveLineId(r) })));
+  ].map(orphanOf).map((r) => ({ ...r, lineId: resolveLineId(r) })));
   const live = execution.filter((r) => !r.superseded);
 
   const hoursByLine = new Map();
@@ -594,7 +613,8 @@ export function computeDeal({ deal, teams, entries, rateCard, progress: progress
   const actualJuniorCost = round2(actualCost - actualSeniorCost);
   const blendedActual = actualSeniorHours > 0 ? round2(actualSeniorCost / actualSeniorHours) : effectiveRate;
 
-  const util = budgetCost > 0 ? actualCost / budgetCost : (actualCost > 0 ? Infinity : 0);
+  // המדד הוא שעות — כמו בצוותים, בשורות ובסקירה (קודם העסקה נמדדה בכסף והראתה מספר אחר)
+  const util = budgetHours > 0 ? actualHours / budgetHours : (actualHours > 0 ? Infinity : 0);
   const progress = deal.progressPct / 100;
 
   // תחזית לסיום (EAC): לפי התקדמות אם דווחה, אחרת לפי קצב זמן
@@ -607,7 +627,7 @@ export function computeDeal({ deal, teams, entries, rateCard, progress: progress
   const eacHoursVariance = eacHours === null ? null : round2(budgetHours - eacHours);
 
   // רווחיות מול שכ"ט מוסכם
-  const agreed = num(deal.agreedFee);
+  const agreed = agreedTotal(deal);
   const hasFee = agreed > 0 && deal.feeModel !== 'hourly';
   const margin = hasFee ? round2(agreed - actualCost) : null;
   const marginPct = hasFee && agreed > 0 ? margin / agreed : null;
@@ -725,6 +745,31 @@ function buildCap(agreedFee, cost, factor, hasFee) {
   };
 }
 
+/** היום האחרון בחודש YYYY-MM */
+export function monthEndISO(ym) {
+  const [y, m] = String(ym).split('-').map(Number);
+  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+}
+
+/** מספר החודשים (כולל) בין תאריך התחלה לסיום — לריטיינר */
+export function monthsBetween(from, to) {
+  if (!from || !to) return 0;
+  const [y1, m1] = from.split('-').map(Number);
+  const [y2, m2] = to.split('-').map(Number);
+  const n = (y2 - y1) * 12 + (m2 - m1) + 1;
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/**
+ * השכ"ט הכולל של העסקה. בריטיינר הסכום שהוזן הוא **חודשי**, ולכן הוא מוכפל במספר
+ * חודשי העסקה (בלי תאריכים — חודש אחד). בשאר המודלים — הסכום כפי שהוזן.
+ */
+export function agreedTotal(deal) {
+  const fee = num(deal?.agreedFee);
+  if (deal?.feeModel !== 'retainer') return fee;
+  return round2(fee * Math.max(1, monthsBetween(deal.startDate, deal.targetDate)));
+}
+
 /** יחס התקדמות בזמן (0..1) לפי תאריכי העסקה */
 export function paceRatio(deal, today = new Date()) {
   if (!deal.startDate || !deal.targetDate) return null;
@@ -766,7 +811,7 @@ function buildAlerts({ deal, teamRows, util, actualHours, budgetHours, actualCos
     out.push({ level: 'over', text: `העלות בפועל עברה את שכר הטרחה המוסכם (${fmtPct(feeUtil)}).` });
   }
   if (progress > 0 && budgetCost > 0 && util > progress + 0.15) {
-    out.push({ level: 'watch', text: `קצב השריפה מקדים את ההתקדמות: ${fmtPct(util)} מהתקציב מול ${fmtPct(progress)} התקדמות.` });
+    out.push({ level: 'watch', text: `קצב השריפה מקדים את ההתקדמות: ${fmtPct(util)} משעות התקציב מול ${fmtPct(progress)} התקדמות.` });
   }
   if (unassignedHours > 0) {
     out.push({ level: 'watch', text: `${fmtHours(unassignedHours)} שעות דווחו בלי שיוך לשורת תקציב — אין להן תעריף ולכן אינן נספרות בעלות.` });
@@ -775,10 +820,6 @@ function buildAlerts({ deal, teamRows, util, actualHours, budgetHours, actualCos
   return out;
 }
 
-/**
- * חישוב מצרפי לקבוצת צוותים מסומנים בתוך עסקה.
- * אותה מתודולוגיה כמו סיכום העסקה, רק על תת-קבוצה.
- */
 /* ============================================================
    תחקיר עסקה — תכנון מול ביצוע, ומה זה אומר לתמחור הבא
    ============================================================ */
@@ -893,8 +934,14 @@ export function dealReview(snapshot) {
     };
   }).sort((a, b) => b.actualHours - a.actualHours);
 
-  const needed = requiredFactor(estHours, actualHours);
-  // המלצה למקדם הבא — עיגול כלפי מעלה ל-5%, עם רצפה של המקדם הנוכחי כשלא חרגנו
+  /*
+   * עסקה שעדיין פתוחה: השעות שבוצעו עד היום אינן הסוף, ולכן המסקנות לתמחור נגזרות
+   * מהתחזית לסיום (EAC) כשיש כזו. בלי תחזית — אין מסקנה, ולא מוצג "מקדם מוצע 0%".
+   */
+  const inProgress = isOpenDeal(d) && num(d.progressPct) < 100;
+  const basisHours = inProgress ? snapshot.eacHours : actualHours;
+  const needed = basisHours === null || basisHours === undefined ? null : requiredFactor(estHours, basisHours);
+  // המלצה למקדם הבא — עיגול כלפי מעלה ל-5%, לא פחות מאפס
   const suggestedFactor = needed === null ? null : Math.max(0, Math.ceil(needed * 20) / 20);
 
   return {
@@ -908,18 +955,24 @@ export function dealReview(snapshot) {
     util: snapshot.util,
     volumeEffect, mixEffect,
     usedFactor: d.overrunFactor, requiredFactor: needed, suggestedFactor,
+    inProgress, basisHours, progressPct: num(d.progressPct), eacBasis: snapshot.eacBasis,
     blendedPlanned: snapshot.blendedRate, blendedActual: snapshot.blendedActual,
     effectiveRate: snapshot.effectiveRate,
     hasFee: snapshot.hasFee, agreedFee: snapshot.agreedFee,
     capActual: snapshot.capActual, realizedRate: snapshot.realizedRate,
     // כמה שכ"ט היה נדרש כדי לכסות את מה שבוצע בפועל
-    feeGap: snapshot.hasFee ? round2(snapshot.actualCost - snapshot.agreedFee) : null,
+    feeGap: snapshot.hasFee
+      ? round2((inProgress && snapshot.eac !== null ? snapshot.eac : snapshot.actualCost) - snapshot.agreedFee) : null,
     teams, hotspots, byRole, people,
     hoursBySource: snapshot.hoursBySource,
     lastReportAt: snapshot.lastReportAt,
   };
 }
 
+/**
+ * חישוב מצרפי לקבוצת צוותים מסומנים בתוך עסקה.
+ * אותה מתודולוגיה כמו סיכום העסקה, רק על תת-קבוצה.
+ */
 export function aggregateTeams(snapshot, teamIds) {
   const ids = new Set(teamIds || []);
   const teams = snapshot.teams.filter((t) => ids.has(t.id));
@@ -1011,7 +1064,7 @@ export function progressByPeriod(snapshot, period = 'week') {
     const d = new Date(`${date}T00:00:00`);
     if (Number.isNaN(d.getTime())) return date;
     d.setDate(d.getDate() - d.getDay());
-    return d.toISOString().slice(0, 10);
+    return localISO(d);
   };
 
   const map = new Map();
@@ -1029,17 +1082,4 @@ export function progressByPeriod(snapshot, period = 'week') {
     acc += r.hours; accCost += r.cost;
     return { ...r, hours: round2(r.hours), cost: round2(r.cost), cumulativeHours: round2(acc), cumulativeCost: round2(accCost) };
   });
-}
-
-/** סדרת burn מצטברת לפי חודש — לגרף */
-export function burnSeries(snapshot) {
-  const byMonth = new Map();
-  for (const e of snapshot.entries) {
-    const m = (e.date || '').slice(0, 7);
-    if (!m) continue;
-    byMonth.set(m, (byMonth.get(m) || 0) + entryNet(e, snapshot.deal.vatRate));
-  }
-  const months = [...byMonth.keys()].sort();
-  let acc = 0;
-  return months.map((m) => { acc += byMonth.get(m); return { month: m, value: byMonth.get(m), cumulative: round2(acc) }; });
 }

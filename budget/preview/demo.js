@@ -53,7 +53,7 @@ const DEALS = [
   {
     deal: { name: 'מכירת דלתא לוגיסטיקה', client: 'דלתא לוגיסטיקה', code: 'M&A-2025-14', feeModel: 'fixed', agreedFee: 280000,
       overrunFactor: 0.2, startDate: '2025-11-01', targetDate: '2026-04-30', progressPct: 100, status: 'closed' },
-    months: ['2025-11', '2025-12', '2026-01', '2026-02', '2026-03', '2026-04'], weights: [.1, .15, .2, .2, .2, .15],
+    months: ['2025-11', '2025-12', '2026-01', '2026-02', '2026-03', '2026-04'], weights: [.1, .15, .2, .2, .2, .15], invoices: true,
     teams: [
       ['צוות עסקה', '', [['שותף', 'מיכל שגיא', 70, 1.25], ['עו"ד', 'תומר לוי', 120, 1.3], ['מתמחה', 'מאיה דהן', 80, 1.2]]],
       ['בדיקת נאותות', 'dd', [['עו"ד', 'עידו נחום', 60, 1.45], ['מתמחה', 'גל שמעוני', 90, 1.5]]],
@@ -101,8 +101,8 @@ async function seed(app) {
           progress.push({
             dealId: deal.id, teamId: team.id, lineId: line.id, roleId: line.roleId, person,
             date: `${ym}-25`, billPeriod: ym, periodFrom: `${ym}-01`, periodTo: monthEnd(ym),
-            hours, sourceHours: hours, source: 'import',
-            fileName: `דוח שעות ${MONTH[ym.slice(5)]} ${ym.slice(0, 4)}.xlsx`, batchId: `demo_${di}_${ym}`,
+            hours, sourceHours: hours, source: spec.invoices ? 'invoice' : 'import',
+            fileName: `${spec.invoices ? 'חשבון' : 'דוח שעות'} ${MONTH[ym.slice(5)]} ${ym.slice(0, 4)}.${spec.invoices ? 'pdf' : 'xlsx'}`, batchId: `demo_${di}_${ym}`,
           });
         });
       });

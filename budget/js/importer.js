@@ -1,7 +1,7 @@
 // importer.js — ייבוא מקבצים: (א) חשבונות/שעות לטבלת הביצוע, (ב) גיליון תקציב קיים.
 // המיפוי מנוחש אוטומטית ומוצג למשתמש לאישור לפני הכתיבה.
 
-import { num, uid, round2, normalizeSplits, allocateHours } from './model.js';
+import { num, uid, round2, normalizeSplits, allocateHours, localISO, todayISO } from './model.js';
 
 /* ============================================================
    ייבוא רישומי ביצוע (חשבונות / שעות / הוצאות)
@@ -327,67 +327,7 @@ export function toISODate(v) {
     return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
   }
   const parsed = new Date(s);
-  return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().slice(0, 10);
-}
-
-/**
- * ממיר שורות גולמיות לרישומי ביצוע לפי מיפוי.
- * @param opts { dealId, teams, roles, defaults:{kind,status,vatIncluded,supplier} }
- * @returns { entries, skipped, warnings }
- */
-export function rowsToEntries(rows, mapping, opts) {
-  const { dealId, teams = [], roles = [], defaults = {}, personTeams = {} } = opts;
-  const teamByName = new Map(teams.map((t) => [norm(t.name), t.id]));
-  const roleByName = new Map(roles.map((r) => [norm(r.name), r.id]));
-  const entries = [];
-  const warnings = new Set();
-  let skipped = 0;
-
-  const pick = (row, field) => (mapping[field] === undefined ? null : row[mapping[field]]);
-
-  for (const row of rows) {
-    if (!row || !row.length) { continue; }
-    const amountRaw = pick(row, 'amount');
-    const hours = num(pick(row, 'hours'));
-    const rate = num(pick(row, 'rate'));
-    const amount = amountRaw === null || amountRaw === '' ? round2(hours * rate) : num(amountRaw);
-    const description = String(pick(row, 'description') ?? '').trim();
-
-    if (!amount && !hours) { skipped++; continue; }
-
-    const teamRaw = pick(row, 'teamName');
-    const roleRaw = pick(row, 'roleName');
-    const person = String(pick(row, 'personName') ?? '').trim();
-    // עדיפות: הצוות שהמשתמש שייך לאיש הזה → הצוות שכתוב בשורה → ברירת המחדל
-    const mappedTeam = person ? (personTeams[normPerson(person)] || '') : '';
-    const teamFromRow = teamRaw ? (teamByName.get(norm(teamRaw)) || '') : '';
-    const teamId = mappedTeam || teamFromRow || defaults.teamId || '';
-    const roleId = roleRaw ? (roleByName.get(norm(roleRaw)) || '') : (defaults.roleId || '');
-    if (teamRaw && !teamFromRow && !mappedTeam) warnings.add(`הצוות "${teamRaw}" לא קיים בעסקה — הרישום ייכנס ללא שיוך.`);
-    if (roleRaw && !roleId) warnings.add(`הדרגה "${roleRaw}" לא קיימת בתעריפון — הרישום ייכנס ללא דרגה.`);
-
-    entries.push({
-      id: uid('ent'),
-      dealId,
-      teamId,
-      roleId,
-      person,
-      kind: defaults.kind || (hours > 0 ? 'hours' : 'invoice'),
-      date: toISODate(pick(row, 'date')) || new Date().toISOString().slice(0, 10),
-      description,
-      supplier: String(pick(row, 'supplier') ?? defaults.supplier ?? '').trim(),
-      docNumber: String(pick(row, 'docNumber') ?? '').trim(),
-      hours,
-      rate: rate || (hours > 0 ? round2(amount / hours) : 0),
-      amount,
-      vatIncluded: !!defaults.vatIncluded,
-      status: defaults.status || 'approved',
-      source: 'import',
-      fileId: defaults.fileId || '',
-      fileName: defaults.fileName || '',
-    });
-  }
-  return { entries, skipped, warnings: [...warnings] };
+  return Number.isNaN(parsed.getTime()) ? '' : localISO(parsed);
 }
 
 /**
@@ -401,8 +341,8 @@ export function rowsToEntries(rows, mapping, opts) {
  */
 export function rowsToProgress(rows, mapping, opts) {
   const {
-    dealId, resolve, cumulative = false, currentByLine = new Map(),
-    fileName = '', batchId = '', defaultDate = '', existing = [],
+    dealId, resolve, cumulative = false, currentFor = () => 0,
+    fileName = '', batchId = '', defaultDate = '', existing = [], source = 'import',
   } = opts;
   const pick = (row, field) => (mapping[field] === undefined ? null : row[mapping[field]]);
   const out = [];
@@ -436,7 +376,7 @@ export function rowsToProgress(rows, mapping, opts) {
     const targets = asSplits(resolve ? resolve(person, roleName) : null);
     if (!targets.length) unmatched.add(person || roleName || '(ללא שם)');
     const billPeriod = billPeriodOf(pick(row, 'billDate'));
-    const date = toISODate(pick(row, 'date')) || (billPeriod ? `${billPeriod}-01` : '') || defaultDate || new Date().toISOString().slice(0, 10);
+    const date = toISODate(pick(row, 'date')) || (billPeriod ? `${billPeriod}-01` : '') || defaultDate || todayISO();
 
     if (cumulative) {
       const key = personKey(person) || `~${person}`;
@@ -449,7 +389,7 @@ export function rowsToProgress(rows, mapping, opts) {
     }
 
     const base = {
-      dealId, person, date, source: 'import', fileName, batchId, billPeriod,
+      dealId, person, date, source, fileName, batchId, billPeriod,
       // תקופת החיוב היא גם התקופה שהרשומה "מכסה" — כך דיווח ידני באותו חודש מוחלף
       periodFrom: billPeriod ? `${billPeriod}-01` : date,
       periodTo: billPeriod ? monthEnd(billPeriod) : date,
@@ -482,12 +422,13 @@ export function rowsToProgress(rows, mapping, opts) {
       const groupId = uid('alc');
       const parts = allocateHours(rec.hours, targets.map((t) => t.pct));
       targets.forEach((t, i) => {
-        const already = num(currentByLine.get(t.lineId) || 0);
+        // מה שכבר דווח **לאותו אדם** באותה שורה — שורת דרגה יכולה להכיל כמה אנשים
+        const already = num(currentFor(t.lineId, rec.person));
         const delta = round2(parts[i] - already);
         if (!delta) { skipped++; return; }
         out.push({
           dealId, teamId: t.teamId || '', lineId: t.lineId || '', roleId: t.roleId || '',
-          person: rec.person, date: rec.date, hours: delta, source: 'import', fileName, batchId,
+          person: rec.person, date: rec.date, hours: delta, source, fileName, batchId,
           allocGroupId: groupId, allocPct: t.pct, sourceHours: delta,
           note: `דוח מצטבר: ${round2(parts[i])} שעות${targets.length > 1 ? ` (${t.pct}%)` : ''} · דווח קודם ${already}`,
         });
@@ -528,13 +469,6 @@ export const billPeriodOf = (v) => {
 function monthEnd(ym) {
   const [y, m] = ym.split('-').map(Number);
   return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
-}
-
-/** מסמן רישומים שכנראה כבר קיימים (אותו תאריך+סכום+מסמך) */
-export function markDuplicates(candidates, existing) {
-  const key = (e) => `${e.date}|${round2(num(e.amount))}|${norm(e.docNumber)}|${norm(e.description).slice(0, 40)}`;
-  const seen = new Set((existing || []).map(key));
-  return candidates.map((e) => ({ entry: e, duplicate: seen.has(key(e)) }));
 }
 
 /* ============================================================

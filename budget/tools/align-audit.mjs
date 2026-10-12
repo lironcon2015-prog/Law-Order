@@ -39,13 +39,16 @@ const scan = () => p.evaluate(() => {
   for (const table of document.querySelectorAll('table')) {
     const headRow = table.tHead?.rows[table.tHead.rows.length - 1];
     if (!headRow) continue;
-    const body = table.tBodies[0]; if (!body) continue;
+    // כל ה-tbody (טבלה מקובצת לפי חודש מחזיקה tbody לכל קבוצה); שורת כותרת קבוצה (colspan) מדולגת
+    const bodyRows = [...table.tBodies].flatMap((tb) => [...tb.rows])
+      .filter((row) => ![...row.cells].some((x) => x.colSpan > 1) && row.offsetParent !== null);
+    if (!bodyRows.length) continue;
     for (let c = 0; c < headRow.cells.length; c++) {
       const th = headRow.cells[c];
       if (!th.textContent.trim() || th.colSpan > 1) continue;
       const hr = box(th);
       if (!hr.width) continue;
-      for (const row of [...body.rows].slice(0, 12)) {
+      for (const row of bodyRows.slice(0, 12)) {
         const td = row.cells[c];
         if (!td || td.colSpan > 1 || !td.textContent.trim()) continue;
         if (td.querySelector('input, select, button, svg')) continue;
@@ -62,7 +65,7 @@ const scan = () => p.evaluate(() => {
 });
 
 let total = 0;
-for (const tab of ['תקציב', 'דיווח ומעקב', 'חשבונות ומסמכים', 'בקרה', 'תחקיר', 'הגדרות']) {
+for (const tab of ['תקציב', 'דיווח ומעקב', 'בקרה', 'תחקיר', 'הגדרות']) {
   await p.locator('.subtabs button', { hasText: tab }).first().click();
   await p.waitForTimeout(900);
   const r = await scan();

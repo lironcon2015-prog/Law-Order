@@ -1340,3 +1340,41 @@ dialog.modal[open] { animation: modalIn .3s var(--ease-out); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* ============================================================
+   קיפול — פאנלים מתקפלים, "הצג עוד", וקיבוץ דיווחים לפי חודש
+   ============================================================ */
+.fold > .fold__head {
+  display: flex; align-items: center; gap: 10px; cursor: pointer; list-style: none; user-select: none;
+}
+.fold > .fold__head::-webkit-details-marker { display: none; }
+.fold > .fold__head .panel__title { margin-bottom: 0; flex: 1 1 auto; }
+.fold[open] > .fold__head { margin-bottom: 14px; }
+.fold__chev, .mgroup__chev {
+  width: 9px; height: 9px; flex: 0 0 auto; display: inline-block;
+  border-inline-start: 2px solid var(--text-faint); border-bottom: 2px solid var(--text-faint);
+  /* פתוח = חץ למטה, סגור = חץ לכיוון הקריאה */
+  transform: rotate(45deg); transition: transform var(--t-fast) var(--ease-out);
+}
+.fold:not([open]) > .fold__head .fold__chev { transform: rotate(135deg); }
+.fold__meta { font-size: .78rem; font-weight: 600; color: var(--text-faint); display: inline-flex; align-items: center; gap: 8px; }
+.fold > .fold__head:hover .fold__chev { border-color: var(--gold); }
+
+/* "הצג עוד" — הפריטים העודפים מוסתרים עד שלוחצים */
+.has-more:not(.show-all) > .is-extra { display: none; }
+.more-row td, li.more-row { text-align: center; padding: 10px; border-bottom: 0; list-style: none; }
+.more-btn { font-size: .8rem; }
+
+/* קבוצת חודש בטבלת הדיווחים */
+.mgroup__head td {
+  background: var(--surface-2); cursor: pointer; padding-block: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.mgroup__head:hover td { background: var(--surface-3); }
+.mgroup__head:focus-visible td { outline: 1px solid var(--gold-line); outline-offset: -1px; }
+.mgroup__head .mgroup__chev { margin-inline-end: 10px; vertical-align: 2px; }
+.mgroup.is-collapsed .mgroup__chev { transform: rotate(135deg); }
+.mgroup__title { font-weight: 700; color: var(--text-strong); unicode-bidi: isolate; }
+.mgroup__count { font-size: .76rem; color: var(--text-faint); margin-inline-start: 12px; unicode-bidi: isolate; }
+.mgroup.is-collapsed > tr:not(.mgroup__head) { display: none; }
+.row--superseded td { opacity: .5; }

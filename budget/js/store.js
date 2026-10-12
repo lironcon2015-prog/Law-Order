@@ -7,7 +7,7 @@ import {
   normalizeDeal, normalizeTeam, normalizeEntry, normalizeRateCard, normalizeProgress, normalizePerson,
   DEFAULT_ROLES, DEFAULT_TEAM_NAMES, buildTeamFromTemplate, uid, computeDeal,
   roleMap, roleNameMap, normRoleName, resolveLineRole, num, round2,
-  normalizeSplits, splitsTotal, allocateHours,
+  normalizeSplits, splitsTotal, allocateHours, todayISO,
 } from './model.js';
 
 /* ---------- מטמון בזיכרון ---------- */
@@ -384,6 +384,9 @@ async function migratePeopleDirectory() {
    עדכוני ביצוע (מעקב ידני)
    ============================================================ */
 
+/** דיווח שהגיע מקובץ (דוח שעות או חשבון) — בניגוד להזנה ידנית */
+export const isImported = (p) => p?.source === 'import' || p?.source === 'invoice';
+
 export function progressOf(dealId) {
   return cache.progress.filter((p) => p.dealId === dealId);
 }
@@ -441,7 +444,7 @@ export async function deleteProgress(id) {
  */
 export async function clearImportedProgressRange({ dealId, from, to, lineIds }) {
   const set = lineIds && lineIds.length ? new Set(lineIds) : null;
-  const doomed = cache.progress.filter((p) => p.dealId === dealId && p.source === 'import'
+  const doomed = cache.progress.filter((p) => p.dealId === dealId && isImported(p)
     && p.date >= from && p.date <= to && (!set || set.has(p.lineId)));
   if (!doomed.length) return 0;
   const ids = new Set(doomed.map((p) => p.id));
@@ -485,10 +488,10 @@ export function dataSourcesOf(dealId) {
   };
 
   for (const p of progressOf(dealId)) {
-    const isImport = p.source === 'import';
+    const isImport = isImported(p);
     const key = isImport ? `progress:${p.batchId || p.fileName || 'ללא שם'}` : 'manual';
     const g = touch(key, isImport
-      ? { kind: 'import', label: p.fileName || 'דוח שעות', fileName: p.fileName || '', batchId: p.batchId || '', deletable: true }
+      ? { kind: p.source, label: p.fileName || (p.source === 'invoice' ? 'חשבון' : 'דוח שעות'), fileName: p.fileName || '', batchId: p.batchId || '', deletable: true }
       : { kind: 'manual', label: 'הזנה ידנית', fileName: '', deletable: false });
     add(g, { hours: p.hours, date: p.date, period: p.billPeriod, fileId: p.fileId });
   }
@@ -516,7 +519,7 @@ export async function deleteDataSource(key, dealId) {
   const fileIds = new Set();
   if (key.startsWith('progress:')) {
     const id = key.slice('progress:'.length);
-    const doomed = progressOf(dealId).filter((p) => p.source === 'import' && (p.batchId || p.fileName || 'ללא שם') === id);
+    const doomed = progressOf(dealId).filter((p) => isImported(p) && (p.batchId || p.fileName || 'ללא שם') === id);
     if (!doomed.length) return { records: 0, fileIds: [] };
     const ids = new Set(doomed.map((p) => p.id));
     for (const p of doomed) if (p.fileId) fileIds.add(p.fileId);
@@ -537,22 +540,19 @@ export async function deleteDataSource(key, dealId) {
 }
 
 /**
- * קובע את הסך המצטבר של שורה: רושם עדכון-התאמה בהפרש מול מה שכבר דווח.
+ * הזנת סך מצטבר בגיליון: רושם עדכון ידני בהפרש מול מה שכבר נספר בשורה.
  * כך אפשר להקליד "כמה שעות בוצעו עד היום" בלי לאבד את ההיסטוריה.
  */
-export async function setLineManualTotal(lineId, total, { date, note } = {}) {
+export async function addManualDelta(lineId, delta, { date, note, first = false } = {}) {
   const line = findLine(lineId);
-  if (!line) return null;
-  const current = manualHoursOfLine(lineId);
-  const delta = round2(num(total) - current);
-  if (!delta) return null;
+  if (!line || !round2(num(delta))) return null;
   return addProgress({
     dealId: line.team.dealId, teamId: line.team.id, lineId,
     // השם מגיע מספריית האנשים; `line.person` נשאר רק לשורות שטרם עברו מיגרציה
     roleId: line.line.roleId, person: personNameOf(line.line.personId) || line.line.person,
-    hours: delta, source: 'manual',
-    date: date || new Date().toISOString().slice(0, 10),
-    note: note || (current === 0 ? 'הזנה ידנית' : 'עדכון מצטבר'),
+    hours: round2(num(delta)), source: 'manual',
+    date: date || todayISO(),
+    note: note || (first ? 'הזנה ידנית' : 'עדכון מצטבר'),
   });
 }
 
@@ -647,7 +647,8 @@ export function knownPeople(dealId) {
     out.set(key.toLowerCase(), cur);
   };
   for (const rec of Object.values(getPeopleMemory())) add(rec?.name, rec?.roleName);
-  for (const t of teamsOf(dealId)) for (const l of t.lines) add(l.person, l.roleName);
+  // השם נקרא מהספרייה (personId); `l.person` נשאר רק בשורות שטרם עברו מיגרציה
+  for (const t of teamsOf(dealId)) for (const l of t.lines) add(personNameOf(l.personId) || l.person, l.roleName);
   for (const p of progressOf(dealId)) add(p.person);
   for (const e of entriesOf(dealId)) add(e.person);
   return [...out.values()].sort((a, b) => a.name.localeCompare(b.name, 'he'));
@@ -681,8 +682,9 @@ export async function splitTeamByPeople(teamId, people) {
   if (!added.length) return 0;
 
   // שורות דרגה "ריקות" מיותרות אחרי הפריסה
+  // שורת אדם נשמרת תמיד (גם בלי שעות) — הבדיקה הקודמת על `l.person` מחקה שורות של אנשים מהספרייה
   const usedLineIds = new Set(cache.progress.filter((x) => x.teamId === teamId).map((x) => x.lineId));
-  const keep = team.lines.filter((l) => l.person || num(l.estHours) > 0 || usedLineIds.has(l.id));
+  const keep = team.lines.filter((l) => l.personId || l.person || num(l.estHours) > 0 || usedLineIds.has(l.id));
   team.lines = [...keep, ...added];
   await saveTeam(team);
   return added.length;
@@ -771,7 +773,7 @@ export function allocationBreakdown(dealId) {
     } else cur.unassignedHours = round2(cur.unassignedHours + num(p.hours));
     cur.groups.add(p.allocGroupId || p.id);
     if (p.billPeriod) cur.periods.add(p.billPeriod);
-    if (p.source === 'import') cur.batches.set(p.batchId || p.fileName, p.fileName || 'דוח שעות');
+    if (isImported(p)) cur.batches.set(p.batchId || p.fileName, p.fileName || 'דוח שעות');
     byPerson.set(key, cur);
   }
   return [...byPerson.values()].map((p) => {
@@ -792,7 +794,7 @@ export function allocationBreakdown(dealId) {
 function inAllocScope(p, scope) {
   if (!scope || scope === 'all') return true;
   if (scope.startsWith('period:')) return p.billPeriod === scope.slice(7);
-  if (scope.startsWith('batch:')) return p.source === 'import' && (p.batchId || p.fileName) === scope.slice(6);
+  if (scope.startsWith('batch:')) return isImported(p) && (p.batchId || p.fileName) === scope.slice(6);
   return true;
 }
 
@@ -1077,7 +1079,8 @@ export async function duplicateDealFromActual(dealId, newName) {
 export async function deleteDeal(dealId) {
   const teamIds = teamsOf(dealId).map((t) => t.id);
   const entryIds = entriesOf(dealId).map((e) => e.id);
-  const fileIds = entriesOf(dealId).map((e) => e.fileId).filter(Boolean);
+  // גם קבצי הדוחות שיובאו (fileId על הדיווח), לא רק קבצי החשבונות
+  const fileIds = [...new Set([...entriesOf(dealId), ...progressOf(dealId)].map((x) => x.fileId).filter(Boolean))];
   const progressIds = progressOf(dealId).map((p) => p.id);
   cache.deals = cache.deals.filter((d) => d.id !== dealId);
   cache.teams = cache.teams.filter((t) => t.dealId !== dealId);
@@ -1090,6 +1093,9 @@ export async function deleteDeal(dealId) {
     db.removeMany('files', fileIds),
     db.removeMany('progress', progressIds),
   ]);
+  // האלוקציה שנשמרה לעסקה
+  const allocs = { ...(getSetting('allocations', {}) || {}) };
+  if (allocs[dealId]) { delete allocs[dealId]; await setSetting('allocations', allocs); }
   notify('deal');
 }
 
