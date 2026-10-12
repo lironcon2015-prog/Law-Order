@@ -1095,12 +1095,12 @@ export function renderProgressTab(root, { snap, period = 'week', sources = [], a
         el('th', { text: 'מצטבר — שעות' }), el('th', { text: 'מצטבר — עלות' }), el('th', { text: 'ניצול מצטבר' }),
       ])),
       el('tbody', { class: 'has-more' }, limitItems([...rows].reverse().map((r) => el('tr', {}, [
-        el('td', { text: periodLabel(r.key, period) }),
+        el('td', { class: 'num', text: periodLabel(r.key, period) }),
         el('td', { class: 'num', text: fmtHours(r.hours) }),
         el('td', { class: 'num', text: money(r.cost, d) }),
         el('td', { class: 'num', text: fmtHours(r.cumulativeHours) }),
         el('td', { class: 'num td-strong', text: money(r.cumulativeCost, d) }),
-        el('td', { class: 'num', text: snap.budgetCost > 0 ? fmtPct(r.cumulativeCost / snap.budgetCost) : '—' }),
+        el('td', { class: 'num', text: snap.budgetHours > 0 ? fmtPct(r.cumulativeHours / snap.budgetHours) : '—' }),
       ])), 6, { colspan: 6, noun: 'תקופות' })),
     ])),
   ]));
@@ -1272,10 +1272,17 @@ function shortPeriod(key, period) {
   return d ? `${d}.${m}` : key;
 }
 
+/** תווית תקופה לטבלה: חודש → "מאי 2026", שבוע → "10.05–16.05.2026", יום → "14.05.2026" */
 function periodLabel(key, period) {
-  if (period === 'month') return key;
-  if (period === 'week') return `שבוע ${key}`;
-  return key;
+  if (period === 'month') return monthLabel(key);
+  const [y, m, d] = String(key).split('-');
+  if (!d) return key;
+  if (period === 'week') {
+    const end = new Date(Number(y), Number(m) - 1, Number(d) + 6);
+    const e = `${String(end.getDate()).padStart(2, '0')}.${String(end.getMonth() + 1).padStart(2, '0')}.${end.getFullYear()}`;
+    return `${d}.${m}–${e}`;
+  }
+  return `${d}.${m}.${y}`;
 }
 
 /** טופס עדכון ביצוע ידני */

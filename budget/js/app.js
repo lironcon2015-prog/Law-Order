@@ -1855,7 +1855,7 @@ function exportProgressCSV() {
           head: ['תקופה', 'שעות', 'עלות', 'מצטבר שעות', 'מצטבר עלות', 'ניצול מצטבר'],
           fmt: ['text', 'hours', 'money', 'hours', 'money', 'pct'],
           rows: periods.map((r) => [r.key, r.hours, r.cost, r.cumulativeHours, r.cumulativeCost,
-            snap.budgetCost > 0 ? r.cumulativeCost / snap.budgetCost : '']) },
+            snap.budgetHours > 0 ? r.cumulativeHours / snap.budgetHours : '']) },
       ] },
     { name: 'אלוקציה לפי אדם',
       blocks: [
