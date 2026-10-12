@@ -1,6 +1,7 @@
 // db.js — עטיפת IndexedDB ל-LexBudget. מסד נפרד לחלוטין מה-CRM (maCrmDB).
 
-const DB_NAME = 'lexBudgetDB';
+// התצוגה המקדימה (budget/preview/) מגדירה מסד נפרד, כדי שנתוני הדמו שם לא ייגעו בנתונים האמיתיים
+const DB_NAME = globalThis.LB_DB_NAME || 'lexBudgetDB';
 // v4: יישור מול סכימה שכבר קיימת אצל משתמשים (store בשם `people`). אסור להוריד גרסה:
 // דפדפן שכבר יצר מסד v4 זורק VersionError אם פותחים אותו ב-3 — ראו openDB.
 const DB_VERSION = 4;

@@ -243,3 +243,4 @@
 [data-skin="ledger"] .dropzone { background: #ffffff; }
 [data-skin="ledger"] .searchbox { background: #ffffff; }
 [data-skin="ledger"] * { scrollbar-color: rgba(20,22,28,.2) transparent; }
+.skin-switch .skin-switch__reset { margin-inline-start: 6px; border-inline-start: 1px solid rgba(255,255,255,.15); border-radius: 0 999px 999px 0; opacity: .75; }

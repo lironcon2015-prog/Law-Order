@@ -17,6 +17,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700&display=swap" />
   <link rel="stylesheet" href="./preview.css" />
+  <script>window.LB_DB_NAME = "lexBudgetPreviewDB";</script>
   <script>try { document.documentElement.dataset.skin = localStorage.getItem("lb_previewSkin") || "refined"; } catch { document.documentElement.dataset.skin = "refined"; }</script>
 </head>
 <body>
@@ -81,6 +82,7 @@
     <button type="button" data-skin="original">מקורי</button>
     <button type="button" data-skin="refined">קיים משודרג</button>
     <button type="button" data-skin="ledger">חדש</button>
+    <button type="button" class="skin-switch__reset" id="demo-reset" title="מחיקת נתוני הדמו ובנייה מחדש">איפוס דמו</button>
   </div>
   <script>
     (function () {
@@ -96,5 +98,10 @@
     })();
   </script>
   <script type="module" src="../js/app.js"></script>
+  <script type="module">
+    import { ensureDemo, resetDemo } from './demo.js';
+    document.getElementById('demo-reset').addEventListener('click', resetDemo);
+    ensureDemo();
+  </script>
 </body>
 </html>

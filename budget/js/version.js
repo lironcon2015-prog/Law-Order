@@ -2,9 +2,9 @@
 // (דרך tools/stamp.mjs) — אין לערוך ידנית. מוצג במסך ההגדרות כדי שאפשר יהיה להשוות
 // בין קובץ אופליין לאתר החי, ובין שני קבצים, בלי לנחש מי חדש יותר.
 export const BUILD = {
-  builtAt: '2026-09-07T11:39:33.075Z',
-  commit: 'c199b4e',
-  branch: 'claude/multi-team-hour-allocation-0se2ky',
-  cache: 'lexbudget-v25',
+  builtAt: '2026-10-12T19:57:13.719Z',
+  commit: '2748e62',
+  branch: 'claude/ma-lawyer-crm-pwa-jqqhhv',
+  cache: 'lexbudget-v26',
   channel: 'web'
 };
