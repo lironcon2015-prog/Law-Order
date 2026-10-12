@@ -1,0 +1,245 @@
+/* ============================================================
+   preview.css — שני קווים עיצוביים מעל האפליקציה האמיתית.
+   אין כאן שינוי מבנה: אותם רכיבים, אותם מיקומים. רק היררכיה, טיפוגרפיה וצבע.
+   [data-skin="original"] = בלי שינוי · "refined" = Obsidian Gold משודרג · "ledger" = קו חדש בהיר
+   ============================================================ */
+
+/* ---------- מתג התצוגה המקדימה (לא חלק מהאפליקציה) ---------- */
+.skin-switch {
+  position: fixed; inset-block-end: 16px; inset-inline-end: 16px; z-index: 200;
+  display: flex; align-items: center; gap: 4px; padding: 4px 4px 4px 4px;
+  background: #24242b; border: 1px solid rgba(255,255,255,.14); border-radius: 999px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.35); font-size: 12.5px; color: #cfcfd6;
+}
+.skin-switch span { padding: 0 10px; opacity: .7; font-weight: 600; }
+.skin-switch button { border: 0; background: transparent; color: #cfcfd6; padding: 6px 12px; border-radius: 999px; font-weight: 600; }
+.skin-switch button.on { background: #fff; color: #111; }
+
+/* ============================================================
+   חלק משותף לשני הקווים המשודרגים — תיקוני היררכיה וטיפוגרפיה
+   ============================================================ */
+:root:is([data-skin="refined"], [data-skin="ledger"]) {
+  --lbl-size: .76rem;
+}
+
+/* 1. תוויות: בלי ריווח אותיות ובלי "אותיות גדולות" — בעברית הם רק פוגעים בקריאות */
+:is([data-skin="refined"], [data-skin="ledger"]) :is(
+  .kpi__label, .trow__head-cell, .btable th, .etable th, .frow__label, .fact__label, .total__label,
+  .field__label, .dcard__nums .lbl, .buildinfo__item .lbl, .hero3__label, .tsec, .seg__label, .btable__groups th
+) {
+  text-transform: none; letter-spacing: 0; font-size: var(--lbl-size); font-weight: 600; color: var(--text-muted);
+}
+:is([data-skin="refined"], [data-skin="ledger"]) .tsec { font-size: .8rem; font-weight: 700; margin: 18px 0 6px; }
+:is([data-skin="refined"], [data-skin="ledger"]) .tsec--alert { color: var(--negative); }
+
+/* 2. סולם טיפוגרפי אחיד: כותרת עמוד → כותרת פאנל → ערך → תווית */
+:is([data-skin="refined"], [data-skin="ledger"]) .page-title { font-size: 1.85rem; font-weight: 800; letter-spacing: -.02em; line-height: 1.15; }
+:is([data-skin="refined"], [data-skin="ledger"]) .page-sub { font-size: .9rem; }
+:is([data-skin="refined"], [data-skin="ledger"]) .panel__title { font-size: 1.05rem; font-weight: 700; margin-bottom: 16px; }
+:is([data-skin="refined"], [data-skin="ledger"]) .panel__title svg { color: var(--text-muted); }
+:is([data-skin="refined"], [data-skin="ledger"]) .panel__hint { font-size: .86rem; line-height: 1.55; }
+:is([data-skin="refined"], [data-skin="ledger"]) .kpi__value { font-size: 1.6rem; font-weight: 650; letter-spacing: -.02em; }
+:is([data-skin="refined"], [data-skin="ledger"]) .fact__value,
+:is([data-skin="refined"], [data-skin="ledger"]) .total__value { font-size: 1.2rem; font-weight: 650; letter-spacing: -.01em; }
+:is([data-skin="refined"], [data-skin="ledger"]) .frow__val { font-size: 1.05rem; font-weight: 600; color: var(--text-primary); }
+:is([data-skin="refined"], [data-skin="ledger"]) .num { letter-spacing: -.01em; }
+
+/* 3. הכותרת של העסקה: מספר מוביל אחד, השאר תומכים */
+:is([data-skin="refined"], [data-skin="ledger"]) .hero3__cell { padding: 18px 22px; gap: 4px; }
+:is([data-skin="refined"], [data-skin="ledger"]) .hero3__val { font-size: 3rem; font-weight: 700; letter-spacing: -.035em; }
+:is([data-skin="refined"], [data-skin="ledger"]) .hero3__mid { font-size: 1.55rem; font-weight: 650; letter-spacing: -.02em; }
+:is([data-skin="refined"], [data-skin="ledger"]) .hero3__sub { font-size: .82rem; line-height: 1.5; }
+:is([data-skin="refined"], [data-skin="ledger"]) .hero3__bar .mbar { height: 6px; }
+:is([data-skin="refined"], [data-skin="ledger"]) .frow { padding: 12px 4px; margin-top: 14px; }
+:is([data-skin="refined"], [data-skin="ledger"]) .frow__item { padding: 2px 18px; }
+:is([data-skin="refined"], [data-skin="ledger"]) .tmap__title { font-size: .9rem; color: var(--text-primary); }
+:is([data-skin="refined"], [data-skin="ledger"]) .tmap__stack { height: 40px; }
+
+/* 4. טאבים פנימיים: קו תחתון במקום כרטיסייה זוהרת — פחות רעש, אותו מיקום */
+:is([data-skin="refined"], [data-skin="ledger"]) .subtabs { gap: 2px; margin-top: 26px; }
+:is([data-skin="refined"], [data-skin="ledger"]) .subtab {
+  padding: 11px 16px 13px; font-size: .98rem; font-weight: 600; border: 0; border-radius: 0; background: none; color: var(--text-muted);
+}
+:is([data-skin="refined"], [data-skin="ledger"]) .subtab svg { width: 17px; height: 17px; opacity: .8; }
+:is([data-skin="refined"], [data-skin="ledger"]) .subtab:hover { background: none; color: var(--text-strong); }
+:is([data-skin="refined"], [data-skin="ledger"]) .subtab[aria-selected="true"] { background: none; border: 0; box-shadow: none; color: var(--text-strong); }
+:is([data-skin="refined"], [data-skin="ledger"]) .subtab[aria-selected="true"]::after { height: 2px; background: var(--gold); box-shadow: none; }
+:is([data-skin="refined"], [data-skin="ledger"]) .tab-body { padding-top: 22px; }
+
+/* 5. פאנלים וכרטיסים שטוחים: מסגרת דקה, בלי הדרגות וזוהר */
+:is([data-skin="refined"], [data-skin="ledger"]) .panel { background: var(--surface-1); border-color: var(--line); border-radius: 16px; padding: 20px 22px; margin-bottom: 16px; }
+:is([data-skin="refined"], [data-skin="ledger"]) :is(.panel--total, .panel--agg, .panel--manual, .panel--dd) { background: var(--surface-1); }
+:is([data-skin="refined"], [data-skin="ledger"]) .panel--total { border-color: var(--line); }
+:is([data-skin="refined"], [data-skin="ledger"]) .kpi { background: var(--surface-1); backdrop-filter: none; -webkit-backdrop-filter: none; border-color: var(--line); padding: 16px 18px; }
+:is([data-skin="refined"], [data-skin="ledger"]) .kpi__ic { background: transparent; border-color: var(--line); color: var(--text-muted); }
+:is([data-skin="refined"], [data-skin="ledger"]) .dcard { background: var(--surface-1); border-color: var(--line); }
+:is([data-skin="refined"], [data-skin="ledger"]) .dcard:hover { transform: none; box-shadow: var(--elev-2); }
+:is([data-skin="refined"], [data-skin="ledger"]) .dcard__nums { gap: 22px; }
+:is([data-skin="refined"], [data-skin="ledger"]) .pill { border-color: transparent; }
+
+/* 6. התראות: פס צבע בקצה במקום רקע צבוע וטקסט ורוד */
+:is([data-skin="refined"], [data-skin="ledger"]) .alert {
+  background: var(--surface-2); border-color: var(--line-soft); color: var(--text-secondary);
+  border-right: 3px solid var(--line-strong); border-radius: 10px; padding: 10px 14px; font-size: .88rem;
+}
+:is([data-skin="refined"], [data-skin="ledger"]) .alert--over { border-right-color: var(--negative); }
+:is([data-skin="refined"], [data-skin="ledger"]) .alert--risk { border-right-color: var(--warn); }
+:is([data-skin="refined"], [data-skin="ledger"]) .alert--watch { border-right-color: var(--watch-c, var(--gold)); }
+
+/* 7. רשימת הצוותים */
+:is([data-skin="refined"], [data-skin="ledger"]) .trow { min-height: 60px; border-radius: 12px; background: var(--surface-1); }
+:is([data-skin="refined"], [data-skin="ledger"]) .trow--head { min-height: 0; background: none; border: 0; }
+:is([data-skin="refined"], [data-skin="ledger"]) .trow__rail { box-shadow: none; }
+:is([data-skin="refined"], [data-skin="ledger"]) .trow__val { font-weight: 650; }
+:is([data-skin="refined"], [data-skin="ledger"]) .trow__meta { font-size: .78rem; color: var(--text-muted); font-weight: 500; }
+:is([data-skin="refined"], [data-skin="ledger"]) .trow--alert { border-color: color-mix(in srgb, var(--negative) 45%, transparent); }
+
+/* 8. טבלאות: יותר אוויר, כותרת קריאה */
+:is([data-skin="refined"], [data-skin="ledger"]) :is(.btable, .etable) { font-size: .9rem; }
+:is([data-skin="refined"], [data-skin="ledger"]) :is(.btable th, .etable th) { padding: 11px 12px; border-bottom-color: var(--line); }
+:is([data-skin="refined"], [data-skin="ledger"]) :is(.btable td, .etable td) { padding: 9px 12px; }
+:is([data-skin="refined"], [data-skin="ledger"]) .btable--sheet td { padding-block: 8px; }
+
+/* 9. תעריפונים: שדות התעריף לא נמתחים לכל הרוחב */
+:is([data-skin="refined"], [data-skin="ledger"]) .btable--rates { max-width: 760px; }
+:is([data-skin="refined"], [data-skin="ledger"]) .btable--rates .cellinput { max-width: 180px; }
+
+/* 10. כפתורים: כפתור ראשי אחד בולט, השאר שקטים */
+:is([data-skin="refined"], [data-skin="ledger"]) .btn--primary { box-shadow: 0 1px 0 rgba(255,255,255,.25) inset; }
+:is([data-skin="refined"], [data-skin="ledger"]) .btn--primary:hover { transform: none; }
+:is([data-skin="refined"], [data-skin="ledger"]) .btn--ghost { box-shadow: none; background: transparent; }
+
+/* ============================================================
+   קו "קיים משודרג" — Obsidian Gold, מאופק
+   ============================================================ */
+[data-skin="refined"] .bg-glow { opacity: .45; animation: none; }
+[data-skin="refined"] .bg-grain { display: none; }
+[data-skin="refined"] .bg-vignette { opacity: .6; }
+[data-skin="refined"] .topbar { box-shadow: none; }
+[data-skin="refined"] .brand__logo { box-shadow: inset 0 1px 0 rgba(255,255,255,.45); }
+[data-skin="refined"] .dtab[aria-selected="true"] { box-shadow: none; background: var(--gold-soft); }
+[data-skin="refined"] .dtab__dot--over { box-shadow: none; }
+[data-skin="refined"] .hero3 { box-shadow: var(--elev-1); }
+[data-skin="refined"] .hero3__cell { background: var(--surface-1); }
+[data-skin="refined"] .hero3__cell--main { background: var(--surface-1); box-shadow: inset 0 -2px 0 0 var(--gold); }
+[data-skin="refined"] .hero3__cell--risk.is-over { background: linear-gradient(180deg, rgba(251,146,60,.07), transparent 70%), var(--surface-1); }
+
+/* ============================================================
+   קו "חדש" — Ledger: נייר בהיר, דיו כחול, כותרות סריף. אותו מבנה בדיוק.
+   ============================================================ */
+:root[data-skin="ledger"] {
+  color-scheme: light;
+  --bg-void:   #ece9e2;
+  --bg-base:   #f4f2ed;
+  --surface-1: #ffffff;
+  --surface-2: #faf9f6;
+  --surface-3: #f1efe9;
+  --surface-4: #e8e5dd;
+  --surface-5: #dcd8ce;
+
+  --gold:        #1d3a5f;
+  --gold-bright: #1d3a5f;
+  --gold-deep:   #1d3a5f;
+  --gold-grad:   linear-gradient(180deg, #27507f 0%, #1d3a5f 100%);
+  --gold-grad-soft: rgba(29,58,95,.07);
+  --gold-soft:   rgba(29,58,95,.07);
+  --gold-softer: rgba(29,58,95,.035);
+  --gold-line:   rgba(29,58,95,.32);
+  --gold-glow:   transparent;
+  --on-gold:     #ffffff;
+  --watch-c:     #a16207;
+
+  --text-strong:    #121419;
+  --text-primary:   #1f2229;
+  --text-secondary: #464a54;
+  --text-muted:     #6a6e78;
+  --text-faint:     #8e919a;
+
+  --line:        rgba(20,22,28,.10);
+  --line-soft:   rgba(20,22,28,.065);
+  --line-strong: rgba(20,22,28,.18);
+  --edge-light:  transparent;
+
+  --positive:      #1f7a4d;
+  --positive-soft: #e6f2eb;
+  --negative:      #b42318;
+  --negative-soft: #fbe9e7;
+  --warn:          #b45309;
+  --warn-soft:     #fdf0e1;
+  --info:          #1d6fa5;
+  --info-soft:     #e6f1f8;
+
+  --glass:        #ffffff;
+  --glass-strong: #ffffff;
+  --glass-border: rgba(20,22,28,.10);
+
+  --elev-1: 0 1px 2px rgba(20,22,28,.05);
+  --elev-2: 0 1px 2px rgba(20,22,28,.05), 0 6px 18px -8px rgba(20,22,28,.12);
+  --elev-3: 0 2px 6px rgba(20,22,28,.08), 0 24px 50px -20px rgba(20,22,28,.25);
+  --glow-gold: none;
+}
+[data-skin="ledger"] body { background: var(--bg-base); background-image: none; }
+[data-skin="ledger"] :is(.bg-glow, .bg-grain, .bg-vignette) { display: none; }
+[data-skin="ledger"] .topbar { background: #ffffff; backdrop-filter: none; -webkit-backdrop-filter: none; box-shadow: none; border-bottom-color: var(--line); }
+[data-skin="ledger"] .brand__name { background: none; color: var(--text-strong); -webkit-background-clip: border-box; background-clip: border-box; }
+[data-skin="ledger"] .brand__logo { box-shadow: none; }
+[data-skin="ledger"] .dtab { background: transparent; }
+[data-skin="ledger"] .dtab[aria-selected="true"] { box-shadow: none; color: var(--gold); }
+[data-skin="ledger"] .dtab__dot--watch { background: var(--watch-c); }
+[data-skin="ledger"] .dtab__dot--over { box-shadow: none; }
+
+/* כותרות בסריף עברי — מבדיל בין "כותרת" ל"נתון" */
+[data-skin="ledger"] :is(.page-title, .panel__title, .empty h2, .modal__head h2, .dcard__name, .rc-name) {
+  font-family: 'Frank Ruhl Libre', 'Assistant', serif; font-weight: 700; letter-spacing: -.005em;
+}
+[data-skin="ledger"] .page-title { font-size: 2rem; }
+[data-skin="ledger"] .panel__title { font-size: 1.15rem; }
+
+[data-skin="ledger"] .hero3 { background: var(--line); box-shadow: var(--elev-1); }
+[data-skin="ledger"] .hero3__cell { background: #ffffff; }
+[data-skin="ledger"] .hero3__cell--main { background: #ffffff; box-shadow: inset 0 -2px 0 0 var(--gold); }
+[data-skin="ledger"] .hero3__cell--risk.is-over { background: linear-gradient(180deg, #fdf3e7, #fff 70%); }
+[data-skin="ledger"] .frow { background: #ffffff; }
+[data-skin="ledger"] .mbar { background: #ebe8e1; }
+[data-skin="ledger"] .cbar__track { background: #ebe8e1; }
+[data-skin="ledger"] .tmap__seg { color: #ffffff; text-shadow: 0 1px 1px rgba(0,0,0,.25); }
+
+/* סטטוס "לתשומת לב" — ענבר, לא צבע המותג */
+[data-skin="ledger"] .pct--watch { color: var(--watch-c); }
+[data-skin="ledger"] .pill--watch, [data-skin="ledger"] .pill--approved { background: #fbf2dc; color: var(--watch-c); }
+[data-skin="ledger"] .pct--ok { color: var(--text-secondary); }
+
+/* שדות */
+[data-skin="ledger"] :is(.input, .select, textarea.input) { background: #ffffff; box-shadow: none; border-color: var(--line-strong); }
+[data-skin="ledger"] :is(.input, .select, textarea.input):focus { box-shadow: 0 0 0 3px rgba(29,58,95,.12); }
+[data-skin="ledger"] .cellinput { background: #ffffff; border-color: var(--line-strong); }
+[data-skin="ledger"] .cellinput:focus { box-shadow: 0 0 0 3px rgba(29,58,95,.12); }
+[data-skin="ledger"] .tsheet .is-input { background: #f6f4ef; border-color: transparent; border-block-end-color: rgba(20,22,28,.28); }
+[data-skin="ledger"] .tsheet .is-input:hover, [data-skin="ledger"] .tsheet .is-input:focus { background: #ffffff; border-color: var(--line-strong); }
+[data-skin="ledger"] .tsheet .cellinput--done.is-input { background: #f6f4ef; }
+[data-skin="ledger"] .cellinput--calc { color: var(--gold); background: var(--gold-softer); }
+[data-skin="ledger"] input[type="date"], [data-skin="ledger"] input[type="file"] { color-scheme: light; }
+[data-skin="ledger"] .th-mark--in { background: #f6f4ef; }
+
+/* טבלאות */
+[data-skin="ledger"] :is(.btable, .etable) tbody tr:hover { background: #faf9f6; }
+[data-skin="ledger"] :is(.btable, .etable) tfoot td { background: #faf9f6; }
+[data-skin="ledger"] .btable td.grp--manual, [data-skin="ledger"] .btable th.grp--manual { background: rgba(29,58,95,.03); }
+[data-skin="ledger"] .bline--over td { background: #fdf4f3; }
+
+/* כפתורים */
+[data-skin="ledger"] .btn--ghost { border-color: var(--line-strong); color: var(--text-primary); }
+[data-skin="ledger"] .btn--ghost:hover { background: var(--surface-3); }
+[data-skin="ledger"] .btn--primary { box-shadow: none; }
+[data-skin="ledger"] .btn-add-row { background: transparent; }
+
+/* חלונות, טוסט, מצב ריק */
+[data-skin="ledger"] dialog.modal { background: #ffffff; backdrop-filter: none; -webkit-backdrop-filter: none; }
+[data-skin="ledger"] dialog.modal::backdrop { background: rgba(20,22,28,.35); }
+[data-skin="ledger"] .modal__foot { background: #faf9f6; }
+[data-skin="ledger"] .toast { background: #1f2229; color: #fff; border-color: transparent; }
+[data-skin="ledger"] .toast svg { color: #9cc3ff; }
+[data-skin="ledger"] .empty__icon { background: #ffffff; border: 1px solid var(--line); box-shadow: var(--elev-2); color: var(--gold); }
+[data-skin="ledger"] .dropzone { background: #ffffff; }
+[data-skin="ledger"] .searchbox { background: #ffffff; }
+[data-skin="ledger"] * { scrollbar-color: rgba(20,22,28,.2) transparent; }
