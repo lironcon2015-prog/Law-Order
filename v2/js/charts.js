@@ -166,3 +166,51 @@ export function flowChart({ labels, series, mode = 'monthly', current = -1, fmt 
   new ResizeObserver(draw).observe(host);
   return host;
 }
+
+/* ============================================================ השנה מול השנה הקודמת (אנליזה) ============================================================
+ * עמודה מלאה = השנה, עמודה במסגרת = השנה הקודמת. ממלא את המכל ונמדד מחדש בשינוי גודל.
+ * cur/prev: 12 ערכים · upto: חודשים עם נתונים בשנה הנוכחית · labels: 12 תוויות · fmt: עיצוב סכום לריחוף */
+export function yoyChart({ labels, cur, prev, upto = 12, curLabel = '', prevLabel = '', current = -1, fmt = (v) => String(v) }) {
+  const host = div('flow-box yoy-box');
+  const tip = div('flow-tip');
+  host.append(tip);
+  const draw = () => {
+    host.querySelector('svg')?.remove();
+    const W = host.clientWidth, H = host.clientHeight;
+    if (!W || !H) return;
+    const pad = { t: 10, r: 56, b: 30, l: 4 };
+    const pw = W - pad.l - pad.r, ph = H - pad.t - pad.b;
+    const raw = Math.max(1, ...cur, ...prev);
+    const pow = 10 ** Math.floor(Math.log10(raw));
+    const stepV = [0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 5, 10].map((m) => m * pow).find((st) => raw / st <= 5) || pow * 10;
+    const max = Math.ceil(raw / stepV) * stepV;
+    const band = pw / 12, xC = (i) => pad.l + band * i + band / 2, y = (v) => pad.t + ph - (v / max) * ph;
+    const bw = Math.max(3, Math.min(20, band * 0.34));
+    const g = [];
+    for (let v = 0; v <= max + 1e-9; v += stepV) {
+      g.push(svg('line', { x1: pad.l, x2: pad.l + pw, y1: y(v), y2: y(v), stroke: 'rgba(255,255,255,0.06)' }));
+      g.push(svg('text', { x: pad.l + pw + 8, y: y(v) + 4, class: 'flow-axis' }, [`₪${fmtK(v)}`]));
+    }
+    for (let i = 0; i < 12; i++) {
+      if (prev[i]) g.push(svg('rect', { x: xC(i) - bw - 1.5, y: y(prev[i]), width: bw, height: pad.t + ph - y(prev[i]), rx: 4, fill: 'none', stroke: 'rgba(197,194,186,0.6)', 'stroke-width': 1.4 }));
+      if (cur[i] && i < upto) g.push(svg('rect', { x: xC(i) + 1.5, y: y(cur[i]), width: bw, height: pad.t + ph - y(cur[i]), rx: 4, fill: '#f2ca50' }));
+      g.push(svg('text', { x: xC(i), y: H - 8, 'text-anchor': 'middle', class: `flow-axis flow-axis--m${i === current ? ' is-now' : ''}` }, [labels[i]]));
+    }
+    const hit = svg('rect', { x: pad.l, y: pad.t, width: pw, height: ph, fill: 'transparent' });
+    g.push(hit);
+    host.prepend(svg('svg', { viewBox: `0 0 ${W} ${H}`, class: 'flow-svg', role: 'img', 'aria-label': 'השוואה חודשית לשנה הקודמת' }, g));
+    hit.addEventListener('mousemove', (e) => {
+      const r = host.getBoundingClientRect();
+      const i = Math.max(0, Math.min(11, Math.floor((e.clientX - r.left - pad.l) / band)));
+      const c = i < upto ? cur[i] : 0;
+      const d = i < upto && prev[i] ? ` · ${c >= prev[i] ? '+' : '−'}${Math.abs(Math.round(((c - prev[i]) / prev[i]) * 100))}%` : '';
+      tip.replaceChildren(div('flow-tip__h', [labels[i]]), div('flow-tip__r', [`${curLabel} ${fmt(c)} · ${prevLabel} ${fmt(prev[i])}${d}`]));
+      tip.style.opacity = '1';
+      tip.style.left = `${Math.max(0, Math.min(W - tip.offsetWidth, xC(i) - tip.offsetWidth / 2))}px`;
+      tip.style.top = `${Math.max(0, y(Math.max(c, prev[i])) - tip.offsetHeight - 10)}px`;
+    });
+    hit.addEventListener('mouseleave', () => { tip.style.opacity = '0'; });
+  };
+  new ResizeObserver(draw).observe(host);
+  return host;
+}

@@ -5,7 +5,8 @@
 import * as billing from './billing.js';
 import * as store from './store.js';
 import { ICONS, toast, formatCurrency, formatCompactCurrency, buildToday } from './ui.js';
-import { flowChart } from './charts.js';
+import { flowChart, yoyChart } from './charts.js';
+import { analysisModel, change } from './analysis.js';
 import * as importer from './importer.js';
 import * as invImport from './invoice-import.js';
 import { parseClientEmail } from './email-parse.js';
@@ -29,7 +30,8 @@ const state = {
   fileArchive: { supported: false, name: '', ready: false }, // תיקיית מסמכי החשבוניות
   flowMode: 'monthly',    // 'monthly' | 'cum' — גרף התזרים בדשבורד
   donutMetric: 'amount',  // 'amount' (הכנסות) | 'commission' (עמלות) — דונאט בדשבורד
-  cmMetric: 'amount',     // 'amount' | 'commission' — טבלת פירוט חודשי לפי לקוח
+  // אנליזה: מיון טבלת הלקוחות, לקוחות פתוחים, מדד הגרף ומפת החום, "הצג עוד" בתשומת לב
+  anaSort: { key: 'amount', dir: -1 }, anaOpen: new Set(), anaYoyMetric: 'a', anaHeatMetric: 'a', anaAttAll: false,
 };
 
 const MONTHS_SHORT = ['', 'ינ', 'פבר', 'מרץ', 'אפר', 'מאי', 'יוני', 'יולי', 'אוג', 'ספט', 'אוק', 'נוב', 'דצמ'];
@@ -111,6 +113,13 @@ export async function loadData() {
     billing.payments.getByYear(state.year),
     billing.balances.computeLedger(state.year),
   ]);
+  // השנה הקודמת — להשוואה במסך האנליזה
+  const [prevInvoices, prevPayments] = await Promise.all([
+    billing.invoices.getByYear(state.year - 1),
+    billing.payments.getByYear(state.year - 1),
+  ]);
+  state.prevInvoices = prevInvoices;
+  state.prevPayments = prevPayments;
   state.clients = clients;
   state.cases = cases;
   state.invoices = invoices;
@@ -620,107 +629,323 @@ function drawDashboard(container) {
 const expName = (name, cid, scope) => el('span', { class: 'exp-name' }, [el('span', { class: 'chevron', html: ICONS.back }), name]);
 const caseMap = () => Object.fromEntries(state.cases.map((c) => [c.id, c]));
 
+/* ============================================================ אנליזה ============================================================
+ * מהסיכום אל הפירוט: פס פתיחה מול אשתקד → השנה מול אשתקד + לפי סוג תיק → דורש תשומת לב →
+ * לקוחות (ממוין, נפתח לתיקים) → מפת חום חודשית → פירוט חודשי עם יתרה מתגלגלת. ייצוא לאקסל בכל מקטע.
+ * החישובים ב-analysis.js (טהור). */
+const MONTHS_ABBR = ['ינו׳', 'פבר׳', 'מרץ', 'אפר׳', 'מאי', 'יוני', 'יולי', 'אוג׳', 'ספט׳', 'אוק׳', 'נוב׳', 'דצמ׳'];
+const ANA_TYPE_COLOR = { 'שוטף': '#c98500', 'עסקה': '#3987e5', 'ליטיגציה': '#d95926' };
+const HEAT_RAMP = [0.08, 0.2, 0.34, 0.5, 0.7, 0.92];
+const fmtK = (v) => { const a = Math.abs(v); return a >= 1e6 ? `${(v / 1e6).toFixed(1).replace(/\.0$/, '')}M` : a >= 1000 ? `${Math.round(v / 1000)}K` : String(Math.round(v)); };
+const pctChange = (r) => (r === null ? 'חדש' : `${r >= 0 ? '+' : '−'}${Math.abs(Math.round(r * 100))}%`);
+const deltaEl = (r) => el('span', { class: `ana-delta num ${r === null || r >= 0 ? 'up' : 'down'}`, text: pctChange(r) });
+
+function anaModel() {
+  return analysisModel({
+    invoices: state.invoices, prevInvoices: state.prevInvoices || [],
+    payments: state.payments, prevPayments: state.prevPayments || [],
+    cases: state.cases, clientName, openingBalance: (state.ledger || {}).openingBalance || 0,
+    uptoFallback: maxMonthFor(state.year),
+  });
+}
+
 function renderAnalysis(container) {
-  const wrap = el('div', { class: 'fin-wrap' }, [
-    el('div', { class: 'view-h' }, [
-      el('div', {}, [el('h1', { text: 'אנליזה' }), el('p', { text: 'פירוט חשבוניות, לקוחות ותיקים' })]),
+  const y = state.year, py = y - 1;
+  const head = el('div', { class: 'view-h' }, [
+    el('div', {}, [el('h1', { text: 'אנליזה' }), el('p', { class: 'ana-period', text: '' })]),
+    el('div', { class: 'ana-head-actions' }, [
       yearSelect(),
+      el('button', { class: 'btn btn--primary btn--sm', type: 'button', 'data-bil-action': 'ana-export', 'data-section': 'all' }, [icon('cloudDown'), el('span', { text: 'ייצוא הכל לאקסל' })]),
     ]),
   ]);
-
-  if (!state.invoices.length) {
-    wrap.append(el('div', { class: 'fin-empty' }, [icon('receipt', 'ic-lg'), el('p', { text: `אין נתוני חשבוניות לשנת ${state.year}` })]));
+  const wrap = el('div', { class: 'fin-wrap ana' }, [head]);
+  if (!state.invoices.length && !(state.prevInvoices || []).length) {
+    wrap.append(el('div', { class: 'fin-empty' }, [icon('receipt', 'ic-lg'), el('p', { text: `אין נתוני חשבוניות לשנת ${y}` })]));
     container.replaceChildren(wrap);
     return;
   }
+  const M = anaModel();
+  state.anaModel = M;
+  head.querySelector('.ana-period').textContent = `${y} מתחילת השנה (${MONTHS[1]}–${MONTHS[M.upto]}), מול אותה תקופה ב-${py}`;
 
-  wrap.append(el('div', { class: 'panel-h', text: 'פירוט חודשי' }), monthlyBreakdownTable());
-  wrap.append(el('div', { class: 'panel-h', text: 'פירוט לפי לקוח' }), clientBreakdownTable());
-  wrap.append(clientMonthlyHeader(), clientMonthlyTable());
+  wrap.append(
+    anaKpis(M),
+    el('div', { class: 'ana-row' }, [anaYoyCard(M), anaTypesCard(M)]),
+    anaAttentionCard(M),
+    anaClientsCard(M),
+    anaHeatCard(M),
+    anaLedgerCard(M),
+  );
   container.replaceChildren(wrap);
 }
 
-/* —— טבלה 1: פירוט חודשי (יתרה מתגלגלת) —— */
-function monthlyBreakdownTable() {
-  const L = state.ledger || {};
-  const invM = {}, payM = {};
-  state.invoices.forEach((i) => { invM[i.month] = invM[i.month] || { a: 0, c: 0 }; invM[i.month].a += i.amount || 0; invM[i.month].c += i.commission || 0; });
-  state.payments.forEach((p) => { const m = (p.month >= 1 && p.month <= 12) ? p.month : 0; payM[m] = (payM[m] || 0) + (p.amount || 0); });
+const exportBtn = (section) => el('button', { class: 'btn btn--ghost btn--xs ana-xls', type: 'button', 'data-bil-action': 'ana-export', 'data-section': section, title: 'ייצוא לאקסל' }, [icon('cloudDown', 'ic-xs'), el('span', { text: 'אקסל' })]);
+const anaSeg = (target, metric) => el('div', { class: 'mix-seg', role: 'group' }, [['a', 'הכנסות'], ['c', 'עמלות']].map(([m, t]) =>
+  el('button', { type: 'button', class: m === metric ? 'on' : '', 'data-bil-action': 'ana-metric', 'data-target': target, 'data-metric': m, 'aria-pressed': String(m === metric), text: t })));
+const anaCard = (title, sub, tools, body, cls = '') => el('section', { class: `panel ana-card ${cls}`.trim() }, [
+  el('div', { class: 'panel__title' }, [el('h3', { text: title }), sub ? el('span', { class: 'ana-sub', text: sub }) : null, ...tools]),
+  ...body,
+]);
 
-  const maxM = maxMonthFor(state.year);
-  let running = L.openingBalance || 0, tA = 0, tC = 0, tP = 0;
-  const rows = [];
-  for (let m = 1; m <= maxM; m++) {
-    const inv = invM[m] || { a: 0, c: 0 }; const pay = payM[m] || 0;
-    running += inv.c - pay; tA += inv.a; tC += inv.c; tP += pay;
-    const has = inv.a > 0 || pay > 0;
-    rows.push(el('tr', { class: has ? '' : 'row-dim' }, [
-      el('td', { text: MONTHS[m] }),
-      el('td', { class: 'num', text: inv.a ? fmtNum(inv.a) : '—' }),
-      el('td', { class: 'num accent', text: inv.c ? fmtNum(inv.c) : '—' }),
-      el('td', { class: 'num pos', text: pay ? fmtNum(pay) : '—' }),
-      el('td', { class: `num ${running < 0 ? 'neg' : ''}`, text: fmtNum(running) }),
-    ]));
-  }
-  if (payM[0]) { running -= payM[0]; tP += payM[0];
-    rows.push(el('tr', { class: 'row-dim' }, [el('td', { text: 'ללא חודש' }), el('td', { class: 'num', text: '—' }), el('td', { class: 'num', text: '—' }), el('td', { class: 'num pos', text: fmtNum(payM[0]) }), el('td', { class: 'num', text: fmtNum(running) })]));
-  }
-  const foot = el('tr', { class: 'fin-table__total' }, [
-    el('td', { text: 'סה״כ' }),
-    el('td', { class: 'num', text: fmtNum(tA) }),
-    el('td', { class: 'num accent', text: fmtNum(tC) }),
-    el('td', { class: 'num pos', text: fmtNum(tP) }),
-    el('td', { class: 'num', text: fmtNum(L.closingBalance) }),
+/* —— 1. פס הפתיחה —— */
+function anaKpis(M) {
+  const k = M.kpi, L = state.ledger || {};
+  const box = (label, value, sub, cls = '') => el('div', { class: `ana-kpi ${cls}`.trim() }, [
+    el('span', { class: 'ana-kpi__l', text: label }),
+    el('span', { class: 'ana-kpi__v num', text: formatCurrency(value) }),
+    el('span', { class: 'ana-kpi__s' }, sub),
   ]);
-  return finTable(['חודש', 'הכנסות', 'עמלות', 'תשלומים', 'יתרה'], rows, foot);
+  const vs = (cur, prev) => [deltaEl(change(cur, prev)), ` מול ${formatCurrency(prev)} אשתקד`];
+  const bal = L.closingBalance != null ? L.closingBalance : k.balance;
+  return el('div', { class: 'ana-kpis' }, [
+    box('הכנסות מתחילת השנה', k.amount, vs(k.amount, k.prevAmount), 'ana-kpi--main'),
+    box('עמלות', k.commission, [deltaEl(change(k.commission, k.prevCommission)), ` · שיעור אפקטיבי ${(k.rate * 100).toFixed(1)}%`]),
+    box('תשלומים שהתקבלו', k.payments, vs(k.payments, k.prevPayments)),
+    box('יתרה לתשלום', bal, [`פתיחה ${formatCurrency(M.openingBalance)} + עמלות − תשלומים`], bal < 0 ? 'ana-kpi--neg' : ''),
+  ]);
 }
 
-/* —— טבלה 2: פירוט לפי לקוח (נפתח לתיקים) —— */
-function clientBreakdownTable() {
-  const cm = caseMap();
-  const byCase = {};
-  state.invoices.forEach((inv) => { byCase[inv.caseId] = byCase[inv.caseId] || { a: 0, c: 0 }; byCase[inv.caseId].a += inv.amount || 0; byCase[inv.caseId].c += inv.commission || 0; });
-  const byClient = {};
-  Object.entries(byCase).forEach(([cid, agg]) => {
-    const cs = cm[cid]; if (!cs) return;
-    const k = cs.clientId;
-    byClient[k] = byClient[k] || { a: 0, c: 0, cases: [] };
-    byClient[k].a += agg.a; byClient[k].c += agg.c; byClient[k].cases.push({ ...agg, cs });
-  });
-  const sorted = Object.entries(byClient).sort((a, b) => b[1].c - a[1].c);
+/* —— 2. השנה מול השנה הקודמת —— */
+function anaYoyCard(M) {
+  const metric = state.anaYoyMetric || 'a';
+  const now = new Date();
+  return anaCard('לפי חודש', `${state.year} מול ${state.year - 1}`, [anaSeg('yoy', metric), exportBtn('monthly')], [
+    yoyChart({
+      labels: MONTHS_ABBR, upto: M.upto,
+      cur: metric === 'c' ? M.totals.c : M.totals.a, prev: metric === 'c' ? M.totals.pc : M.totals.pa,
+      curLabel: String(state.year), prevLabel: String(state.year - 1),
+      current: state.year === now.getFullYear() ? now.getMonth() : -1,
+      fmt: (v) => formatCurrency(v),
+    }),
+    el('div', { class: 'ana-legend' }, [
+      el('span', {}, [el('i', { class: 'ana-legend__cur' }), String(state.year)]),
+      el('span', {}, [el('i', { class: 'ana-legend__prev' }), String(state.year - 1)]),
+    ]),
+  ], 'ana-card--yoy');
+}
 
-  let tA = 0, tC = 0; const rows = [];
-  sorted.forEach(([cid, data]) => {
-    tA += data.a; tC += data.c;
-    data.cases.sort((a, b) => b.c - a.c);
-    rows.push(el('tr', { class: 'client-row', 'data-bil-action': 'exp-client', dataset: { cid, scope: 'cb' } }, [
-      el('td', {}, [expName(clientName(parseInt(cid, 10)))]),
-      el('td', { class: 'muted', text: `${data.cases.length} תיקים` }),
-      el('td', { class: 'num muted', text: '—' }),
-      el('td', { class: 'num', text: fmtNum(data.a) }),
-      el('td', { class: 'num accent', text: fmtNum(data.c) }),
-      el('td', { class: 'ta-c muted', text: '—' }),
-    ]));
-    data.cases.forEach((r) => {
-      const c = r.cs;
-      rows.push(el('tr', { class: 'case-row', hidden: true, dataset: { parent: `cb-${cid}` } }, [
-        el('td', {}),
-        el('td', {}, [el('span', { class: 'case-num', text: c.caseNumber || '—' }), c.description && c.description !== c.caseNumber ? el('span', { class: 'muted', text: ' ' + c.description }) : null]),
-        el('td', { class: 'num muted', text: `${c.commissionRate}%` }),
-        // הסכום לחיץ → מאיפה הוא הגיע (מסמך מקור לכל חשבונית, או "הוזן ידנית")
-        el('td', { class: 'num' }, [el('button', { class: 'amount-src', 'data-bil-action': 'case-sources', 'data-id': String(c.id), title: 'מקור הנתונים' }, [fmtNum(r.a)])]),
-        el('td', { class: 'num accent', text: fmtNum(r.c) }),
-        el('td', { class: 'ta-c' }, [el('span', { class: `bil-type bil-type--${TYPE_TONE[c.caseType] || 'info'}`, text: c.caseType })]),
-      ]));
-    });
-  });
-  const foot = el('tr', { class: 'fin-table__total' }, [
-    el('td', { colspan: '3', text: 'סה״כ' }),
-    el('td', { class: 'num', text: fmtNum(tA) }),
-    el('td', { class: 'num accent', text: fmtNum(tC) }),
-    el('td', {}),
+/* —— 3. לפי סוג תיק —— */
+function anaTypesCard(M) {
+  const types = M.types.filter((t) => t.amount || t.prevAmount);
+  const run = M.types.find((t) => t.type === 'שוטף');
+  return anaCard('לפי סוג תיק', '', [exportBtn('types')], [
+    el('div', { class: 'mix-stack' }, types.filter((t) => t.amount > 0).map((t) => el('i', { style: `width:${t.share * 100}%;background:${ANA_TYPE_COLOR[t.type]}`, title: `${t.type} · ${Math.round(t.share * 100)}%` }))),
+    el('div', { class: 'ana-types' }, types.map((t) => el('div', { class: 'ana-type' }, [
+      el('i', { class: 'ana-type__dot', style: `background:${ANA_TYPE_COLOR[t.type]}` }),
+      el('span', { class: 'ana-type__nm', text: t.type }),
+      el('span', { class: 'ana-type__am num', text: formatCurrency(t.amount) }),
+      el('span', { class: 'ana-type__meta' }, [
+        el('span', { text: `${Math.round(t.share * 100)}% מההכנסות · ${t.active === 1 ? 'תיק פעיל אחד' : `${t.active} תיקים פעילים`}` }),
+        deltaEl(t.change),
+      ]),
+    ]))),
+    run && M.total ? el('p', { class: 'mix-insight ana-type-insight' }, ['ההכנסה החוזרת (שוטף) היא ', el('b', { class: 'num', text: `${Math.round(run.share * 100)}%` }), ' מהסה״כ.']) : null,
+  ], 'ana-card--types');
+}
+
+/* —— 4. דורש תשומת לב —— */
+function anaAttentionCard(M) {
+  const LIMIT = 6;
+  const items = M.attention;
+  const ic = { stale: ['warn', '!'], stopped: ['down', '■'], down: ['down', '↓'], up: ['up', '↑'], new: ['new', '★'] };
+  const text = (a) => {
+    const nm = el('b', { text: a.name });
+    if (a.kind === 'stale') return [nm, ` לא חויב מאז ${MONTHS[a.last]} (${a.months} חודשים)`];
+    if (a.kind === 'stopped') return [nm, ` לא חויב השנה (אשתקד באותה תקופה ${formatCurrency(a.prevAmount)})`];
+    if (a.kind === 'new') return [nm, ` לקוח חדש השנה · ${formatCurrency(a.amount)}`];
+    return [nm, ` ${pctChange(a.change)} מול אשתקד (${formatCurrency(a.amount)})`];
+  };
+  if (!items.length) return anaCard('דורש תשומת לב', '', [], [el('p', { class: 'muted ana-empty', text: 'אין חריגים: כל הלקוחות חויבו בשלושת החודשים האחרונים, ואין שינוי חד מול אשתקד.' })]);
+  const list = el('ul', { class: `ana-att${state.anaAttAll ? ' all' : ''}` }, items.map((a, i) => el('li', { class: i >= LIMIT ? 'extra' : '' }, [
+    el('span', { class: `ana-att__ic ${ic[a.kind][0]}`, text: ic[a.kind][1] }),
+    el('span', { class: 'ana-att__tx' }, text(a)),
+    el('button', { type: 'button', class: 'ana-att__go', 'data-bil-action': 'ana-goto', 'data-id': String(a.clientId), text: 'ללקוח ←' }),
+  ])));
+  return anaCard('דורש תשומת לב', `${items.length} פריטים`, [], [
+    list,
+    items.length > LIMIT ? el('button', { type: 'button', class: 'mix-more', 'data-bil-action': 'ana-att-all', text: state.anaAttAll ? 'הצג פחות' : `הצג עוד ${items.length - LIMIT}` }) : null,
   ]);
-  return finTable(['לקוח / תיק', 'תיקים', 'אחוז', 'הכנסות', 'עמלות', 'סטטוס'], rows, foot);
+}
+
+/* —— 5. לקוחות —— */
+const ANA_COLS = [['name', 'לקוח'], ['share', 'חלק מהסה״כ'], ['amount', 'הכנסות'], ['commission', 'עמלות'], ['change', 'מול אשתקד'], ['last', 'חיוב אחרון'], ['trail', 'מגמה · 12 חודשים']];
+function anaSorted(M) {
+  const { key, dir } = state.anaSort || { key: 'amount', dir: -1 };
+  const v = (r) => (key === 'share' ? r.amount : key === 'change' ? (r.change === null ? 1e9 : r.change) : key === 'trail' ? r.trail.reduce((s, x) => s + x, 0) : r[key]);
+  return [...M.clients].sort((a, b) => (key === 'name' ? a.name.localeCompare(b.name, 'he') * dir : (v(a) - v(b)) * dir));
+}
+function sparkline(vals, w = 96, h = 24) {
+  const max = Math.max(1, ...vals), step = w / Math.max(1, vals.length - 1);
+  const pts = vals.map((v, i) => [i * step, h - 3 - (v / max) * (h - 6)]);
+  const NS = 'http://www.w3.org/2000/svg';
+  const s = document.createElementNS(NS, 'svg');
+  s.setAttribute('viewBox', `0 0 ${w} ${h}`); s.setAttribute('width', w); s.setAttribute('height', h); s.setAttribute('class', 'ana-spark'); s.setAttribute('aria-hidden', 'true');
+  const pl = document.createElementNS(NS, 'polyline');
+  pl.setAttribute('points', pts.map((p) => p.map((n) => n.toFixed(1)).join(',')).join(' '));
+  const dot = document.createElementNS(NS, 'circle');
+  const [lx, ly] = pts[pts.length - 1];
+  dot.setAttribute('cx', lx); dot.setAttribute('cy', ly); dot.setAttribute('r', 2.5);
+  s.append(pl, dot);
+  return s;
+}
+function anaClientsCard(M) {
+  const { key, dir } = state.anaSort || { key: 'amount', dir: -1 };
+  const open = state.anaOpen || new Set();
+  const maxAmt = Math.max(1, ...M.clients.map((r) => r.amount));
+  const head = el('tr', {}, ANA_COLS.map(([k, label]) => el('th', {
+    class: `ana-th${k === key ? ' on' : ''}${['amount', 'commission'].includes(k) ? ' num' : ''}`, tabindex: '0', 'data-bil-action': 'ana-sort', 'data-key': k,
+    'aria-sort': k === key ? (dir < 0 ? 'descending' : 'ascending') : 'none',
+  }, [label, k === key ? el('span', { class: 'ana-arr', text: dir < 0 ? '▼' : '▲' }) : null])));
+  const rows = [];
+  for (const r of anaSorted(M)) {
+    const isOpen = open.has(r.id);
+    const stale = r.amount > 0 && M.upto - r.last >= 3;
+    rows.push(el('tr', { class: `ana-client${isOpen ? ' open' : ''}`, 'data-bil-action': 'ana-toggle', 'data-id': String(r.id), 'data-client-row': String(r.id), tabindex: '0' }, [
+      el('td', {}, [el('span', { class: 'ana-nm' }, [
+        el('span', { class: 'ana-chev' }), el('span', { class: 'ana-nm__t', title: r.name, text: r.name }),
+        el('span', { class: 'ana-nm__cnt', text: r.cases.length === 1 ? 'תיק אחד' : `${r.cases.length} תיקים` }),
+      ])]),
+      el('td', {}, [el('span', { class: 'ana-share' }, [el('span', { class: 'ana-share__bar' }, [el('i', { style: `width:${(r.amount / maxAmt) * 100}%` })]), el('span', { class: 'num muted', text: `${Math.round(r.share * 100)}%` })])]),
+      el('td', { class: 'num', text: formatCurrency(r.amount) }),
+      el('td', { class: 'num accent', text: formatCurrency(r.commission) }),
+      el('td', {}, [deltaEl(r.change)]),
+      el('td', { class: stale ? 'ana-stale' : 'muted', text: r.last ? MONTHS[r.last] : '—' }),
+      el('td', {}, [sparkline(r.trail)]),
+    ]));
+    if (isOpen) for (const c of r.cases) {
+      rows.push(el('tr', { class: 'ana-case' }, [
+        el('td', {}, [el('span', { class: 'ana-nm ana-nm--case' }, [
+          el('span', { class: 'case-num', text: c.caseNumber || '—' }),
+          c.description && c.description !== c.caseNumber ? el('span', { class: 'muted', text: c.description }) : null,
+          el('span', { class: `bil-type bil-type--${TYPE_TONE[c.caseType] || 'info'}`, text: c.caseType }),
+        ])]),
+        el('td', { class: 'muted', text: `עמלה ${c.rate}%` }),
+        // הסכום לחיץ → מאיפה הוא הגיע (מסמך מקור לכל חשבונית, או "הוזן ידנית")
+        el('td', { class: 'num' }, [el('button', { class: 'amount-src', 'data-bil-action': 'case-sources', 'data-id': String(c.id), title: 'מקור הנתונים' }, [formatCurrency(c.amount)])]),
+        el('td', { class: 'num accent', text: formatCurrency(c.commission) }),
+        el('td', {}, [deltaEl(change(c.amount, c.prevAmount))]),
+        el('td', {}),
+        el('td', {}, [sparkline(c.trail, 80, 20)]),
+      ]));
+    }
+  }
+  const prevTotal = M.clients.reduce((s, r) => s + r.prevAmount, 0);
+  const foot = el('tr', {}, [
+    el('td', { text: `סה״כ · ${M.clients.length} לקוחות` }), el('td', {}),
+    el('td', { class: 'num', text: formatCurrency(M.total) }),
+    el('td', { class: 'num accent', text: formatCurrency(M.clients.reduce((s, r) => s + r.commission, 0)) }),
+    el('td', {}, [deltaEl(change(M.total, prevTotal))]), el('td', {}), el('td', {}),
+  ]);
+  return anaCard('לקוחות', 'לחיצה על כותרת ממיינת · לחיצה על לקוח פותחת את התיקים', [exportBtn('clients')], [
+    el('div', { class: 'fin-table-wrap ana-table-wrap' }, [el('table', { class: 'fin-table ana-table' }, [el('thead', {}, [head]), el('tbody', {}, rows), el('tfoot', {}, [foot])])]),
+  ]);
+}
+
+/* —— 6. מפת חום —— */
+function anaHeatCard(M) {
+  const metric = state.anaHeatMetric || 'a';
+  const pick = (r) => (metric === 'c' ? r.monthsC : r.months);
+  const list = anaSorted(M);
+  const max = Math.max(1, ...list.flatMap((r) => pick(r).slice(0, M.upto)));
+  const cell = (v) => {
+    if (!v) return el('td', { class: 'ana-heat__c zero', text: '—' });
+    const step = Math.min(HEAT_RAMP.length - 1, Math.floor((v / max) * HEAT_RAMP.length));
+    return el('td', { class: `ana-heat__c num${HEAT_RAMP[step] > 0.55 ? ' dark' : ''}`, style: `background:rgba(242,202,80,${HEAT_RAMP[step]})`, title: formatCurrency(v), text: fmtK(v) });
+  };
+  const months = Array.from({ length: M.upto }, (_, i) => MONTHS_ABBR[i]);
+  const colTot = months.map((_, m) => list.reduce((s, r) => s + pick(r)[m], 0));
+  const table = el('table', { class: 'ana-heat' }, [
+    el('thead', {}, [el('tr', {}, [el('th', { class: 'lbl', text: 'לקוח' }), ...months.map((m) => el('th', { text: m })), el('th', { class: 'tot', text: 'סה״כ' })])]),
+    el('tbody', {}, list.map((r) => el('tr', {}, [
+      el('td', { class: 'lbl', title: r.name, text: r.name }),
+      ...pick(r).slice(0, M.upto).map(cell),
+      el('td', { class: 'tot num', text: formatCurrency(pick(r).slice(0, M.upto).reduce((s, v) => s + v, 0)) }),
+    ]))),
+    el('tfoot', {}, [el('tr', {}, [el('td', { class: 'lbl', text: 'סה״כ חודשי' }), ...colTot.map((v) => el('td', { class: 'num', text: v ? fmtK(v) : '—' })), el('td', { class: 'tot num', text: formatCurrency(colTot.reduce((s, v) => s + v, 0)) })])]),
+  ]);
+  return anaCard('חודש לפי לקוח', '', [anaSeg('heat', metric), exportBtn('heat')], [
+    el('div', { class: 'ana-heat-wrap' }, [table]),
+    el('div', { class: 'ana-scale' }, [el('span', { text: 'נמוך' }), el('span', { class: 'ana-scale__ramp' }, HEAT_RAMP.map((a) => el('i', { style: `background:rgba(242,202,80,${a})` }))), el('span', { text: 'גבוה' })]),
+  ]);
+}
+
+/* —— פירוט חודשי עם יתרה מתגלגלת (המאזן) —— */
+function anaLedgerCard(M) {
+  const L = state.ledger || {};
+  const rows = [el('tr', { class: 'row-dim' }, [el('td', { text: 'יתרת פתיחה' }), el('td', { class: 'num', text: '—' }), el('td', { class: 'num', text: '—' }), el('td', { class: 'num', text: '—' }), el('td', { class: 'num', text: fmtNum(M.openingBalance) })])];
+  for (const r of M.ledger) rows.push(el('tr', { class: r.amount || r.payments ? '' : 'row-dim' }, [
+    el('td', { text: MONTHS[r.month] }),
+    el('td', { class: 'num', text: r.amount ? fmtNum(r.amount) : '—' }),
+    el('td', { class: 'num accent', text: r.commission ? fmtNum(r.commission) : '—' }),
+    el('td', { class: 'num pos', text: r.payments ? fmtNum(r.payments) : '—' }),
+    el('td', { class: `num ${r.balance < 0 ? 'neg' : ''}`, text: fmtNum(r.balance) }),
+  ]));
+  if (M.unassignedPay) rows.push(el('tr', { class: 'row-dim' }, [el('td', { text: 'תשלומים ללא חודש' }), el('td', { class: 'num', text: '—' }), el('td', { class: 'num', text: '—' }), el('td', { class: 'num pos', text: fmtNum(M.unassignedPay) }), el('td', { class: 'num', text: '—' })]));
+  const foot = el('tr', { class: 'fin-table__total' }, [
+    el('td', { text: 'סה״כ' }),
+    el('td', { class: 'num', text: fmtNum(M.ledger.reduce((s, r) => s + r.amount, 0)) }),
+    el('td', { class: 'num accent', text: fmtNum(M.ledger.reduce((s, r) => s + r.commission, 0)) }),
+    el('td', { class: 'num pos', text: fmtNum(M.ledger.reduce((s, r) => s + r.payments, 0) + M.unassignedPay) }),
+    el('td', { class: 'num', text: fmtNum(L.closingBalance != null ? L.closingBalance : M.kpi.balance) }),
+  ]);
+  return anaCard('פירוט חודשי ויתרה מתגלגלת', 'יתרה = פתיחה + עמלות − תשלומים', [exportBtn('ledger')], [finTable(['חודש', 'הכנסות', 'עמלות', 'תשלומים', 'יתרה'], rows, foot)]);
+}
+
+/* —— 7. ייצוא לאקסל —— */
+async function anaExport(section) {
+  const M = state.anaModel;
+  if (!M) return;
+  let XLSX;
+  try { XLSX = await invImport.loadXlsx(); } catch { return toast('טעינת רכיב האקסל נכשלה', 'alert'); }
+  const y = state.year, py = y - 1;
+  const pct = (r) => (r === null ? 'חדש' : Math.round(r * 1000) / 10);
+  const sheets = {
+    kpi: () => ['סיכום', [['מדד', String(y), `${py} (אותה תקופה)`, 'שינוי %'],
+      ['הכנסות', M.kpi.amount, M.kpi.prevAmount, pct(change(M.kpi.amount, M.kpi.prevAmount))],
+      ['עמלות', M.kpi.commission, M.kpi.prevCommission, pct(change(M.kpi.commission, M.kpi.prevCommission))],
+      ['תשלומים', M.kpi.payments, M.kpi.prevPayments, pct(change(M.kpi.payments, M.kpi.prevPayments))],
+      ['שיעור עמלה אפקטיבי %', Math.round(M.kpi.rate * 1000) / 10, '', ''],
+      ['יתרה לתשלום', (state.ledger || {}).closingBalance ?? M.kpi.balance, '', '']]],
+    monthly: () => ['לפי חודש', [['חודש', `הכנסות ${y}`, `הכנסות ${py}`, `עמלות ${y}`, `עמלות ${py}`],
+      ...Array.from({ length: 12 }, (_, m) => [MONTHS[m + 1], m < M.upto ? M.totals.a[m] : '', M.totals.pa[m], m < M.upto ? M.totals.c[m] : '', M.totals.pc[m]])]],
+    types: () => ['לפי סוג תיק', [['סוג', `הכנסות ${y}`, `הכנסות ${py}`, 'שינוי %', 'חלק מהסה"כ %', 'תיקים פעילים'],
+      ...M.types.map((t) => [t.type, t.amount, t.prevAmount, pct(t.change), Math.round(t.share * 1000) / 10, t.active])]],
+    clients: () => ['לקוחות', [['לקוח', 'תיק', 'סוג', 'אחוז עמלה', `הכנסות ${y}`, 'עמלות', `הכנסות ${py}`, 'שינוי %', 'חיוב אחרון'],
+      ...anaSorted(M).flatMap((r) => [
+        [r.name, '', '', '', r.amount, r.commission, r.prevAmount, pct(r.change), r.last ? MONTHS[r.last] : ''],
+        ...r.cases.map((c) => ['', [c.caseNumber, c.description].filter(Boolean).join(' — '), c.caseType, c.rate, c.amount, c.commission, c.prevAmount, pct(change(c.amount, c.prevAmount)), '']),
+      ])]],
+    heat: () => {
+      const metric = state.anaHeatMetric === 'c' ? 'monthsC' : 'months';
+      return [state.anaHeatMetric === 'c' ? 'עמלות לפי חודש' : 'הכנסות לפי חודש', [['לקוח', ...Array.from({ length: M.upto }, (_, m) => MONTHS[m + 1]), 'סה"כ'],
+        ...anaSorted(M).map((r) => [r.name, ...r[metric].slice(0, M.upto), r[metric].slice(0, M.upto).reduce((s, v) => s + v, 0)])]];
+    },
+    ledger: () => ['יתרה מתגלגלת', [['חודש', 'הכנסות', 'עמלות', 'תשלומים', 'יתרה'], ['יתרת פתיחה', '', '', '', M.openingBalance],
+      ...M.ledger.map((r) => [MONTHS[r.month], r.amount, r.commission, r.payments, r.balance])]],
+  };
+  const keys = section === 'all' ? ['kpi', 'monthly', 'types', 'clients', 'heat', 'ledger'] : [section];
+  const wb = XLSX.utils.book_new();
+  wb.Workbook = { Views: [{ RTL: true }] };
+  for (const key of keys) {
+    const [name, aoa] = sheets[key]();
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = aoa[0].map((_, i) => ({ wch: i === 0 ? 34 : 14 }));
+    for (const ref of Object.keys(ws)) if (ref[0] !== '!' && typeof ws[ref].v === 'number') ws[ref].z = '#,##0';
+    XLSX.utils.book_append_sheet(wb, ws, name);
+  }
+  const blob = new Blob([XLSX.write(wb, { bookType: 'xlsx', type: 'array' })], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const a = el('a', { href: URL.createObjectURL(blob), download: `LexLedger-analysis-${y}${section === 'all' ? '' : `-${section}`}.xlsx` });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+/** "ללקוח" מתוך "דורש תשומת לב": פותח את הלקוח בטבלה וגולל אליו */
+function anaGoto(id) {
+  state.anaOpen = state.anaOpen || new Set();
+  state.anaOpen.add(id);
+  renderAnalysis(refs.analysis);
+  const row = refs.analysis.querySelector(`[data-client-row="${CSS.escape(String(id))}"]`);
+  if (row) { row.scrollIntoView({ behavior: 'smooth', block: 'center' }); row.classList.add('ana-client--flash'); setTimeout(() => row.classList.remove('ana-client--flash'), 1600); }
 }
 
 /* —— מקור הנתונים של תיק: חשבונית → מסמך מקור / הוזן ידנית —— */
@@ -757,71 +982,6 @@ async function caseSourcesModal(caseId) {
     finTable(['חודש', 'סכום', 'עמלה', 'מקור'], rows),
   ]);
   openModal(title, body, async () => true, { saveLabel: 'סגירה', noCancel: true });
-}
-
-/* —— טבלה 3: פירוט חודשי לפי לקוח (pivot, נפתח, מתג מטריקה) —— */
-function clientMonthlyHeader() {
-  return el('div', { class: 'panel-h panel-h--row' }, [
-    el('span', { text: 'פירוט חודשי לפי לקוח' }),
-    el('button', { class: 'btn btn--ghost btn--sm', 'data-bil-action': 'toggle-cm', text: state.cmMetric === 'commission' ? 'הצג הכנסות' : 'הצג עמלות' }),
-  ]);
-}
-function clientMonthlyTable() {
-  const cm = caseMap();
-  const metric = state.cmMetric === 'commission' ? 'c' : 'a';
-  const maxM = maxMonthFor(state.year);
-  const clients = {};
-  state.invoices.forEach((inv) => {
-    const cs = cm[inv.caseId]; if (!cs) return;
-    const k = cs.clientId;
-    clients[k] = clients[k] || { months: {}, cases: {} };
-    clients[k].months[inv.month] = clients[k].months[inv.month] || { a: 0, c: 0 };
-    clients[k].months[inv.month].a += inv.amount || 0; clients[k].months[inv.month].c += inv.commission || 0;
-    clients[k].cases[inv.caseId] = clients[k].cases[inv.caseId] || { months: {}, cs };
-    clients[k].cases[inv.caseId].months[inv.month] = clients[k].cases[inv.caseId].months[inv.month] || { a: 0, c: 0 };
-    clients[k].cases[inv.caseId].months[inv.month].a += inv.amount || 0; clients[k].cases[inv.caseId].months[inv.month].c += inv.commission || 0;
-  });
-  const sortedIds = Object.keys(clients).sort((a, b) => clientName(parseInt(a, 10)).localeCompare(clientName(parseInt(b, 10)), 'he'));
-
-  const monthCells = (months) => {
-    let total = 0; const cells = [];
-    for (let m = 1; m <= maxM; m++) { const v = (months[m] || {})[metric] || 0; total += v; cells.push(el('td', { class: `num ${v ? '' : 'muted'}`, text: v ? fmtNum(v) : '—' })); }
-    return { cells, total };
-  };
-
-  const monthTotals = {}; let grand = 0; const rows = [];
-  sortedIds.forEach((cid) => {
-    const data = clients[cid];
-    const { cells, total } = monthCells(data.months);
-    for (let m = 1; m <= maxM; m++) monthTotals[m] = (monthTotals[m] || 0) + ((data.months[m] || {})[metric] || 0);
-    grand += total;
-    rows.push(el('tr', { class: 'client-row', 'data-bil-action': 'exp-client', dataset: { cid, scope: 'cm' } }, [
-      el('td', { class: 'nowrap' }, [expName(clientName(parseInt(cid, 10)))]),
-      ...cells,
-      el('td', { class: `num ${metric === 'c' ? 'accent' : ''}`, text: fmtNum(total) }),
-    ]));
-    Object.keys(data.cases).sort((a, b) => (data.cases[a].cs.caseNumber || '').localeCompare(data.cases[b].cs.caseNumber || '')).forEach((caseId) => {
-      const cd = data.cases[caseId]; const c = cd.cs;
-      const { cells: ccells, total: ctotal } = monthCells(cd.months);
-      rows.push(el('tr', { class: 'case-row', hidden: true, dataset: { parent: `cm-${cid}` } }, [
-        el('td', { class: 'nowrap' }, [el('span', { class: 'case-num', text: (c.caseNumber || '—') + (c.description && c.description !== c.caseNumber ? ' — ' + c.description : '') })]),
-        ...ccells,
-        el('td', { class: 'num muted', text: fmtNum(ctotal) }),
-      ]));
-    });
-  });
-  const totalCells = []; for (let m = 1; m <= maxM; m++) { const v = monthTotals[m] || 0; totalCells.push(el('td', { class: 'num', text: v ? fmtNum(v) : '—' })); }
-  const foot = el('tr', { class: 'fin-table__total' }, [el('td', { text: 'סה״כ חודשי' }), ...totalCells, el('td', { class: `num ${metric === 'c' ? 'accent' : ''}`, text: fmtNum(grand) })]);
-
-  // כותרת עמודת התווית ללא class num (נשארת RTL כמו תאיה); עמודות החודשים והסה״כ מיושרות לימין כמספרים
-  const monthHeads = Array.from({ length: maxM }, (_, i) => MONTHS_SHORT[i + 1]);
-  const headRow = el('tr', {}, [
-    el('th', { text: 'לקוח / תיק' }),
-    ...monthHeads.map((h) => el('th', { class: 'num', text: h })),
-    el('th', { class: 'num', text: 'סה״כ' }),
-  ]);
-  const thead = el('thead', {}, [headRow]);
-  return el('div', { class: 'fin-table-wrap fin-table-wrap--scroll' }, [el('table', { class: 'fin-table fin-table--pivot' }, [thead, el('tbody', {}, rows), el('tfoot', {}, [foot])])]);
 }
 
 /* ---------- shared widgets ---------- */
@@ -1168,9 +1328,23 @@ async function onClick(e) {
       state.mixAll = !state.mixAll;
       return renderDashboard(refs.dashboard, state.crmCtx);
     case 'open-client': return openClientFromDashboard(id);
-    case 'toggle-cm':
-      state.cmMetric = state.cmMetric === 'commission' ? 'amount' : 'commission';
+    case 'ana-sort': {
+      const key = t.dataset.key;
+      const cur = state.anaSort;
+      state.anaSort = cur.key === key ? { key, dir: -cur.dir } : { key, dir: key === 'name' ? 1 : -1 };
       return renderAnalysis(refs.analysis);
+    }
+    case 'ana-toggle':
+      if (state.anaOpen.has(id)) state.anaOpen.delete(id); else state.anaOpen.add(id);
+      return renderAnalysis(refs.analysis);
+    case 'ana-metric':
+      if (t.dataset.target === 'heat') state.anaHeatMetric = t.dataset.metric; else state.anaYoyMetric = t.dataset.metric;
+      return renderAnalysis(refs.analysis);
+    case 'ana-att-all':
+      state.anaAttAll = !state.anaAttAll;
+      return renderAnalysis(refs.analysis);
+    case 'ana-goto': return anaGoto(id);
+    case 'ana-export': return anaExport(t.dataset.section);
     case 'exp-client': return toggleExpand(t);
     case 'toggle-month': return toggleMonth(t);
     case 'case-sources': return caseSourcesModal(id);

@@ -564,6 +564,12 @@ async function parseCsvFile(file, ctx) {
   return classifyTable(parseCsv(await file.text()), ctx);
 }
 
+/** ספריית XLSX המקומית (lazy) — גם לייצוא לאקסל מהאנליזה */
+export async function loadXlsx() {
+  await loadScript(VENDOR_XLSX());
+  return window.XLSX;
+}
+
 async function parseExcel(file, ctx) {
   await loadScript(VENDOR_XLSX());
   const XLSX = window.XLSX;

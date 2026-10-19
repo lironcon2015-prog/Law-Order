@@ -2466,3 +2466,104 @@ a.fin-contact__item:hover { color: var(--gold); }
 .mix-listbox { flex: 1 1 auto; min-height: 0; }
 .mix--all .mix-listbox { max-height: 212px; overflow-y: auto; scrollbar-width: thin; padding-inline-start: 4px; }
 .mix-more { margin-top: auto; }
+
+/* ============================================================
+   אנליזה — פס פתיחה מול אשתקד, גרף שנה מול שנה, סוגי תיקים, תשומת לב, לקוחות, מפת חום
+   ============================================================ */
+.ana-head-actions { display: flex; align-items: center; gap: 10px; }
+.ana-card { display: flex; flex-direction: column; margin-bottom: 18px; }
+.ana-card .panel__title { flex-wrap: wrap; min-height: 34px; }
+.ana-sub { font-size: .8rem; color: var(--text-muted); }
+.ana-card .panel__title .mix-seg { margin-inline-start: auto; }
+.ana-card .panel__title .mix-seg + .ana-xls { margin-inline-start: 0; }
+.ana-xls { margin-inline-start: auto; color: var(--text-muted); }
+.ana-xls:hover { color: var(--gold-bright); }
+.ana-delta { display: inline-block; font-size: .78rem; font-weight: 700; padding: 1px 7px; border-radius: 999px; white-space: nowrap; }
+.ana-delta.up { color: var(--positive, #34d399); background: rgba(52,211,153,.1); }
+.ana-delta.down { color: var(--negative); background: var(--negative-soft); }
+
+.ana-kpis { display: grid; grid-template-columns: 1.3fr 1fr 1fr 1fr; gap: 14px; margin-bottom: 18px; }
+.ana-kpi { display: flex; flex-direction: column; gap: 6px; padding: 18px 20px; border-radius: var(--radius-lg, 16px);
+  background: var(--glass, rgba(255,255,255,.03)); border: 1px solid var(--line-soft); text-align: right; }
+.ana-kpi__l { font-size: .78rem; font-weight: 600; color: var(--text-muted); }
+.ana-kpi__v { font-size: 1.6rem; font-weight: 700; color: var(--text-strong); letter-spacing: -.02em; }
+.ana-kpi--main { border-color: var(--gold-line); background: linear-gradient(160deg, rgba(242,202,80,.09), rgba(242,202,80,.02)); }
+.ana-kpi--main .ana-kpi__v { font-size: 2rem; color: var(--gold-bright); }
+.ana-kpi--neg .ana-kpi__v { color: var(--negative); }
+.ana-kpi__s { font-size: .78rem; color: var(--text-muted); }
+
+.ana-row { display: grid; grid-template-columns: 1.65fr 1fr; gap: 18px; align-items: stretch; }
+.ana-row > .ana-card { margin-bottom: 18px; }
+.ana-card--yoy .yoy-box { min-height: 260px; }
+.ana-legend { display: flex; gap: 18px; margin-top: 8px; font-size: .78rem; color: var(--text-muted); }
+.ana-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.ana-legend i { display: block; width: 11px; height: 11px; border-radius: 3px; }
+.ana-legend__cur { background: #f2ca50; }
+.ana-legend__prev { border: 1.4px solid rgba(197,194,186,.6); }
+
+.ana-types { display: flex; flex-direction: column; }
+.ana-type { display: grid; grid-template-columns: 14px 1fr auto; grid-template-areas: "dot nm am" ". meta meta"; column-gap: 8px; row-gap: 3px;
+  padding: 11px 0; border-bottom: 1px solid var(--line-soft); }
+.ana-type:last-child { border-bottom: 0; }
+.ana-type__dot { grid-area: dot; align-self: center; width: 10px; height: 10px; border-radius: 3px; }
+.ana-type__nm { grid-area: nm; font-weight: 700; color: var(--text-primary); }
+.ana-type__am { grid-area: am; font-weight: 700; color: var(--text-strong); }
+.ana-type__meta { grid-area: meta; display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: .78rem; color: var(--text-muted); }
+.ana-type-insight { margin: 10px 0 0; }
+
+.ana-att { list-style: none; margin: 0; padding: 0; }
+.ana-att li { display: flex; align-items: center; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line-soft); font-size: .88rem; color: var(--text-secondary); }
+.ana-att li:last-child { border-bottom: 0; }
+.ana-att li.extra { display: none; }
+.ana-att.all li.extra { display: flex; }
+.ana-att b { color: var(--text-primary); font-weight: 700; }
+.ana-att__ic { flex: none; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; font-size: .78rem; font-weight: 800; }
+.ana-att__ic.warn { background: rgba(242,202,80,.14); color: var(--gold-bright); }
+.ana-att__ic.down { background: var(--negative-soft); color: var(--negative); }
+.ana-att__ic.up { background: rgba(52,211,153,.12); color: #34d399; }
+.ana-att__ic.new { background: rgba(57,135,229,.15); color: #7fb2f0; }
+.ana-att__tx { flex: 1; min-width: 0; }
+.ana-att__go { flex: none; border: 0; background: none; color: var(--gold-bright); font-size: .8rem; font-weight: 700; cursor: pointer; }
+.ana-att__go:hover { text-decoration: underline; }
+.ana-empty { margin: 0; font-size: .86rem; }
+
+.ana-table-wrap { max-height: none; }
+.ana-table th, .ana-table td { text-align: right; }
+.ana-th { cursor: pointer; user-select: none; white-space: nowrap; }
+.ana-th:hover, .ana-th.on { color: var(--gold-bright); }
+.ana-arr { font-size: .6rem; margin-inline-start: 4px; }
+.ana-client { cursor: pointer; }
+.ana-client td { font-weight: 600; }
+.ana-client--flash td { background: rgba(242,202,80,.1) !important; transition: background .4s; }
+.ana-nm { display: inline-flex; align-items: center; gap: 8px; max-width: 320px; }
+.ana-nm__t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
+.ana-nm__cnt { flex: none; font-size: .72rem; font-weight: 500; color: var(--text-faint); }
+.ana-chev { flex: none; width: 0; height: 0; border-block: 4.5px solid transparent; border-inline-end: 6px solid var(--text-muted); transition: transform .15s; }
+.ana-client.open .ana-chev { transform: rotate(-90deg); }
+.ana-client.open td { background: rgba(255,255,255,.025); }
+.ana-case td { font-size: .84rem; font-weight: 400; background: rgba(255,255,255,.012); padding-block: 8px; }
+.ana-nm--case { padding-inline-start: 22px; max-width: none; flex-wrap: wrap; }
+.ana-share { display: inline-flex; align-items: center; gap: 8px; }
+.ana-share__bar { display: block; width: 72px; height: 6px; border-radius: 3px; background: rgba(255,255,255,.06); overflow: hidden; }
+.ana-share__bar i { display: block; height: 100%; background: var(--gold); border-radius: 3px; float: right; }
+.ana-stale { color: var(--gold-bright); font-weight: 700; }
+.ana-spark { display: block; overflow: visible; }
+.ana-spark polyline { fill: none; stroke: var(--gold); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.ana-spark circle { fill: var(--gold-bright); }
+.ana-table tfoot td { font-weight: 800; color: var(--text-strong); border-top: 1px solid var(--line); padding: 12px 16px; }
+
+.ana-heat-wrap { overflow-x: auto; scrollbar-width: thin; }
+.ana-heat { width: 100%; border-collapse: separate; border-spacing: 3px; font-size: .8rem; }
+.ana-heat th { font-weight: 600; color: var(--text-muted); font-size: .74rem; padding: 4px 2px; text-align: center; }
+.ana-heat td { text-align: center; padding: 7px 4px; border-radius: 5px; white-space: nowrap; }
+.ana-heat .lbl { position: sticky; right: 0; z-index: 1; background: var(--surface-1, #121216); text-align: right; max-width: 200px; min-width: 140px;
+  overflow: hidden; text-overflow: ellipsis; color: var(--text-primary); font-weight: 600; padding-inline: 4px 10px; }
+.ana-heat__c { color: var(--text-primary); min-width: 46px; }
+.ana-heat__c.dark { color: #17140a; font-weight: 700; }
+.ana-heat__c.zero { color: var(--text-faint); background: rgba(255,255,255,.02); }
+.ana-heat .tot { text-align: right; font-weight: 700; color: var(--text-strong); padding-inline-start: 12px; }
+.ana-heat tfoot td { color: var(--text-secondary); font-weight: 700; border-top: 1px solid var(--line-soft); }
+.ana-scale { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: .74rem; color: var(--text-muted); }
+.ana-scale__ramp { display: flex; gap: 2px; }
+.ana-scale__ramp i { display: block; width: 18px; height: 9px; border-radius: 2px; }
+@media (max-width: 1100px) { .ana-kpis { grid-template-columns: 1fr 1fr; } .ana-row { grid-template-columns: 1fr; } }
