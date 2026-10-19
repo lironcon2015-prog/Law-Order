@@ -5,7 +5,7 @@
 import * as billing from './billing.js';
 import * as store from './store.js';
 import { ICONS, toast, formatCurrency, formatCompactCurrency, buildToday } from './ui.js';
-import { barChart } from './charts.js';
+import { flowChart } from './charts.js';
 import * as importer from './importer.js';
 import * as invImport from './invoice-import.js';
 import { parseClientEmail } from './email-parse.js';
@@ -27,6 +27,7 @@ const state = {
   crmCtx: { contacts: [], companies: [] }, // נשמר עבור הדשבורד המאוחד
   openMonths: new Set(),  // חודשים פתוחים במסך החשבוניות (קיפול לפי חודש)
   fileArchive: { supported: false, name: '', ready: false }, // תיקיית מסמכי החשבוניות
+  flowMode: 'monthly',    // 'monthly' | 'cum' — גרף התזרים בדשבורד
   donutMetric: 'amount',  // 'amount' (הכנסות) | 'commission' (עמלות) — דונאט בדשבורד
   cmMetric: 'amount',     // 'amount' | 'commission' — טבלת פירוט חודשי לפי לקוח
 };
@@ -525,7 +526,8 @@ function clientMixPanel() {
         ` מה${label}.`,
       ])
       : null,
-    el('table', { class: 'mix-table' }, [body]),
+    // "הצג הכל": הרשימה נגללת בתוך הכרטיס, כך שהשורה בדשבורד לא מתארכת
+    el('div', { class: 'mix-listbox' }, [el('table', { class: 'mix-table' }, [body])]),
     d.rest.length
       ? el('button', { type: 'button', class: 'mix-more', 'data-bil-action': 'mix-all', text: state.mixAll ? 'הצג פחות' : `הצג את כל ${d.rows.length} הלקוחות` })
       : null,
@@ -548,10 +550,38 @@ function openClientFromDashboard(id) {
   focus();
 }
 
+/** כרטיס התזרים: שורת סיכום (באותו קו כמו הסכום בכרטיס הפילוח) וגרף שממלא את שאר הכרטיס */
+function flowPanel(comm, pay) {
+  const MONTHS = ['ינו׳', 'פבר׳', 'מרץ', 'אפר׳', 'מאי', 'יוני', 'יולי', 'אוג׳', 'ספט׳', 'אוק׳', 'נוב׳', 'דצמ׳'];
+  const sumC = comm.reduce((a, v) => a + (v || 0), 0);
+  const sumP = pay.reduce((a, v) => a + (v || 0), 0);
+  const now = new Date();
+  const current = state.year === now.getFullYear() ? now.getMonth() : -1;
+  const mode = state.flowMode;
+  const seg = el('div', { class: 'mix-seg', role: 'group', 'aria-label': 'תצוגה' }, [['monthly', 'חודשי'], ['cum', 'מצטבר']].map(([m, t]) =>
+    el('button', { type: 'button', class: m === mode ? 'on' : '', 'data-bil-action': 'flow-mode', 'data-mode': m, 'aria-pressed': String(m === mode), text: t })));
+  const fact = (label, value, color, big) => el('div', { class: `flow-fact${big ? ' flow-fact--big' : ''}` }, [
+    el('span', { class: 'flow-fact__l' }, [color ? el('i', { style: `background:${color}` }) : null, label]),
+    el('span', { class: 'flow-fact__v num', text: formatCurrency(value) }),
+  ]);
+  return el('div', { class: 'panel flow' }, [
+    el('div', { class: 'panel__title' }, [icon('trending'), el('h3', { text: 'תזרים חודשי' }), seg]),
+    el('div', { class: 'flow-facts' }, [
+      fact('עמלות השנה', sumC, '#f2ca50', true),
+      fact('תשלומים', sumP, '#34d399'),
+      fact('פער', sumC - sumP),
+    ]),
+    flowChart({
+      labels: MONTHS, mode, current,
+      series: [{ name: 'עמלות', color: '#f2ca50', values: comm }, { name: 'תשלומים', color: '#34d399', values: pay }],
+      fmt: (v) => formatCurrency(v),
+    }),
+  ]);
+}
+
 function drawDashboard(container) {
   const L = state.ledger || {};
   const { comm, pay } = monthlySeries();
-  const monthLabels = ['ינ', 'פב', 'מר', 'אפ', 'מא', 'יו', 'יל', 'אג', 'ספ', 'אק', 'נו', 'דצ'];
 
   const hero = el('div', { class: 'dash-hero' }, [
     el('div', { class: 'dash-hero__top' }, [
@@ -569,16 +599,7 @@ function drawDashboard(container) {
     kpiSmall('יתרה לתשלום', L.closingBalance, 'total'),
   ]);
 
-  const charts = el('div', { class: 'dash-charts' }, [
-    el('div', { class: 'panel' }, [
-      el('div', { class: 'panel__title' }, [icon('trending'), el('h3', { text: 'תזרים חודשי' })]),
-      barChart({ labels: monthLabels, series: [
-        { name: 'עמלות', color: '#f2ca50', values: comm },
-        { name: 'תשלומים', color: '#34d399', values: pay },
-      ] }),
-    ]),
-    clientMixPanel(),
-  ]);
+  const charts = el('div', { class: 'dash-charts' }, [flowPanel(comm, pay), clientMixPanel()]);
 
   const todaySection = el('div', { class: 'dash-today' }, [
     el('div', { class: 'panel__title dash-section-h' }, [icon('zap'), el('h3', { text: 'היום — פעולות פתוחות' })]),
@@ -1139,6 +1160,9 @@ async function onClick(e) {
     case 'export-backup': return exportBackup();
     case 'mix-metric':
       state.donutMetric = t.dataset.metric === 'commission' ? 'commission' : 'amount';
+      return renderDashboard(refs.dashboard, state.crmCtx);
+    case 'flow-mode':
+      state.flowMode = t.dataset.mode === 'cum' ? 'cum' : 'monthly';
       return renderDashboard(refs.dashboard, state.crmCtx);
     case 'mix-all':
       state.mixAll = !state.mixAll;
