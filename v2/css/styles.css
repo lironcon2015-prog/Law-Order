@@ -2412,3 +2412,35 @@ a.fin-contact__item:hover { color: var(--gold); }
 .arch-status { display: flex; align-items: center; gap: 9px; font-size: 0.86rem; margin-top: 10px; }
 .arch-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); flex: 0 0 auto; }
 .arch-dot--on { background: var(--positive); box-shadow: 0 0 8px var(--positive); }
+
+/* ============================================================
+   דשבורד — פילוח לפי לקוח ("ריכוזיות"): פס חלוקה + משפט + רשימה
+   ============================================================ */
+.mix .panel__title { flex-wrap: wrap; }
+.mix-seg { display: inline-flex; margin-inline-start: auto; background: rgba(255,255,255,.06); border-radius: 999px; padding: 3px; gap: 2px; }
+.mix-seg button { border: 0; background: none; padding: 3px 12px; border-radius: 999px; font-size: .78rem; font-weight: 700; color: var(--text-muted); cursor: pointer; }
+.mix-seg button.on { background: var(--gold-soft); color: var(--gold-bright); }
+.mix-total { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin: 2px 0 12px; text-align: right; }
+.mix-total b { font-size: 1.55rem; font-weight: 700; color: var(--text-strong); letter-spacing: -.02em; }
+.mix-total span { font-size: .8rem; color: var(--text-muted); }
+.mix-stack { display: flex; gap: 2px; height: 14px; border-radius: 7px; overflow: hidden; background: rgba(255,255,255,.06); margin-bottom: 10px; }
+.mix-stack i { display: block; height: 100%; min-width: 3px; }
+.mix-insight { font-size: .85rem; color: var(--text-secondary); margin: 0 0 12px; }
+.mix-insight b { color: var(--gold-bright); font-weight: 700; }
+.mix-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: .86rem; }
+.mix-table td { padding: 7px 0; border-bottom: 1px solid var(--line-soft); vertical-align: middle; }
+.mix-table tr:last-child td { border-bottom: 0; }
+.mix-dot { width: 20px; }
+.mix-dot i { display: block; width: 9px; height: 9px; border-radius: 3px; }
+.mix-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--text-primary); text-align: right; }
+.mix-amt { width: 104px; text-align: left; color: var(--text-secondary); white-space: nowrap; padding-left: 12px; }
+.mix-pct { width: 42px; text-align: left; color: var(--text-muted); white-space: nowrap; }
+.mix-row[data-bil-action] { cursor: pointer; }
+.mix-row[data-bil-action]:hover td { background: rgba(255,255,255,.025); }
+.mix-row[data-bil-action]:hover .mix-name { color: var(--gold-bright); }
+.mix-row--rest .mix-name, .mix-row--extra .mix-name { color: var(--text-muted); font-weight: 500; }
+.mix-row--extra { display: none; }
+.mix--all .mix-row--extra { display: table-row; }
+.mix--all .mix-row--rest { display: none; }
+.mix-more { display: block; width: 100%; margin-top: 10px; padding: 9px 0 2px; border: 0; border-top: 1px solid var(--line-soft); background: none; color: var(--gold-bright); font-size: .82rem; font-weight: 700; cursor: pointer; }
+.fin-client--flash { box-shadow: 0 0 0 2px var(--gold-line), 0 0 28px -8px var(--gold-glow); transition: box-shadow .4s; }

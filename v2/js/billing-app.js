@@ -5,7 +5,7 @@
 import * as billing from './billing.js';
 import * as store from './store.js';
 import { ICONS, toast, formatCurrency, formatCompactCurrency, buildToday } from './ui.js';
-import { barChart, donut } from './charts.js';
+import { barChart } from './charts.js';
 import * as importer from './importer.js';
 import * as invImport from './invoice-import.js';
 import { parseClientEmail } from './email-parse.js';
@@ -32,7 +32,6 @@ const state = {
 };
 
 const MONTHS_SHORT = ['', 'ינ', 'פבר', 'מרץ', 'אפר', 'מאי', 'יוני', 'יולי', 'אוג', 'ספט', 'אוק', 'נוב', 'דצמ'];
-const DONUT_PALETTE = ['#f2ca50', '#86dfff', '#c084fc', '#34d399', '#f87171', '#fbbf24'];
 const fmtNum = (v) => Math.round(v || 0).toLocaleString('he-IL');
 const casesLabel = (n) => (n === 1 ? 'תיק אחד' : `${n} תיקים`);
 const invLabel = (n) => (n === 1 ? 'חשבונית אחת' : `${n} חשבוניות`);
@@ -194,7 +193,7 @@ function renderClients(container) {
   const sorted = [...state.clients].sort((a, b) => a.name.localeCompare(b.name, 'he'));
   for (const cl of sorted) {
     const cCases = state.cases.filter((x) => x.clientId === cl.id);
-    const card = el('div', { class: 'fin-client' }, [
+    const card = el('div', { class: 'fin-client', 'data-client-id': String(cl.id) }, [
       el('div', { class: 'fin-client__head' }, [
         el('div', { class: 'fin-client__id' }, [
           el('span', { class: 'fin-client__name' }, [
@@ -456,37 +455,97 @@ function monthlySeries() {
   state.payments.forEach((p) => { if (p.month >= 1 && p.month <= 12) pay[p.month - 1] += p.amount || 0; });
   return { comm, pay };
 }
-/** פילוח לפי לקוח (top-5 + "אחרים"), לפי המטריקה הנבחרת */
-function clientSegments(metric) {
-  const byClient = {};
+/*
+ * פילוח לפי לקוח — כרטיס "ריכוזיות": פס אחד שמראה כמה ההכנסות תלויות בכמה לקוחות,
+ * משפט אחד שאומר את זה, ומתחת רשימה (5 הגדולים בצבע + "לקוחות נוספים" באפור; "הצג הכל" פותח הכל).
+ * הצבעים עברו בדיקת עיוורון צבעים מול רקע כהה; "נוספים" תמיד אפור — לא חוזר על צבע של לקוח.
+ */
+const MIX_COLORS = ['#c98500', '#3987e5', '#d95926', '#199e70', '#9085e9'];
+const MIX_REST = '#5f626d';
+const MIX_TOP = 5;
+
+function clientMix(metric) {
+  const byClient = new Map();
   state.invoices.forEach((inv) => {
     const cs = state.cases.find((c) => c.id === inv.caseId);
     if (!cs) return;
-    byClient[cs.clientId] = (byClient[cs.clientId] || 0) + (metric === 'commission' ? (inv.commission || 0) : (inv.amount || 0));
+    byClient.set(cs.clientId, (byClient.get(cs.clientId) || 0) + (metric === 'commission' ? (inv.commission || 0) : (inv.amount || 0)));
   });
-  let rows = Object.entries(byClient)
-    .map(([cid, v]) => ({ name: clientName(parseInt(cid, 10)), val: v }))
+  const rows = [...byClient.entries()]
+    .map(([cid, v]) => ({ cid, name: clientName(cid), val: v }))
     .filter((r) => r.val > 0)
     .sort((a, b) => b.val - a.val);
-  if (rows.length > 5) {
-    const rest = rows.slice(5);
-    rows = [...rows.slice(0, 5), { name: `${rest.length} אחרים`, val: rest.reduce((s, r) => s + r.val, 0) }];
-  }
-  return rows.map((r, i) => ({ label: r.name, value: r.val, color: DONUT_PALETTE[i] || '#9ca3af' }));
+  const total = rows.reduce((s, r) => s + r.val, 0);
+  const rest = rows.slice(MIX_TOP);
+  return { rows, total, top: rows.slice(0, MIX_TOP), rest, restSum: rest.reduce((s, r) => s + r.val, 0) };
 }
 
-function donutPanel() {
+function clientMixPanel() {
   const metric = state.donutMetric;
-  const segs = clientSegments(metric);
-  const total = segs.reduce((s, x) => s + x.value, 0);
-  const title = metric === 'commission' ? 'פילוח עמלות לפי לקוח' : 'פילוח הכנסות לפי לקוח';
-  const toggle = el('button', { class: 'btn btn--ghost btn--sm panel__toggle', 'data-bil-action': 'toggle-donut', text: metric === 'commission' ? 'הצג הכנסות' : 'הצג עמלות' });
-  return el('div', { class: 'panel' }, [
-    el('div', { class: 'panel__title' }, [icon('coins'), el('h3', { text: title }), toggle]),
-    segs.length
-      ? donut({ segments: segs, centerLabel: 'סה״כ', centerValue: formatCompactCurrency(total) || '₪0' })
-      : el('div', { class: 'fin-empty', text: `אין נתונים לשנת ${state.year}` }),
+  const label = metric === 'commission' ? 'עמלות' : 'הכנסות';
+  const d = clientMix(metric);
+  const seg = el('div', { class: 'mix-seg', role: 'group', 'aria-label': 'מדד' }, [['amount', 'הכנסות'], ['commission', 'עמלות']].map(([m, t]) =>
+    el('button', { type: 'button', class: m === metric ? 'on' : '', 'data-bil-action': 'mix-metric', 'data-metric': m, 'aria-pressed': String(m === metric), text: t })));
+  const head = el('div', { class: 'panel__title' }, [icon('coins'), el('h3', { text: `פילוח ${label} לפי לקוח` }), seg]);
+  if (!d.rows.length) return el('div', { class: 'panel mix' }, [head, el('div', { class: 'fin-empty', text: `אין נתונים לשנת ${state.year}` })]);
+
+  const pct = (v) => { const p = d.total ? (v / d.total) * 100 : 0; return p > 0 && p < 1 ? '<1%' : `${Math.round(p)}%`; };
+  const parts = [...d.top.map((r, i) => ({ v: r.val, c: MIX_COLORS[i], name: r.name })), ...(d.restSum ? [{ v: d.restSum, c: MIX_REST, name: `${d.rest.length} לקוחות נוספים` }] : [])];
+  const topN = Math.min(3, d.rows.length);
+  const topShare = d.rows.slice(0, topN).reduce((s, r) => s + r.val, 0);
+
+  const row = (r, color, cls = '') => el('tr', {
+    class: `mix-row ${cls}`.trim(), title: r.name,
+    ...(r.cid != null ? { 'data-bil-action': 'open-client', 'data-id': String(r.cid), tabindex: '0' } : {}),
+  }, [
+    el('td', { class: 'mix-dot' }, [el('i', { style: `background:${color}` })]),
+    el('td', { class: 'mix-name', text: r.name }),
+    el('td', { class: 'mix-amt num', text: formatCurrency(r.val) }),
+    el('td', { class: 'mix-pct num', text: pct(r.val) }),
   ]);
+  const body = el('tbody', {}, [
+    ...d.top.map((r, i) => row(r, MIX_COLORS[i])),
+    ...(d.rest.length ? [
+      row({ name: `${d.rest.length} לקוחות נוספים`, val: d.restSum }, MIX_REST, 'mix-row--rest'),
+      ...d.rest.map((r) => row(r, MIX_REST, 'mix-row--extra')),
+    ] : []),
+  ]);
+  const panel = el('div', { class: `panel mix${state.mixAll ? ' mix--all' : ''}` }, [
+    head,
+    el('div', { class: 'mix-total' }, [
+      el('b', { class: 'num', text: formatCurrency(d.total) }),
+      el('span', { text: d.rows.length === 1 ? 'לקוח אחד' : `${d.rows.length} לקוחות` }),
+    ]),
+    el('div', { class: 'mix-stack', role: 'img', 'aria-label': `חלוקת ה${label} בין הלקוחות` },
+      parts.map((p) => el('i', { style: `width:${(p.v / d.total) * 100}%;background:${p.c}`, title: `${p.name} · ${pct(p.v)}` }))),
+    d.rows.length > 1
+      ? el('p', { class: 'mix-insight' }, [
+        topN === 1 ? 'הלקוח הגדול = ' : `${topN} הלקוחות הגדולים = `,
+        el('b', { class: 'num', text: pct(topShare) }),
+        ` מה${label}.`,
+      ])
+      : null,
+    el('table', { class: 'mix-table' }, [body]),
+    d.rest.length
+      ? el('button', { type: 'button', class: 'mix-more', 'data-bil-action': 'mix-all', text: state.mixAll ? 'הצג פחות' : `הצג את כל ${d.rows.length} הלקוחות` })
+      : null,
+  ]);
+  return panel;
+}
+
+/** מעבר מהדשבורד ללקוח: פותח את מסך הלקוחות וממקד את כרטיס הלקוח */
+function openClientFromDashboard(id) {
+  document.getElementById('view-clients')?.click();
+  // מסך הלקוחות מרונדר אחרי טעינה — ממתינים עד שהכרטיס קיים (עד כשתי שניות)
+  let tries = 0;
+  const focus = () => {
+    const card = document.querySelector(`.fin-client[data-client-id="${CSS.escape(String(id))}"]`);
+    if (!card) { if (++tries < 40) setTimeout(focus, 50); return; }
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card.classList.add('fin-client--flash');
+    setTimeout(() => card.classList.remove('fin-client--flash'), 1600);
+  };
+  focus();
 }
 
 function drawDashboard(container) {
@@ -518,7 +577,7 @@ function drawDashboard(container) {
         { name: 'תשלומים', color: '#34d399', values: pay },
       ] }),
     ]),
-    donutPanel(),
+    clientMixPanel(),
   ]);
 
   const todaySection = el('div', { class: 'dash-today' }, [
@@ -1078,9 +1137,13 @@ async function onClick(e) {
     case 'del-payment': return delPayment(id);
     case 'save-opening': return saveOpening();
     case 'export-backup': return exportBackup();
-    case 'toggle-donut':
-      state.donutMetric = state.donutMetric === 'commission' ? 'amount' : 'commission';
+    case 'mix-metric':
+      state.donutMetric = t.dataset.metric === 'commission' ? 'commission' : 'amount';
       return renderDashboard(refs.dashboard, state.crmCtx);
+    case 'mix-all':
+      state.mixAll = !state.mixAll;
+      return renderDashboard(refs.dashboard, state.crmCtx);
+    case 'open-client': return openClientFromDashboard(id);
     case 'toggle-cm':
       state.cmMetric = state.cmMetric === 'commission' ? 'amount' : 'commission';
       return renderAnalysis(refs.analysis);
