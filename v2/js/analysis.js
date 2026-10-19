@@ -16,10 +16,11 @@ export const change = (cur, prev) => (prev ? (cur - prev) / Math.abs(prev) : nul
  * @param {Array} p.payments / p.prevPayments ({ month, amount })
  * @param {Array} p.cases ({ id, clientId, caseNumber, description, caseType, commissionRate })
  * @param {Function} p.clientName (id) → שם
+ * @param {Function} p.statusOf (id) → 'active' | 'oneoff' | 'ended' — לא פעילים נספרים בסכומים אך לא מתריעים
  * @param {number} p.openingBalance
  * @param {number} p.uptoFallback  חודש סיום כשאין נתונים (בד"כ החודש הנוכחי)
  */
-export function analysisModel({ invoices = [], prevInvoices = [], payments = [], prevPayments = [], cases = [], clientName = String, openingBalance = 0, uptoFallback = 12 }) {
+export function analysisModel({ invoices = [], prevInvoices = [], payments = [], prevPayments = [], cases = [], clientName = String, statusOf = () => 'active', openingBalance = 0, uptoFallback = 12 }) {
   const caseById = new Map(cases.map((c) => [c.id, c]));
   // חודש הסיום: החודש האחרון שיש בו חשבונית או תשלום — כך ההשוואה לשנה הקודמת הוגנת
   const lastMonth = Math.max(0, ...invoices.map((i) => i.month || 0), ...payments.map((p) => p.month || 0));
@@ -72,8 +73,12 @@ export function analysisModel({ invoices = [], prevInvoices = [], payments = [],
     for (const r of cl.cases.values()) for (let m = 0; m < 12; m++) { months[m] += r.a[m]; monthsC[m] += r.c[m]; prevMonths[m] += r.pa[m]; }
     const amount = sumTo(months, upto), prevAmount = sumTo(prevMonths, upto);
     const last = months.slice(0, upto).reduce((L, v, m) => (v ? m + 1 : L), 0);   // 1..12, 0 = לא חויב השנה
+    const prevLast = prevMonths.reduce((L, v, m) => (v ? m + 1 : L), 0);
     return {
-      id: cl.id, name: cl.name, cases: caseRows.sort((x, y) => y.amount - x.amount),
+      id: cl.id, name: cl.name, status: statusOf(cl.id),
+      // חודשים מאז החיוב האחרון (בחלון השנתיים הטעון); null = לא חויב בחלון
+      prevLast,
+      since: last ? upto - last : prevLast ? upto + 12 - prevLast : null, cases: caseRows.sort((x, y) => y.amount - x.amount),
       amount, prevAmount, commission: sumTo(monthsC, upto), months, monthsC,
       change: change(amount, prevAmount), last,
       // 12 החודשים שמסתיימים בחודש הסיום (חלק מהשנה הקודמת + השנה)
@@ -91,16 +96,19 @@ export function analysisModel({ invoices = [], prevInvoices = [], payments = [],
     return { type: t, amount, prevAmount, change: change(amount, prevAmount), active: rs.filter((r) => r.amount > 0).length, share: total ? amount / total : 0 };
   });
 
-  // ---- 4. דורש תשומת לב — פריט אחד ללקוח, החמור מביניהם ----
-  const STALE = 3, JUMP = 0.5, MIN_BASE = 10000;
+  // ---- 4. דורש תשומת לב — פריט אחד ללקוח, החמור מביניהם. רק לקוחות פעילים ----
+  const STALE = 3, JUMP = 0.5, MIN_BASE = 10000, DORMANT = 12;
   const attention = [];
   const seen = new Set();
   const push = (item) => { if (!seen.has(item.clientId)) { seen.add(item.clientId); attention.push(item); } };
-  for (const r of clientRows) if (r.amount > 0 && upto - r.last >= STALE) push({ kind: 'stale', clientId: r.id, name: r.name, months: upto - r.last, last: r.last });
-  for (const r of clientRows) if (r.amount === 0 && r.prevAmount >= MIN_BASE) push({ kind: 'stopped', clientId: r.id, name: r.name, prevAmount: r.prevAmount });
-  for (const r of clientRows) if (r.prevAmount >= MIN_BASE && r.change !== null && r.change <= -JUMP) push({ kind: 'down', clientId: r.id, name: r.name, change: r.change, amount: r.amount });
-  for (const r of clientRows) if (r.prevAmount >= MIN_BASE && r.change !== null && r.change >= JUMP) push({ kind: 'up', clientId: r.id, name: r.name, change: r.change, amount: r.amount });
-  for (const r of clientRows) if (!r.prevAmount && r.amount > 0) push({ kind: 'new', clientId: r.id, name: r.name, amount: r.amount });
+  const active = clientRows.filter((r) => r.status === 'active');
+  // שנה בלי חיוב → הצעה לסמן "הסתיים" (לא מסמנים לבד)
+  for (const r of active) if (r.since !== null && r.since >= DORMANT) push({ kind: 'dormant', clientId: r.id, name: r.name, months: r.since, prevLast: r.prevLast });
+  for (const r of active) if (r.amount > 0 && upto - r.last >= STALE) push({ kind: 'stale', clientId: r.id, name: r.name, months: upto - r.last, last: r.last });
+  for (const r of active) if (r.amount === 0 && r.prevAmount >= MIN_BASE) push({ kind: 'stopped', clientId: r.id, name: r.name, prevAmount: r.prevAmount });
+  for (const r of active) if (r.prevAmount >= MIN_BASE && r.change !== null && r.change <= -JUMP) push({ kind: 'down', clientId: r.id, name: r.name, change: r.change, amount: r.amount });
+  for (const r of active) if (r.prevAmount >= MIN_BASE && r.change !== null && r.change >= JUMP) push({ kind: 'up', clientId: r.id, name: r.name, change: r.change, amount: r.amount });
+  for (const r of active) if (!r.prevAmount && r.amount > 0) push({ kind: 'new', clientId: r.id, name: r.name, amount: r.amount });
 
   // ---- פירוט חודשי עם יתרה מתגלגלת ----
   let running = openingBalance;
@@ -109,6 +117,9 @@ export function analysisModel({ invoices = [], prevInvoices = [], payments = [],
     running += totals.c[m] - totals.pay[m];
     ledger.push({ month: m + 1, amount: totals.a[m], commission: totals.c[m], payments: totals.pay[m], balance: running });
   }
+
+  // הכנסה מלקוחות חד-פעמיים (מול הבסיס החוזר)
+  kpi.oneoff = clientRows.filter((r) => r.status === 'oneoff').reduce((s, r) => s + r.amount, 0);
 
   return { upto, kpi, totals, clients: clientRows, total, types, attention, ledger, openingBalance, unassignedPay };
 }

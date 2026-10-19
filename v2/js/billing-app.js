@@ -31,7 +31,8 @@ const state = {
   flowMode: 'monthly',    // 'monthly' | 'cum' — גרף התזרים בדשבורד
   donutMetric: 'amount',  // 'amount' (הכנסות) | 'commission' (עמלות) — דונאט בדשבורד
   // אנליזה: מיון טבלת הלקוחות, לקוחות פתוחים, מדד הגרף ומפת החום, "הצג עוד" בתשומת לב
-  anaSort: { key: 'amount', dir: -1 }, anaOpen: new Set(), anaYoyMetric: 'a', anaHeatMetric: 'a', anaAttAll: false,
+  anaSort: { key: 'amount', dir: -1 }, anaOpen: new Set(), anaYoyMetric: 'a', anaHeatMetric: 'a', anaAttAll: false, anaInactiveOpen: false,
+  clientFilter: 'active',  // מסך לקוחות: active | oneoff | ended | all
 };
 
 const MONTHS_SHORT = ['', 'ינ', 'פבר', 'מרץ', 'אפר', 'מאי', 'יוני', 'יולי', 'אוג', 'ספט', 'אוק', 'נוב', 'דצמ'];
@@ -136,6 +137,8 @@ export async function loadData() {
 async function reload(view) {
   await loadData();
   renderView(view);
+  const back = billing.drainReactivated();
+  if (back.length) toast(`חזר להיות לקוח פעיל: ${back.join(', ')}`);
 }
 
 /* ============================================================ render dispatch ============================================================ */
@@ -157,6 +160,14 @@ export async function renderDashboard(container, crmCtx) {
 }
 
 const clientName = (id) => (state.clients.find((c) => c.id === id) || {}).name || '—';
+const statusLabel = (st) => (billing.CLIENT_STATUSES.find((x) => x.value === st) || {}).label || 'פעיל';
+/** תגית סטטוס — רק ללא-פעילים (פעיל הוא ברירת המחדל ולא צריך סימון) */
+const statusTag = (st, date) => (st && st !== 'active'
+  ? el('span', { class: `cl-status cl-status--${st}`, text: st === 'ended' && date ? `הסתיים · ${date.slice(5)}/${date.slice(0, 4)}` : statusLabel(st) })
+  : null);
+/** פעילים קודם, ואחריהם חד-פעמיים/שהסתיימו (לרשימות בחירה) */
+const clientRank = (id) => (billing.clientStatus(state.clients.find((c) => c.id === id)) === 'active' ? 0 : 1);
+const clientSuffix = (id) => { const st = billing.clientStatus(state.clients.find((c) => c.id === id)); return st === 'active' ? '' : ` (${statusLabel(st)})`; };
 const caseLabel = (id) => {
   const c = state.cases.find((x) => x.id === id);
   return c ? `${c.caseNumber || '—'} · ${c.description || ''}`.trim() : '—';
@@ -200,7 +211,15 @@ function renderClients(container) {
     return;
   }
 
-  const sorted = [...state.clients].sort((a, b) => a.name.localeCompare(b.name, 'he'));
+  // סינון לפי סטטוס: ברירת המחדל — פעילים בלבד; הלקוחות האחרים נשמרים ונגישים בלשונית
+  const count = (f) => state.clients.filter((c) => f === 'all' || billing.clientStatus(c) === f).length;
+  const tabs = [['active', 'פעילים'], ['oneoff', 'חד־פעמיים'], ['ended', 'הסתיימו'], ['all', 'הכל']];
+  wrap.append(el('div', { class: 'mix-seg cl-filter', role: 'group', 'aria-label': 'סינון לקוחות' }, tabs.map(([f, t]) =>
+    el('button', { type: 'button', class: f === state.clientFilter ? 'on' : '', 'data-bil-action': 'client-filter', 'data-filter': f, 'aria-pressed': String(f === state.clientFilter) }, [t, el('span', { class: 'cl-filter__n num', text: String(count(f)) })]))));
+  const sorted = [...state.clients]
+    .filter((c) => state.clientFilter === 'all' || billing.clientStatus(c) === state.clientFilter)
+    .sort((a, b) => a.name.localeCompare(b.name, 'he'));
+  if (!sorted.length) wrap.append(el('div', { class: 'fin-empty' }, [el('p', { text: 'אין לקוחות בסטטוס הזה' })]));
   for (const cl of sorted) {
     const cCases = state.cases.filter((x) => x.clientId === cl.id);
     const card = el('div', { class: 'fin-client', 'data-client-id': String(cl.id) }, [
@@ -209,6 +228,7 @@ function renderClients(container) {
           el('span', { class: 'fin-client__name' }, [
             cl.name,
             cl.clientNumber ? el('span', { class: 'fin-client__num num', text: `#${cl.clientNumber}` }) : null,
+            statusTag(billing.clientStatus(cl), cl.statusDate),
           ]),
           el('span', { class: 'fin-client__sub muted', text: casesLabel(cCases.length) }),
           clientContactLine(cl),
@@ -481,10 +501,12 @@ function clientMix(metric) {
     if (!cs) return;
     byClient.set(cs.clientId, (byClient.get(cs.clientId) || 0) + (metric === 'commission' ? (inv.commission || 0) : (inv.amount || 0)));
   });
-  const rows = [...byClient.entries()]
-    .map(([cid, v]) => ({ cid, name: clientName(cid), val: v }))
-    .filter((r) => r.val > 0)
-    .sort((a, b) => b.val - a.val);
+  // חד-פעמיים/שהסתיימו נספרים בסה״כ אך מקובצים לשורה אחת — הריכוזיות נמדדת על בסיס הלקוחות הפעיל
+  const all = [...byClient.entries()].map(([cid, v]) => ({ cid, name: clientName(cid), val: v })).filter((r) => r.val > 0);
+  const off = all.filter((r) => clientRank(r.cid));
+  const rows = all.filter((r) => !clientRank(r.cid));
+  if (off.length) rows.push({ cid: null, name: `חד־פעמיים והסתיימו (${off.length})`, val: off.reduce((s, r) => s + r.val, 0) });
+  rows.sort((a, b) => b.val - a.val);
   const total = rows.reduce((s, r) => s + r.val, 0);
   const rest = rows.slice(MIX_TOP);
   return { rows, total, top: rows.slice(0, MIX_TOP), rest, restSum: rest.reduce((s, r) => s + r.val, 0) };
@@ -501,8 +523,9 @@ function clientMixPanel() {
 
   const pct = (v) => { const p = d.total ? (v / d.total) * 100 : 0; return p > 0 && p < 1 ? '<1%' : `${Math.round(p)}%`; };
   const parts = [...d.top.map((r, i) => ({ v: r.val, c: MIX_COLORS[i], name: r.name })), ...(d.restSum ? [{ v: d.restSum, c: MIX_REST, name: `${d.rest.length} לקוחות נוספים` }] : [])];
-  const topN = Math.min(3, d.rows.length);
-  const topShare = d.rows.slice(0, topN).reduce((s, r) => s + r.val, 0);
+  const named = d.rows.filter((r) => r.cid != null);   // הריכוזיות — בלי שורת הקבוצה
+  const topN = Math.min(3, named.length);
+  const topShare = named.slice(0, topN).reduce((s, r) => s + r.val, 0);
 
   const row = (r, color, cls = '') => el('tr', {
     class: `mix-row ${cls}`.trim(), title: r.name,
@@ -528,7 +551,7 @@ function clientMixPanel() {
     ]),
     el('div', { class: 'mix-stack', role: 'img', 'aria-label': `חלוקת ה${label} בין הלקוחות` },
       parts.map((p) => el('i', { style: `width:${(p.v / d.total) * 100}%;background:${p.c}`, title: `${p.name} · ${pct(p.v)}` }))),
-    d.rows.length > 1
+    named.length > 1
       ? el('p', { class: 'mix-insight' }, [
         topN === 1 ? 'הלקוח הגדול = ' : `${topN} הלקוחות הגדולים = `,
         el('b', { class: 'num', text: pct(topShare) }),
@@ -644,7 +667,7 @@ function anaModel() {
   return analysisModel({
     invoices: state.invoices, prevInvoices: state.prevInvoices || [],
     payments: state.payments, prevPayments: state.prevPayments || [],
-    cases: state.cases, clientName, openingBalance: (state.ledger || {}).openingBalance || 0,
+    cases: state.cases, clientName, statusOf: (id) => billing.clientStatus(state.clients.find((c) => c.id === id)), openingBalance: (state.ledger || {}).openingBalance || 0,
     uptoFallback: maxMonthFor(state.year),
   });
 }
@@ -739,7 +762,10 @@ function anaTypesCard(M) {
         deltaEl(t.change),
       ]),
     ]))),
-    run && M.total ? el('p', { class: 'mix-insight ana-type-insight' }, ['ההכנסה החוזרת (שוטף) היא ', el('b', { class: 'num', text: `${Math.round(run.share * 100)}%` }), ' מהסה״כ.']) : null,
+    run && M.total ? el('p', { class: 'mix-insight ana-type-insight' }, [
+      'ההכנסה החוזרת (שוטף) היא ', el('b', { class: 'num', text: `${Math.round(run.share * 100)}%` }), ' מהסה״כ',
+      ...(M.kpi.oneoff ? ['; מלקוחות חד־פעמיים ', el('b', { class: 'num', text: `${Math.round((M.kpi.oneoff / M.total) * 100)}%` })] : []), '.',
+    ]) : null,
   ], 'ana-card--types');
 }
 
@@ -747,9 +773,10 @@ function anaTypesCard(M) {
 function anaAttentionCard(M) {
   const LIMIT = 6;
   const items = M.attention;
-  const ic = { stale: ['warn', '!'], stopped: ['down', '■'], down: ['down', '↓'], up: ['up', '↑'], new: ['new', '★'] };
+  const ic = { dormant: ['warn', 'z'], stale: ['warn', '!'], stopped: ['down', '■'], down: ['down', '↓'], up: ['up', '↑'], new: ['new', '★'] };
   const text = (a) => {
     const nm = el('b', { text: a.name });
+    if (a.kind === 'dormant') return [nm, ` לא חויב ${a.months} חודשים (מאז ${MONTHS[a.prevLast]} ${state.year - 1}) — עדיין לקוח פעיל?`];
     if (a.kind === 'stale') return [nm, ` לא חויב מאז ${MONTHS[a.last]} (${a.months} חודשים)`];
     if (a.kind === 'stopped') return [nm, ` לא חויב השנה (אשתקד באותה תקופה ${formatCurrency(a.prevAmount)})`];
     if (a.kind === 'new') return [nm, ` לקוח חדש השנה · ${formatCurrency(a.amount)}`];
@@ -759,6 +786,9 @@ function anaAttentionCard(M) {
   const list = el('ul', { class: `ana-att${state.anaAttAll ? ' all' : ''}` }, items.map((a, i) => el('li', { class: i >= LIMIT ? 'extra' : '' }, [
     el('span', { class: `ana-att__ic ${ic[a.kind][0]}`, text: ic[a.kind][1] }),
     el('span', { class: 'ana-att__tx' }, text(a)),
+    a.kind === 'dormant'
+      ? el('button', { type: 'button', class: 'ana-att__go', 'data-bil-action': 'client-end', 'data-id': String(a.clientId), 'data-ym': `${state.year - 1}-${String(a.prevLast).padStart(2, '0')}`, text: 'סמן כהסתיים' })
+      : null,
     el('button', { type: 'button', class: 'ana-att__go', 'data-bil-action': 'ana-goto', 'data-id': String(a.clientId), text: 'ללקוח ←' }),
   ])));
   return anaCard('דורש תשומת לב', `${items.length} פריטים`, [], [
@@ -797,13 +827,17 @@ function anaClientsCard(M) {
     'aria-sort': k === key ? (dir < 0 ? 'descending' : 'ascending') : 'none',
   }, [label, k === key ? el('span', { class: 'ana-arr', text: dir < 0 ? '▼' : '▲' }) : null])));
   const rows = [];
-  for (const r of anaSorted(M)) {
+  const sorted = anaSorted(M);
+  // לקוחות חד-פעמיים/שהסתיימו: נספרים בסה״כ, מקובצים בתחתית; בלי חיוב בתקופה — לא מוצגים כלל
+  const inactive = sorted.filter((r) => r.status !== 'active' && r.amount > 0);
+  const pushClient = (r) => {
     const isOpen = open.has(r.id);
     const stale = r.amount > 0 && M.upto - r.last >= 3;
     rows.push(el('tr', { class: `ana-client${isOpen ? ' open' : ''}`, 'data-bil-action': 'ana-toggle', 'data-id': String(r.id), 'data-client-row': String(r.id), tabindex: '0' }, [
       el('td', {}, [el('span', { class: 'ana-nm' }, [
         el('span', { class: 'ana-chev' }), el('span', { class: 'ana-nm__t', title: r.name, text: r.name }),
         el('span', { class: 'ana-nm__cnt', text: r.cases.length === 1 ? 'תיק אחד' : `${r.cases.length} תיקים` }),
+        statusTag(r.status),
       ])]),
       el('td', {}, [el('span', { class: 'ana-share' }, [el('span', { class: 'ana-share__bar' }, [el('i', { style: `width:${(r.amount / maxAmt) * 100}%` })]), el('span', { class: 'num muted', text: `${Math.round(r.share * 100)}%` })])]),
       el('td', { class: 'num', text: formatCurrency(r.amount) }),
@@ -828,13 +862,25 @@ function anaClientsCard(M) {
         el('td', {}, [sparkline(c.trail, 80, 20)]),
       ]));
     }
+  };
+  sorted.filter((r) => r.status === 'active').forEach(pushClient);
+  if (inactive.length) {
+    const sum = (k) => inactive.reduce((s, r) => s + r[k], 0);
+    const amt = sum('amount');
+    rows.push(el('tr', { class: `ana-client ana-inactive${state.anaInactiveOpen ? ' open' : ''}`, 'data-bil-action': 'ana-inactive', tabindex: '0' }, [
+      el('td', {}, [el('span', { class: 'ana-nm' }, [el('span', { class: 'ana-chev' }), el('span', { class: 'ana-nm__t', text: 'חד־פעמיים והסתיימו' }), el('span', { class: 'ana-nm__cnt', text: inactive.length === 1 ? 'לקוח אחד' : `${inactive.length} לקוחות` })])]),
+      el('td', {}, [el('span', { class: 'ana-share' }, [el('span', { class: 'ana-share__bar' }, [el('i', { style: `width:${Math.min(100, (amt / maxAmt) * 100)}%` })]), el('span', { class: 'num muted', text: `${Math.round((M.total ? amt / M.total : 0) * 100)}%` })])]),
+      el('td', { class: 'num', text: formatCurrency(amt) }),
+      el('td', { class: 'num accent', text: formatCurrency(sum('commission')) }),
+      el('td', {}, [deltaEl(change(amt, sum('prevAmount')))]), el('td', {}), el('td', {}),
+    ]));
+    if (state.anaInactiveOpen) inactive.forEach(pushClient);
   }
-  const prevTotal = M.clients.reduce((s, r) => s + r.prevAmount, 0);
   const foot = el('tr', {}, [
-    el('td', { text: `סה״כ · ${M.clients.length} לקוחות` }), el('td', {}),
+    el('td', { text: `סה״כ · ${M.clients.filter((r) => r.amount > 0).length} לקוחות` }), el('td', {}),
     el('td', { class: 'num', text: formatCurrency(M.total) }),
     el('td', { class: 'num accent', text: formatCurrency(M.clients.reduce((s, r) => s + r.commission, 0)) }),
-    el('td', {}, [deltaEl(change(M.total, prevTotal))]), el('td', {}), el('td', {}),
+    el('td', {}, [deltaEl(change(M.total, M.kpi.prevAmount))]), el('td', {}), el('td', {}),
   ]);
   return anaCard('לקוחות', 'לחיצה על כותרת ממיינת · לחיצה על לקוח פותחת את התיקים', [exportBtn('clients')], [
     el('div', { class: 'fin-table-wrap ana-table-wrap' }, [el('table', { class: 'fin-table ana-table' }, [el('thead', {}, [head]), el('tbody', {}, rows), el('tfoot', {}, [foot])])]),
@@ -845,7 +891,13 @@ function anaClientsCard(M) {
 function anaHeatCard(M) {
   const metric = state.anaHeatMetric || 'a';
   const pick = (r) => (metric === 'c' ? r.monthsC : r.months);
-  const list = anaSorted(M);
+  const all = anaSorted(M);
+  const list = all.filter((r) => r.status === 'active');
+  const rest = all.filter((r) => r.status !== 'active' && r.amount > 0);
+  if (rest.length) {
+    const agg = (k) => Array.from({ length: 12 }, (_, m) => rest.reduce((s, r) => s + r[k][m], 0));
+    list.push({ name: `חד־פעמיים והסתיימו (${rest.length})`, months: agg('months'), monthsC: agg('monthsC'), group: true });
+  }
   const max = Math.max(1, ...list.flatMap((r) => pick(r).slice(0, M.upto)));
   const cell = (v) => {
     if (!v) return el('td', { class: 'ana-heat__c zero', text: '—' });
@@ -856,7 +908,7 @@ function anaHeatCard(M) {
   const colTot = months.map((_, m) => list.reduce((s, r) => s + pick(r)[m], 0));
   const table = el('table', { class: 'ana-heat' }, [
     el('thead', {}, [el('tr', {}, [el('th', { class: 'lbl', text: 'לקוח' }), ...months.map((m) => el('th', { text: m })), el('th', { class: 'tot', text: 'סה״כ' })])]),
-    el('tbody', {}, list.map((r) => el('tr', {}, [
+    el('tbody', {}, list.map((r) => el('tr', { class: r.group ? 'ana-heat__group' : '' }, [
       el('td', { class: 'lbl', title: r.name, text: r.name }),
       ...pick(r).slice(0, M.upto).map(cell),
       el('td', { class: 'tot num', text: formatCurrency(pick(r).slice(0, M.upto).reduce((s, v) => s + v, 0)) }),
@@ -910,9 +962,9 @@ async function anaExport(section) {
       ...Array.from({ length: 12 }, (_, m) => [MONTHS[m + 1], m < M.upto ? M.totals.a[m] : '', M.totals.pa[m], m < M.upto ? M.totals.c[m] : '', M.totals.pc[m]])]],
     types: () => ['לפי סוג תיק', [['סוג', `הכנסות ${y}`, `הכנסות ${py}`, 'שינוי %', 'חלק מהסה"כ %', 'תיקים פעילים'],
       ...M.types.map((t) => [t.type, t.amount, t.prevAmount, pct(t.change), Math.round(t.share * 1000) / 10, t.active])]],
-    clients: () => ['לקוחות', [['לקוח', 'תיק', 'סוג', 'אחוז עמלה', `הכנסות ${y}`, 'עמלות', `הכנסות ${py}`, 'שינוי %', 'חיוב אחרון'],
+    clients: () => ['לקוחות', [['לקוח', 'תיק', 'סוג', 'אחוז עמלה', `הכנסות ${y}`, 'עמלות', `הכנסות ${py}`, 'שינוי %', 'חיוב אחרון', 'סטטוס'],
       ...anaSorted(M).flatMap((r) => [
-        [r.name, '', '', '', r.amount, r.commission, r.prevAmount, pct(r.change), r.last ? MONTHS[r.last] : ''],
+        [r.name, '', '', '', r.amount, r.commission, r.prevAmount, pct(r.change), r.last ? MONTHS[r.last] : '', statusLabel(r.status)],
         ...r.cases.map((c) => ['', [c.caseNumber, c.description].filter(Boolean).join(' — '), c.caseType, c.rate, c.amount, c.commission, c.prevAmount, pct(change(c.amount, c.prevAmount)), '']),
       ])]],
     heat: () => {
@@ -1115,9 +1167,9 @@ const NEW_CASE = '__newcase__'; // צור תיק חדש אצל לקוח קיים
 function reviewImportModal(result, srcFile) {
   const fileName = srcFile.name;
   // תווית תיק כוללת תיאור — תיקים שנפתחו ממייל עדיין בלי מספר, ובלי התיאור אי אפשר להבדיל ביניהם
-  const existingOpts = state.cases.map((c) => ({
+  const existingOpts = [...state.cases].sort((a, b) => clientRank(a.clientId) - clientRank(b.clientId)).map((c) => ({
     value: c.id,
-    label: `${[c.caseNumber, c.description].filter(Boolean).join(' — ') || '—'} · ${clientName(c.clientId)}`,
+    label: `${[c.caseNumber, c.description].filter(Boolean).join(' — ') || '—'} · ${clientName(c.clientId)}${clientSuffix(c.clientId)}`,
   }));
   const kindLabel = result.kind === 'pdf' ? 'PDF' : result.kind === 'csv' ? 'CSV' : 'Excel';
   const needCase = result.candidates.filter((c) => !c.caseId).length;
@@ -1344,6 +1396,19 @@ async function onClick(e) {
       state.anaAttAll = !state.anaAttAll;
       return renderAnalysis(refs.analysis);
     case 'ana-goto': return anaGoto(id);
+    case 'ana-inactive':
+      state.anaInactiveOpen = !state.anaInactiveOpen;
+      return renderAnalysis(refs.analysis);
+    case 'client-end': {
+      const cl = state.clients.find((c) => c.id === id);
+      if (!cl) return;
+      await billing.clients.update(billing.withStatus(cl, 'ended', t.dataset.ym));
+      toast(`${cl.name} סומן כהסתיים — ההיסטוריה נשמרת`);
+      return reload(view);
+    }
+    case 'client-filter':
+      state.clientFilter = t.dataset.filter;
+      return renderClients(refs.clients);
     case 'ana-export': return anaExport(t.dataset.section);
     case 'exp-client': return toggleExpand(t);
     case 'toggle-month': return toggleMonth(t);
@@ -1460,6 +1525,10 @@ function clientForm(client) {
       field('שם הלקוח', input('f-cl-name', { value: c.name || '', placeholder: 'שם מלא' })),
       field('מספר לקוח', input('f-cl-num', { value: c.clientNumber || '', placeholder: 'אופציונלי' })),
     ]),
+    el('div', { class: 'field--row' }, [
+      field('סטטוס', selectEl('f-cl-status', billing.CLIENT_STATUSES, billing.clientStatus(c)), 'חד־פעמי / הסתיים: נשמר ונספר בסכומים, בלי התראות'),
+      field('החל מ־', input('f-cl-sdate', { type: 'month', value: c.statusDate || '' }), 'ריק = החודש הנוכחי'),
+    ]),
     el('div', { class: 'form__sep', text: 'איש קשר אצל הלקוח' }),
     field('שם', input('f-cl-cname', { value: c.contactName || '', placeholder: 'אופציונלי' })),
     el('div', { class: 'field--row' }, [
@@ -1477,8 +1546,9 @@ function clientForm(client) {
       contactEmail: document.getElementById('f-cl-cmail').value.trim(),
       contactPhone: document.getElementById('f-cl-cphone').value.trim(),
     };
-    if (client) await billing.clients.update({ ...client, ...data });
-    else await billing.clients.add(data);
+    const st = document.getElementById('f-cl-status').value, sd = document.getElementById('f-cl-sdate').value;
+    if (client) await billing.clients.update(billing.withStatus({ ...client, ...data }, st, sd));
+    else await billing.clients.add({ ...data, status: st, statusDate: sd });
     toast(client ? 'הלקוח עודכן' : 'הלקוח נוסף');
     reload('clients');
     return true;
@@ -1632,7 +1702,7 @@ async function upsertCrmContact(contact, clientId) {
 }
 
 function caseForm(caseRec, presetClientId) {
-  const clientOpts = state.clients.map((c) => ({ value: c.id, label: c.name }));
+  const clientOpts = [...state.clients].sort((a, b) => clientRank(a.id) - clientRank(b.id)).map((c) => ({ value: c.id, label: c.name + clientSuffix(c.id) }));
   const body = el('div', { class: 'form' }, [
     field('לקוח', selectEl('f-case-client', clientOpts, caseRec ? caseRec.clientId : presetClientId)),
     el('div', { class: 'field--row' }, [
@@ -1667,7 +1737,7 @@ function caseForm(caseRec, presetClientId) {
 
 function invoiceForm(inv) {
   if (!state.cases.length) { toast('צריך להגדיר תיק לפני חשבונית', 'alert'); return; }
-  const caseOpts = state.cases.map((c) => ({ value: c.id, label: `${c.caseNumber || '—'} · ${clientName(c.clientId)}` }));
+  const caseOpts = [...state.cases].sort((a, b) => clientRank(a.clientId) - clientRank(b.clientId)).map((c) => ({ value: c.id, label: `${c.caseNumber || '—'} · ${clientName(c.clientId)}${clientSuffix(c.clientId)}` }));
   const rateInput = input('f-inv-rate', { type: 'number', step: '0.5', min: '0', max: '100', value: inv ? inv.commissionRate : caseRate(state.cases[0].id) });
   const amountInput = input('f-inv-amount', { type: 'number', step: '0.01', min: '0', value: inv ? inv.amount : '' });
   const commOut = el('span', { class: 'num accent fin-comm-out', text: formatCurrency(inv ? inv.commission : 0) });

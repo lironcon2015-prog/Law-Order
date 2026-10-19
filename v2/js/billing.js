@@ -13,6 +13,25 @@ const round2 = (n) => +(Number(n) || 0).toFixed(2);
 const computeCommission = (amount, rate) => round2((Number(amount) || 0) * (Number(rate) || 0) / 100);
 
 /* ============================================================ Clients ============================================================ */
+/* סטטוס לקוח: ההיסטוריה נשמרת ונספרת תמיד — הסטטוס משנה רק התראות ותצוגה.
+ * active = פעיל · oneoff = חד-פעמי (אין לצפות לחיוב חוזר) · ended = הסתיים (statusDate = 'YYYY-MM'). רשומה בלי שדה = פעיל. */
+export const CLIENT_STATUSES = [
+  { value: 'active', label: 'פעיל' },
+  { value: 'oneoff', label: 'חד־פעמי' },
+  { value: 'ended', label: 'הסתיים' },
+];
+export const clientStatus = (cl) => (cl && (cl.status === 'oneoff' || cl.status === 'ended') ? cl.status : 'active');
+const ym = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+/** מחזיר עותק עם status/statusDate תקינים. statusDate נקבע כשעוברים לסטטוס לא-פעיל ונמחק בחזרה לפעיל */
+export function withStatus(record, status, statusDate) {
+  const st = clientStatus({ status });
+  if (st === 'active') return { ...record, status: 'active', statusDate: '' };
+  return { ...record, status: st, statusDate: statusDate || (clientStatus(record) === st && record.statusDate) || ym() };
+}
+let reactivated = [];
+/** לקוחות שחזרו אוטומטית לפעיל בעקבות חשבונית חדשה (לתצוגת הודעה) — נקרא ומתרוקן */
+export const drainReactivated = () => reactivated.splice(0);
+
 export const clients = {
   getAll: () => db.getAll('clients'),
   get: (id) => db.get('clients', id),
@@ -29,6 +48,7 @@ export const clients = {
       crmContactId: src.crmContactId || '',
       createdAt: Date.now(),
     };
+    Object.assign(record, withStatus({}, src.status, src.statusDate));
     const id = await db.addAuto('clients', record);
     notify();
     return id;
@@ -69,6 +89,18 @@ export const cases = {
   remove: async (id) => { await db.remove('cases', id); notify(); },
 };
 
+/* לקוח שסומן "הסתיים" וקיבל חשבונית על חודש מאוחר מסיום הקשר — חזר להיות לקוח: מחזירים לפעיל.
+ * חשבונית ישנה (ייבוא היסטוריה) לא משנה דבר; חד-פעמי נשאר חד-פעמי. */
+async function reactivateFor(inv) {
+  const cs = await db.get('cases', inv.caseId);
+  const cl = cs && await db.get('clients', cs.clientId);
+  if (!cl || clientStatus(cl) !== 'ended' || !inv.year || !inv.month) return;
+  const invYm = `${inv.year}-${String(inv.month).padStart(2, '0')}`;
+  if (cl.statusDate && invYm <= cl.statusDate) return;
+  await db.put('clients', withStatus(cl, 'active'));
+  reactivated.push(cl.name);
+}
+
 /* ============================================================ Invoices (חשבוניות) ============================================================ */
 export const invoices = {
   getAll: () => db.getAll('invoices'),
@@ -93,6 +125,7 @@ export const invoices = {
       createdAt: Date.now(),
     };
     const id = await db.addAuto('invoices', record);
+    await reactivateFor(record);
     notify();
     return id;
   },

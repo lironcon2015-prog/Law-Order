@@ -2567,3 +2567,14 @@ a.fin-contact__item:hover { color: var(--gold); }
 .ana-scale__ramp { display: flex; gap: 2px; }
 .ana-scale__ramp i { display: block; width: 18px; height: 9px; border-radius: 2px; }
 @media (max-width: 1100px) { .ana-kpis { grid-template-columns: 1fr 1fr; } .ana-row { grid-template-columns: 1fr; } }
+
+/* ---------- סטטוס לקוח (חד-פעמי / הסתיים): נשמר ונספר, מסומן ומקובץ ---------- */
+.cl-status { display: inline-block; margin-inline-start: 8px; padding: 1px 8px; border-radius: 999px; font-size: .7rem; font-weight: 700; white-space: nowrap; vertical-align: middle; }
+.cl-status--oneoff { background: rgba(57,135,229,.14); color: #7fb2f0; }
+.cl-status--ended { background: rgba(255,255,255,.07); color: var(--text-muted); }
+.cl-filter { margin: 0 0 16px; }
+.cl-filter button { display: inline-flex; align-items: center; gap: 6px; }
+.cl-filter__n { font-size: .7rem; opacity: .7; }
+.ana-inactive td { color: var(--text-muted); font-weight: 600; border-top: 1px dashed var(--line); }
+.ana-inactive .ana-nm__t { color: var(--text-secondary); }
+.ana-heat__group .lbl { color: var(--text-muted); font-style: italic; }
