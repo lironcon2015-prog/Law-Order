@@ -951,7 +951,7 @@ function reviewImportModal(result, srcFile) {
   });
 
   const body = el('div', { class: 'imp-review' }, [
-    el('p', { class: 'muted imp-summary', text: `זוהו ${result.candidates.length} חשבוניות בקובץ ${kindLabel} (${fileName}). כל שדה ניתן לעריכה. סכום ברירת המחדל = לפני מע״מ (בסיס העמלה).` + (needCase ? ` שורות של לקוח/תיק שאינו במערכת יוקמו אוטומטית לפי מספר התיק שזוהה.` : '') }),
+    el('p', { class: 'muted imp-summary', text: `זוהו ${result.candidates.length} חשבוניות בקובץ ${kindLabel} (${fileName}). כל שדה ניתן לעריכה. סכום ברירת המחדל = שכ״ט בלבד לפני מע״מ (בסיס העמלה) — הוצאות אינן נספרות.` + (needCase ? ` שורות של לקוח/תיק שאינו במערכת יוקמו אוטומטית לפי מספר התיק שזוהה.` : '') }),
     el('div', { class: 'fin-table-wrap fin-table-wrap--scroll' }, [
       el('table', { class: 'fin-table imp-table' }, [
         el('thead', {}, [el('tr', {}, ['', 'תיק / לקוח', 'חודש', 'שנה', 'סכום', 'עמלה %', 'הערה', 'סטטוס'].map((h) => el('th', { text: h })))]),

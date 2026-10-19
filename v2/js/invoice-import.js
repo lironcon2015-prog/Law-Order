@@ -323,6 +323,28 @@ function labeledAmount(lines, labelRe) {
   return null;
 }
 
+/**
+ * שכר הטרחה בלבד, לפני מע"מ — מתוך שורות הטבלה מסוג "שכ"ט"/"שכר טרחה".
+ * בחשבונית יש לעיתים גם שורות הוצאות (חייבות במע"מ, ובטבלה נפרדת — פטורות), וה"סה"כ חייב במע"מ"
+ * כולל אותן. שורת שכ"ט נראית כך: [כולל מע"מ] [מע"מ] [לפני מע"מ] שכ"ט — ולכן "לפני מע"מ" הוא
+ * הסכום השני בגודלו (הגדול = כולל מע"מ). כמה שורות שכ"ט (כמה תיקים) — נסכמות.
+ * מחזיר null כשאין שורת שכ"ט מזוהה (ואז נופלים לסה"כ לפני מע"מ).
+ */
+export function feeAmountFromRows(lines) {
+  let sum = 0, found = false;
+  for (const raw of lines) {
+    const line = normQuotes(raw);
+    if (!/שכ"ט|שכר\s*טרחה/.test(line)) continue;
+    if (/סה"כ|הוצאות|להלן/.test(line)) continue;
+    const nums = amountsInLine(line).sort((a, b) => b - a);
+    if (!nums.length) continue;
+    // [כולל, לפני, מע"מ] → לפני = השני. שכ"ט פטור (מע"מ 0 לא נקלט) → [כולל=לפני, לפני] → אותו ערך
+    sum += nums.length >= 2 ? nums[1] : nums[0];
+    found = true;
+  }
+  return found ? Math.round(sum * 100) / 100 : null;
+}
+
 /** הערך בשורת תווית, עם התווית מוסרת (לשדות טקסט: "שם לקוח:", "תאריך:") */
 function labeledText(lines, labelRe) {
   for (const line of lines) {
@@ -387,11 +409,17 @@ export function extractInvoiceFields(lines, ctx) {
   // סוג תיק (enum) — אם שם התיק הוא ערך מוכר; אחרת ברירת מחדל תיקבע ביצירה
   const caseType = ['שוטף', 'ליטיגציה', 'עסקה'].includes(caseName) ? caseName : null;
 
-  // סכומים — תווית-מונחה. ברירת המחדל לחיוב = לפני מע"מ (שכר הטרחה, בסיס העמלה)
+  // סכומים — תווית-מונחה. ברירת המחדל לחיוב = שכר הטרחה בלבד, לפני מע"מ (בסיס העמלה):
+  // שורות הוצאות (חייבות במע"מ או פטורות, גם בטבלה נפרדת) אינן שכ"ט ולכן אינן נספרות.
   const amountBeforeVat = labeledAmount(lines, /סה"כ\s*חייב\s*במע"מ|סכום\s*לפני\s*מע"מ|לפני\s*מע"מ/);
   const vat = labeledAmount(lines, /סה"כ\s*מע"מ|מע"מ\s*\)?\s*1[78]\s*%/);
   const amountTotal = labeledAmount(lines, /סה"כ\s*לתשלום|סה"כ\s*החשבון/);
-  let amount = amountBeforeVat != null ? amountBeforeVat : amountTotal;
+  const exempt = labeledAmount(lines, /סה"כ\s*פטור\s*ממע"מ/);
+  const feeAmount = feeAmountFromRows(lines);
+  // הוצאות שהוחרגו = כל מה שלפני מע"מ (חייב + פטור) פחות שכר הטרחה
+  const expenses = feeAmount != null && amountBeforeVat != null
+    ? Math.max(0, Math.round(((amountBeforeVat + (exempt || 0)) - feeAmount) * 100) / 100) : null;
+  let amount = feeAmount != null ? feeAmount : (amountBeforeVat != null ? amountBeforeVat : amountTotal);
   if (amount == null) {
     let max = 0;
     for (const line of lines) for (const n of amountsInLine(line)) if (n > max) max = n;
@@ -418,7 +446,7 @@ export function extractInvoiceFields(lines, ctx) {
 
   return {
     invoiceNo, date, clientName, externalClientId, caseNumber, caseName, caseType,
-    amountBeforeVat, vat, amountTotal, amount, clientMatch, matchedCase,
+    amountBeforeVat, vat, amountTotal, feeAmount, expenses, amount, clientMatch, matchedCase,
     _defaultYear: defaultYear,
   };
 }
@@ -469,6 +497,7 @@ export function extractCaseNumber(lines, clientId) {
 function fieldsToCandidate(f) {
   const notes = [];
   if (f.invoiceNo) notes.push(`חשבון ${f.invoiceNo}`);
+  if (f.expenses) notes.push(`שכ"ט בלבד — הוחרגו הוצאות ₪${f.expenses.toLocaleString('he-IL')}`);
   if (f.amountTotal != null && f.amountTotal !== f.amount) notes.push(`כולל מע"מ ₪${Math.round(f.amountTotal).toLocaleString('he-IL')}`);
   const hasClient = !!(f.clientMatch || (f.clientName && f.clientName.length > 1));
   return {
@@ -486,7 +515,7 @@ function fieldsToCandidate(f) {
     caseType: f.caseType || 'שוטף',
     notes: notes.join(' · '),
     invoiceNo: f.invoiceNo, externalClientId: f.externalClientId,
-    amountBeforeVat: f.amountBeforeVat, vat: f.vat, amountTotal: f.amountTotal,
+    amountBeforeVat: f.amountBeforeVat, vat: f.vat, amountTotal: f.amountTotal, feeAmount: f.feeAmount, expenses: f.expenses,
     confidence: f.matchedCase && f.date ? 'high' : (hasClient && f.date && f.amount != null ? 'medium' : 'low'),
   };
 }
