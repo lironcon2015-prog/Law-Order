@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LexLedger — Redesign</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="tokens.css" />
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <script src="../data.js"></script>
+
+  <style>
+    html, body { background: #ede9e0; }
+    body { font-family: 'Assistant', sans-serif; }
+    /* Tweak panel */
+    .tweaks-panel {
+      position: fixed; bottom: 20px; left: 20px; z-index: 500;
+      background: #fff; border: 1px solid #e5e2d8; border-radius: 14px;
+      padding: 14px 16px; box-shadow: 0 6px 24px rgba(0,0,0,0.12);
+      display: none; flex-direction: column; gap: 10px;
+      font-family: 'Assistant', sans-serif; min-width: 260px;
+    }
+    .tweaks-panel.on { display: flex; }
+    .tweaks-panel h3 { font-size: 13px; font-weight: 700; letter-spacing: -0.2px; margin: 0; }
+    .tweaks-panel .row { display: flex; flex-direction: column; gap: 5px; }
+    .tweaks-panel label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+    .tweaks-panel .swatches { display: flex; gap: 6px; flex-wrap: wrap; }
+    .tweaks-panel .sw {
+      width: 22px; height: 22px; border-radius: 6px; border: 2px solid transparent; cursor: pointer;
+      transition: transform 0.12s;
+    }
+    .tweaks-panel .sw:hover { transform: scale(1.08); }
+    .tweaks-panel .sw.on { border-color: #222; }
+    .tweaks-panel .seg {
+      display: inline-flex; border: 1px solid #e5e2d8; background: #faf9f6; border-radius: 8px; padding: 2px; gap: 2px;
+    }
+    .tweaks-panel .seg button {
+      padding: 5px 10px; font-size: 12px; border-radius: 6px; color: #666; font-weight: 500; background: none; border: none; cursor: pointer;
+    }
+    .tweaks-panel .seg button.on { background: #fff; color: #222; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <div class="tweaks-panel" id="tweaks-panel">
+    <h3>Tweaks</h3>
+    <div class="row">
+      <label>סגנון כרטיסיות KPI</label>
+      <div class="seg" id="tweak-kpi">
+        <button data-val="hero" class="on">Hero + קטנים</button>
+        <button data-val="minimal">מינימליות</button>
+      </div>
+    </div>
+    <div class="row">
+      <label>צבע מבטא</label>
+      <div class="swatches" id="tweak-accent">
+        <!-- populated by JS -->
+      </div>
+    </div>
+  </div>
+
+  <script src="components.jsx" type="text/babel"></script>
+  <script src="screens.jsx" type="text/babel"></script>
+  <script src="screens-2.jsx" type="text/babel"></script>
+
+  <script type="text/babel">
+    const ACCENTS = [
+      { id: 'indigo',  color: 'oklch(0.52 0.19 265)', soft: 'oklch(0.96 0.03 265)', border: 'oklch(0.88 0.06 265)', text: 'oklch(0.42 0.19 265)' },
+      { id: 'emerald', color: 'oklch(0.42 0.10 165)', soft: 'oklch(0.95 0.03 165)', border: 'oklch(0.85 0.06 165)', text: 'oklch(0.35 0.11 165)' },
+      { id: 'navy',    color: 'oklch(0.32 0.09 250)', soft: 'oklch(0.94 0.02 250)', border: 'oklch(0.86 0.05 250)', text: 'oklch(0.30 0.09 250)' },
+      { id: 'gold',    color: 'oklch(0.62 0.14 75)',  soft: 'oklch(0.96 0.04 75)',  border: 'oklch(0.88 0.07 75)',  text: 'oklch(0.45 0.13 75)' },
+      { id: 'plum',    color: 'oklch(0.45 0.14 330)', soft: 'oklch(0.95 0.03 330)', border: 'oklch(0.87 0.06 330)', text: 'oklch(0.38 0.14 330)' },
+      { id: 'graphite', color: 'oklch(0.28 0.02 250)', soft: 'oklch(0.95 0.005 250)', border: 'oklch(0.85 0.01 250)', text: 'oklch(0.25 0.02 250)' },
+    ];
+
+    const TWEAKS = /*EDITMODE-BEGIN*/{
+      "kpiStyle": "hero",
+      "accent": "indigo"
+    }/*EDITMODE-END*/;
+
+    function applyAccent(id) {
+      const a = ACCENTS.find((x) => x.id === id) || ACCENTS[0];
+      const root = document.documentElement.style;
+      document.querySelectorAll('[data-variation="A"]').forEach((el) => {
+        el.style.setProperty('--accent', a.color);
+        el.style.setProperty('--accent-soft', a.soft);
+        el.style.setProperty('--accent-border', a.border);
+        el.style.setProperty('--accent-text', a.text);
+      });
+    }
+
+    function App() {
+      const [kpiStyle, setKpiStyle] = React.useState(TWEAKS.kpiStyle);
+      const [accent, setAccent] = React.useState(TWEAKS.accent);
+
+      React.useEffect(() => { applyAccent(accent); }, [accent]);
+
+      // Build swatches
+      React.useEffect(() => {
+        const root = document.getElementById('tweak-accent');
+        if (!root) return;
+        root.innerHTML = '';
+        ACCENTS.forEach((a) => {
+          const b = document.createElement('button');
+          b.className = 'sw' + (a.id === accent ? ' on' : '');
+          b.style.background = a.color;
+          b.title = a.id;
+          b.onclick = () => {
+            setAccent(a.id);
+            window.parent.postMessage({type:'__edit_mode_set_keys', edits:{accent:a.id}}, '*');
+          };
+          root.appendChild(b);
+        });
+      }, [accent]);
+
+      React.useEffect(() => {
+        document.querySelectorAll('#tweak-kpi button').forEach((btn) => {
+          btn.classList.toggle('on', btn.dataset.val === kpiStyle);
+          btn.onclick = () => {
+            setKpiStyle(btn.dataset.val);
+            window.parent.postMessage({type:'__edit_mode_set_keys', edits:{kpiStyle:btn.dataset.val}}, '*');
+          };
+        });
+      }, [kpiStyle]);
+
+      return (
+        <DesignCanvas>
+          <DCSection id="dash" title="Dashboard" subtitle="סקירה שנתית — KPIs, גרף תזרים, דונאט לקוחות וטבלת פירוט">
+            <DCArtboard id="dashboard" label="Dashboard" width={1280} height={1500}>
+              <div data-variation="A" data-screen-label="01 Dashboard" className="theme-fintech">
+                <div className="app"><DashboardView kpiStyle={kpiStyle}/><Sidebar active="dashboard"/></div>
+              </div>
+            </DCArtboard>
+          </DCSection>
+
+          <DCSection id="clients" title="לקוחות ותיקים" subtitle="רשימה + סטטוס + stats inline">
+            <DCArtboard id="clients" label="Clients" width={1280} height={900}>
+              <div data-variation="A" data-screen-label="02 Clients" className="theme-fintech">
+                <div className="app"><ClientsView/><Sidebar active="clients"/></div>
+              </div>
+            </DCArtboard>
+          </DCSection>
+
+          <DCSection id="invoices" title="חשבוניות" subtitle="dropzone + טבלת היסטוריה">
+            <DCArtboard id="invoices" label="Invoices list" width={1280} height={950}>
+              <div data-variation="A" data-screen-label="03 Invoices" className="theme-fintech">
+                <div className="app"><InvoicesView/><Sidebar active="invoices"/></div>
+              </div>
+            </DCArtboard>
+            <DCArtboard id="pdfmodal" label="PDF extract modal" width={760} height={620}>
+              <div data-variation="A" data-screen-label="04 PDF modal" className="theme-fintech" style={{width:'100%',height:'100%'}}>
+                <PDFModal/>
+              </div>
+            </DCArtboard>
+          </DCSection>
+
+          <DCSection id="payments" title="תשלומים שהתקבלו" subtitle="summary strip + gap chart + table">
+            <DCArtboard id="payments" label="Payments" width={1280} height={1050}>
+              <div data-variation="A" data-screen-label="05 Payments" className="theme-fintech">
+                <div className="app"><PaymentsView/><Sidebar active="payments"/></div>
+              </div>
+            </DCArtboard>
+          </DCSection>
+
+          <DCSection id="import" title="ייבוא נתונים" subtitle="stepper + dropzone + הגדרת יתרת פתיחה">
+            <DCArtboard id="import" label="Import flow" width={1280} height={1000}>
+              <div data-variation="A" data-screen-label="06 Import" className="theme-fintech">
+                <div className="app"><ImportView/><Sidebar active="import"/></div>
+              </div>
+            </DCArtboard>
+          </DCSection>
+
+          <DCSection id="settings" title="הגדרות" subtitle="sub-nav צד + כרטיסי תצורה">
+            <DCArtboard id="settings" label="Settings" width={1280} height={800}>
+              <div data-variation="A" data-screen-label="07 Settings" className="theme-fintech">
+                <div className="app"><SettingsView/><Sidebar active="settings"/></div>
+              </div>
+            </DCArtboard>
+          </DCSection>
+        </DesignCanvas>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+
+    // Tweaks host bridge
+    window.addEventListener('message', (e) => {
+      if (!e.data || typeof e.data !== 'object') return;
+      if (e.data.type === '__activate_edit_mode') document.getElementById('tweaks-panel').classList.add('on');
+      if (e.data.type === '__deactivate_edit_mode') document.getElementById('tweaks-panel').classList.remove('on');
+    });
+    window.parent.postMessage({type:'__edit_mode_available'}, '*');
+  </script>
+
+  <script src="design-canvas.jsx" type="text/babel"></script>
+</body>
+</html>

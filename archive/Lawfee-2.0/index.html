@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="he">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<meta name="theme-color" content="#131315"/>
+<title>LexLedger — ניהול שכר טרחה</title>
+<!-- App icon (inline SVG, works offline too) -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIiB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiI+CiAgPGRlZnM+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImJnIiB4MT0iMCIgeTE9IjAiIHgyPSIwIiB5Mj0iMSI+CiAgICAgIDxzdG9wIG9mZnNldD0iMCIgc3RvcC1jb2xvcj0iIzIwMjAyNCIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiMwZDBkMGYiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImdvbGQiIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjZjlkZTc2Ii8+CiAgICAgIDxzdG9wIG9mZnNldD0iMC41IiBzdG9wLWNvbG9yPSIjZjJjYTUwIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iI2Q5YTcyZiIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICA8L2RlZnM+CiAgPHJlY3QgeD0iMjAiIHk9IjIwIiB3aWR0aD0iNDcyIiBoZWlnaHQ9IjQ3MiIgcng9IjEwOCIgZmlsbD0idXJsKCNiZykiCiAgICAgICAgc3Ryb2tlPSIjZjJjYTUwIiBzdHJva2Utb3BhY2l0eT0iMC4zMCIgc3Ryb2tlLXdpZHRoPSI2Ii8+CiAgPGcgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ1cmwoI2dvbGQpIiBzdHJva2Utd2lkdGg9IjE1IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPgogICAgPGNpcmNsZSBjeD0iMjU2IiBjeT0iMTMwIiByPSIxNCIgZmlsbD0idXJsKCNnb2xkKSIgc3Ryb2tlPSJub25lIi8+CiAgICA8bGluZSB4MT0iMjU2IiB5MT0iMTQ0IiB4Mj0iMjU2IiB5Mj0iMzg4Ii8+CiAgICA8bGluZSB4MT0iMTUwIiB5MT0iMTYyIiB4Mj0iMzYyIiB5Mj0iMTYyIi8+CiAgICA8bGluZSB4MT0iMTUwIiB5MT0iMTYyIiB4Mj0iMTA0IiB5Mj0iMjQ4Ii8+CiAgICA8bGluZSB4MT0iMTUwIiB5MT0iMTYyIiB4Mj0iMTk2IiB5Mj0iMjQ4Ii8+CiAgICA8bGluZSB4MT0iMzYyIiB5MT0iMTYyIiB4Mj0iMzE2IiB5Mj0iMjQ4Ii8+CiAgICA8bGluZSB4MT0iMzYyIiB5MT0iMTYyIiB4Mj0iNDA4IiB5Mj0iMjQ4Ii8+CiAgICA8cGF0aCBkPSJNMTA0IDI0OCBBNTIgNTIgMCAwIDAgMTk2IDI0OCIvPgogICAgPHBhdGggZD0iTTMxNiAyNDggQTUyIDUyIDAgMCAwIDQwOCAyNDgiLz4KICAgIDxsaW5lIHgxPSIxOTgiIHkxPSIzOTIiIHgyPSIzMTQiIHkyPSIzOTIiLz4KICA8L2c+Cjwvc3ZnPgo="/>
+<link rel="apple-touch-icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIiB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiI+CiAgPGRlZnM+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImJnIiB4MT0iMCIgeTE9IjAiIHgyPSIwIiB5Mj0iMSI+CiAgICAgIDxzdG9wIG9mZnNldD0iMCIgc3RvcC1jb2xvcj0iIzIwMjAyNCIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiMwZDBkMGYiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImdvbGQiIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjZjlkZTc2Ii8+CiAgICAgIDxzdG9wIG9mZnNldD0iMC41IiBzdG9wLWNvbG9yPSIjZjJjYTUwIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iI2Q5YTcyZiIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICA8L2RlZnM+CiAgPHJlY3QgeD0iMjAiIHk9IjIwIiB3aWR0aD0iNDcyIiBoZWlnaHQ9IjQ3MiIgcng9IjEwOCIgZmlsbD0idXJsKCNiZykiCiAgICAgICAgc3Ryb2tlPSIjZjJjYTUwIiBzdHJva2Utb3BhY2l0eT0iMC4zMCIgc3Ryb2tlLXdpZHRoPSI2Ii8+CiAgPGcgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ1cmwoI2dvbGQpIiBzdHJva2Utd2lkdGg9IjE1IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPgogICAgPGNpcmNsZSBjeD0iMjU2IiBjeT0iMTMwIiByPSIxNCIgZmlsbD0idXJsKCNnb2xkKSIgc3Ryb2tlPSJub25lIi8+CiAgICA8bGluZSB4MT0iMjU2IiB5MT0iMTQ0IiB4Mj0iMjU2IiB5Mj0iMzg4Ii8+CiAgICA8bGluZSB4MT0iMTUwIiB5MT0iMTYyIiB4Mj0iMzYyIiB5Mj0iMTYyIi8+CiAgICA8bGluZSB4MT0iMTUwIiB5MT0iMTYyIiB4Mj0iMTA0IiB5Mj0iMjQ4Ii8+CiAgICA8bGluZSB4MT0iMTUwIiB5MT0iMTYyIiB4Mj0iMTk2IiB5Mj0iMjQ4Ii8+CiAgICA8bGluZSB4MT0iMzYyIiB5MT0iMTYyIiB4Mj0iMzE2IiB5Mj0iMjQ4Ii8+CiAgICA8bGluZSB4MT0iMzYyIiB5MT0iMTYyIiB4Mj0iNDA4IiB5Mj0iMjQ4Ii8+CiAgICA8cGF0aCBkPSJNMTA0IDI0OCBBNTIgNTIgMCAwIDAgMTk2IDI0OCIvPgogICAgPHBhdGggZD0iTTMxNiAyNDggQTUyIDUyIDAgMCAwIDQwOCAyNDgiLz4KICAgIDxsaW5lIHgxPSIxOTgiIHkxPSIzOTIiIHgyPSIzMTQiIHkyPSIzOTIiLz4KICA8L2c+Cjwvc3ZnPgo="/>
+<!-- Fonts (local) -->
+<link rel="stylesheet" href="vendor/lib/fonts.css"/>
+<!-- Tailwind (local, pre-built) -->
+<link rel="stylesheet" href="vendor/lib/tailwind.css"/>
+<!-- App styles -->
+<link rel="stylesheet" href="style.css" />
+<!-- Google Identity Services (remote — required for Drive OAuth; auto-skips on file://) -->
+<script src="https://accounts.google.com/gsi/client" async defer onerror="window.__gisFailed=true"></script>
+<!-- External Libraries (local) -->
+<script src="vendor/lib/xlsx.full.min.js"></script>
+<script src="vendor/lib/pdf.min.js"></script>
+<script>
+    if (typeof pdfjsLib !== 'undefined') {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/lib/pdf.worker.min.js';
+    }
+  </script>
+<style>
+    /* Material icons — thin weight globally */
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 200, 'GRAD' 0, 'opsz' 24;
+    }
+    .hidden { display: none !important; }
+    .view { animation: fadeIn 0.45s cubic-bezier(0.16, 1, 0.3, 1); }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body class="bg-background text-gray-200 font-sans antialiased flex h-screen overflow-hidden selection:bg-primary/20 selection:text-primary">
+<script>window._BUNDLE_VERSION = '3.3.3';</script>
+
+<!-- AMBIENT BACKGROUND GLOWS -->
+<div class="fixed inset-0 z-0 pointer-events-none">
+  <div class="absolute top-0 right-0 w-[800px] h-[800px] bg-primary/5 rounded-full blur-[120px] opacity-50 transform translate-x-1/3 -translate-y-1/3"></div>
+  <div class="absolute bottom-0 left-0 w-[600px] h-[600px] bg-surface-bright/20 rounded-full blur-[100px] opacity-30 transform -translate-x-1/3 translate-y-1/3"></div>
+</div>
+
+<div class="flex h-screen overflow-hidden w-full relative z-10" id="app">
+
+<!-- SIDEBAR — Floating Glassmorphism -->
+<aside class="z-40 bg-surface-container-low/30 backdrop-blur-2xl flex flex-col p-6 space-y-6 h-auto fixed top-6 right-6 bottom-6 w-72 rounded-2xl border-[0.5px] border-gray-600/20 shadow-[0_40px_60px_-15px_rgba(0,0,0,0.5)]" id="sidebar">
+  <!-- Brand -->
+  <div class="flex items-center gap-3 pb-4 border-b border-gray-600/15">
+    <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-primary/10 border border-primary/30 shadow-[0_0_20px_rgba(242,202,80,0.2)]">
+      <span class="material-symbols-outlined text-primary" style="font-size:20px;font-variation-settings:'FILL' 1,'wght' 400,'GRAD' 0,'opsz' 20;">balance</span>
+    </div>
+    <div>
+      <div class="font-semibold text-white tracking-tight" style="font-size:1.05rem;letter-spacing:-0.02em;">LexLedger</div>
+      <div class="text-[10px] font-medium tracking-[0.2em] uppercase text-primary/80">ניהול שכר טרחה</div>
+    </div>
+  </div>
+
+  <!-- Nav -->
+  <nav class="flex-1 overflow-y-auto -mx-2 px-2" id="sidebar-nav">
+    <div class="mb-2 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-gray-500">ניווט</div>
+    <a class="nav-item flex items-center gap-3 px-4 py-2.5 mb-1 rounded-xl text-sm font-medium transition-all duration-200 text-gray-400 hover:text-white hover:bg-surface-container-high/30" data-view="dashboard" href="#dashboard">
+      <span class="material-symbols-outlined" style="font-size:18px;">dashboard</span>
+      <span class="nav-label">לוח בקרה</span>
+    </a>
+    <a class="nav-item flex items-center gap-3 px-4 py-2.5 mb-1 rounded-xl text-sm font-medium transition-all duration-200 text-gray-400 hover:text-white hover:bg-surface-container-high/30" data-view="clients" href="#clients">
+      <span class="material-symbols-outlined" style="font-size:18px;">group</span>
+      <span class="nav-label">לקוחות ותיקים</span>
+    </a>
+    <a class="nav-item flex items-center gap-3 px-4 py-2.5 mb-1 rounded-xl text-sm font-medium transition-all duration-200 text-gray-400 hover:text-white hover:bg-surface-container-high/30" data-view="invoices" href="#invoices">
+      <span class="material-symbols-outlined" style="font-size:18px;">receipt_long</span>
+      <span class="nav-label">חשבוניות</span>
+    </a>
+    <a class="nav-item flex items-center gap-3 px-4 py-2.5 mb-1 rounded-xl text-sm font-medium transition-all duration-200 text-gray-400 hover:text-white hover:bg-surface-container-high/30" data-view="payments" href="#payments">
+      <span class="material-symbols-outlined" style="font-size:18px;">payments</span>
+      <span class="nav-label">תשלומים</span>
+    </a>
+    <a class="nav-item flex items-center gap-3 px-4 py-2.5 mb-1 rounded-xl text-sm font-medium transition-all duration-200 text-gray-400 hover:text-white hover:bg-surface-container-high/30" data-view="import" href="#import">
+      <span class="material-symbols-outlined" style="font-size:18px;">upload_file</span>
+      <span class="nav-label">ייבוא נתונים</span>
+    </a>
+    <div class="my-3 border-t border-gray-600/15"></div>
+    <a class="nav-item flex items-center gap-3 px-4 py-2.5 mb-1 rounded-xl text-sm font-medium transition-all duration-200 text-gray-400 hover:text-white hover:bg-surface-container-high/30" data-view="settings" href="#settings">
+      <span class="material-symbols-outlined" style="font-size:18px;">settings</span>
+      <span class="nav-label">הגדרות</span>
+    </a>
+  </nav>
+
+  <!-- Footer: backup -->
+  <div class="pt-4 border-t border-gray-600/15 space-y-1.5">
+    <button class="flex items-center justify-center w-full gap-2 px-3 py-2 text-xs font-medium rounded-xl transition-all duration-200 text-gray-300 bg-surface-container-high/40 border border-gray-600/15 hover:bg-surface-container-high/60 hover:text-white" id="btn-export-backup" title="גיבוי JSON מלא">
+      <span class="material-symbols-outlined" style="font-size:15px;">download</span> גיבוי נתונים
+    </button>
+    <button class="flex items-center justify-center w-full gap-2 px-3 py-2 text-xs font-medium rounded-xl transition-all duration-200 text-gray-300 bg-surface-container-high/40 border border-gray-600/15 hover:bg-surface-container-high/60 hover:text-white" id="btn-import-backup" title="שחזור מגיבוי JSON">
+      <span class="material-symbols-outlined" style="font-size:15px;">upload</span> שחזור נתונים
+    </button>
+    <input accept=".json" class="hidden" id="input-restore-file" type="file"/>
+    <div class="my-2 border-t border-gray-600/10"></div>
+    <div id="drive-status-sidebar" class="text-[10px] text-center font-medium py-1 text-gray-500">○ לא מחובר</div>
+    <button class="flex items-center justify-center w-full gap-2 px-3 py-2 text-xs font-medium rounded-xl transition-all duration-200 text-gray-300 bg-surface-container-high/40 border border-gray-600/15 hover:bg-surface-container-high/60 hover:text-white" id="btn-drive-backup" title="גיבוי ל-Google Drive">
+      <span class="material-symbols-outlined" style="font-size:15px;">cloud_upload</span> גיבוי לדרייב
+    </button>
+    <button class="flex items-center justify-center w-full gap-2 px-3 py-2 text-xs font-medium rounded-xl transition-all duration-200 text-gray-300 bg-surface-container-high/40 border border-gray-600/15 hover:bg-surface-container-high/60 hover:text-white" id="btn-drive-restore" title="שחזור מ-Google Drive">
+      <span class="material-symbols-outlined" style="font-size:15px;">cloud_download</span> שחזור מדרייב
+    </button>
+    <button class="hidden flex items-center justify-center w-full gap-2 px-3 py-2 mt-1 text-xs font-medium rounded-xl transition-all" id="drive-disconnect-sidebar" style="color:#FCA5A5;background:rgba(220,38,38,0.08);border:1px solid rgba(220,38,38,0.25);">
+      <span class="material-symbols-outlined" style="font-size:15px;">logout</span> התנתק מדרייב
+    </button>
+  </div>
+</aside>
+
+<!-- MOBILE BOTTOM NAV -->
+<nav class="fixed bottom-0 right-0 left-0 z-50 flex md:hidden h-[64px] bg-surface-container-low/70 backdrop-blur-2xl border-t border-gray-600/20" id="mobile-nav">
+  <a class="nav-item mobile-nav-item flex-1 flex flex-col items-center justify-center gap-0.5 transition-colors h-full text-gray-500" data-view="dashboard" href="#dashboard" style="font-size:10px;">
+    <span class="material-symbols-outlined" style="font-size:20px;">dashboard</span>
+    <span>בקרה</span>
+  </a>
+  <a class="nav-item mobile-nav-item flex-1 flex flex-col items-center justify-center gap-0.5 transition-colors h-full text-gray-500" data-view="clients" href="#clients" style="font-size:10px;">
+    <span class="material-symbols-outlined" style="font-size:20px;">group</span>
+    <span>לקוחות</span>
+  </a>
+  <a class="nav-item mobile-nav-item flex-1 flex flex-col items-center justify-center gap-0.5 transition-colors h-full text-gray-500" data-view="invoices" href="#invoices" style="font-size:10px;">
+    <span class="material-symbols-outlined" style="font-size:20px;">receipt_long</span>
+    <span>חשבוניות</span>
+  </a>
+  <a class="nav-item mobile-nav-item flex-1 flex flex-col items-center justify-center gap-0.5 transition-colors h-full text-gray-500" data-view="payments" href="#payments" style="font-size:10px;">
+    <span class="material-symbols-outlined" style="font-size:20px;">payments</span>
+    <span>תשלומים</span>
+  </a>
+  <a class="nav-item mobile-nav-item flex-1 flex flex-col items-center justify-center gap-0.5 transition-colors h-full text-gray-500" data-view="import" href="#import" style="font-size:10px;">
+    <span class="material-symbols-outlined" style="font-size:20px;">upload_file</span>
+    <span>ייבוא</span>
+  </a>
+  <a class="nav-item mobile-nav-item flex-1 flex flex-col items-center justify-center gap-0.5 transition-colors h-full text-gray-500" data-view="settings" href="#settings" style="font-size:10px;">
+    <span class="material-symbols-outlined" style="font-size:20px;">settings</span>
+    <span>הגדרות</span>
+  </a>
+</nav>
+
+<!-- MAIN CONTENT -->
+<main class="flex-1 overflow-y-auto p-4 md:p-8 pb-24 md:pb-8 md:mr-[19.5rem] relative z-10" id="main-content">
+
+<!-- ── VIEW: DASHBOARD ── -->
+<section class="view max-w-7xl mx-auto space-y-5 relative z-10" id="view-dashboard">
+  <!-- Header -->
+  <header class="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-2">
+    <div>
+      <h1 class="font-semibold text-white tracking-tight" style="font-size:1.7rem;letter-spacing:-0.03em;">לוח בקרה</h1>
+      <p class="text-gray-500 mt-1 text-sm">סיכום ביצועים שנתי</p>
+    </div>
+    <div class="flex items-center gap-2 bg-surface-container-high/40 backdrop-blur-3xl border border-gray-600/15 rounded-full px-4 py-2 shadow-[0_8px_32px_rgba(0,0,0,0.2)]">
+      <span class="material-symbols-outlined text-primary/70" style="font-size:16px;">calendar_today</span>
+      <label class="text-xs font-medium text-gray-400">שנה</label>
+      <select class="bg-transparent text-sm font-semibold text-white focus:outline-none focus:ring-0 cursor-pointer border-0 py-0 pr-1 pl-5" id="dashboard-year" style="font-family:'Inter',sans-serif;"></select>
+    </div>
+  </header>
+
+  <!-- Bento KPI row -->
+  <div class="grid grid-cols-1 lg:grid-cols-5 gap-4">
+    <!-- Hero balance card -->
+    <div class="lg:col-span-2 relative overflow-hidden flex flex-col justify-between rounded-2xl border border-primary/20 bg-gradient-to-br from-surface-container-high/60 via-surface-container/60 to-background/60 backdrop-blur-3xl shadow-[0_8px_40px_rgba(242,202,80,0.08)]" style="min-height:220px;padding:32px 36px;">
+      <div class="absolute inset-0 pointer-events-none" style="background:radial-gradient(ellipse at 80% 0%, rgba(242,202,80,0.18) 0%, transparent 60%);"></div>
+      <div class="absolute pointer-events-none" style="bottom:-40px;left:-40px;width:220px;height:220px;border-radius:50%;border:1px solid rgba(242,202,80,0.06);"></div>
+      <div class="absolute pointer-events-none" style="bottom:-90px;left:-90px;width:340px;height:340px;border-radius:50%;border:1px solid rgba(242,202,80,0.04);"></div>
+      <div class="relative z-10">
+        <div class="flex items-center justify-between mb-8">
+          <div class="text-[0.6rem] font-semibold tracking-[0.22em] uppercase text-gray-400">יתרה לתשלום</div>
+          <div class="text-[0.6rem] font-medium tracking-[0.08em] uppercase text-primary/40">LEXLEDGER</div>
+        </div>
+        <div class="flex items-baseline gap-3 mb-3">
+          <span id="kpi-balance" class="font-num tabular-nums text-white" style="font-size:3.8rem;font-weight:300;letter-spacing:-0.05em;line-height:1;">—</span>
+          <span class="font-num text-primary/50" style="font-size:1.4rem;font-weight:200;letter-spacing:-0.02em;">₪</span>
+        </div>
+        <div class="font-num tabular-nums text-gray-500" style="font-size:0.72rem;direction:ltr;text-align:right;letter-spacing:0.03em;" id="hero-meta">—</div>
+      </div>
+    </div>
+
+    <!-- 4 mini KPIs -->
+    <div class="lg:col-span-3 grid grid-cols-2 gap-4">
+      <div class="bg-surface-container-high/40 backdrop-blur-3xl border border-gray-600/10 rounded-2xl flex flex-col justify-between shadow-[0_8px_32px_rgba(0,0,0,0.2)] hover:border-gray-600/20 transition-colors" style="padding:24px 28px;">
+        <div class="mb-5 text-[0.6rem] font-semibold tracking-[0.15em] uppercase text-gray-500">יתרת פתיחה</div>
+        <div class="flex items-baseline gap-2">
+          <span id="kpi-opening" class="font-num tabular-nums text-white" style="font-size:1.8rem;font-weight:400;letter-spacing:-0.04em;">—</span>
+          <span class="font-num text-gray-500" style="font-size:0.85rem;font-weight:300;">₪</span>
+        </div>
+      </div>
+      <div class="bg-surface-container-high/40 backdrop-blur-3xl border border-gray-600/10 rounded-2xl flex flex-col justify-between shadow-[0_8px_32px_rgba(0,0,0,0.2)] hover:border-gray-600/20 transition-colors" style="padding:24px 28px;">
+        <div class="mb-5 text-[0.6rem] font-semibold tracking-[0.15em] uppercase text-gray-500">הכנסה כוללת</div>
+        <div class="flex items-baseline gap-2">
+          <span id="kpi-revenue" class="font-num tabular-nums text-white" style="font-size:1.8rem;font-weight:400;letter-spacing:-0.04em;">—</span>
+          <span class="font-num text-gray-500" style="font-size:0.85rem;font-weight:300;">₪</span>
+        </div>
+      </div>
+      <div class="bg-surface-container-high/40 backdrop-blur-3xl border border-primary/15 rounded-2xl flex flex-col justify-between shadow-[0_8px_32px_rgba(242,202,80,0.06)] hover:border-primary/30 transition-colors" style="padding:24px 28px;">
+        <div class="mb-5 text-[0.6rem] font-semibold tracking-[0.15em] uppercase text-primary/80">עמלות שנצברו</div>
+        <div class="flex items-baseline gap-2">
+          <span id="kpi-commissions" class="font-num tabular-nums text-primary" style="font-size:1.8rem;font-weight:400;letter-spacing:-0.04em;">—</span>
+          <span class="font-num text-primary/50" style="font-size:0.85rem;font-weight:300;">₪</span>
+        </div>
+      </div>
+      <div class="bg-surface-container-high/40 backdrop-blur-3xl border border-gray-600/10 rounded-2xl flex flex-col justify-between shadow-[0_8px_32px_rgba(0,0,0,0.2)] hover:border-gray-600/20 transition-colors" style="padding:24px 28px;">
+        <div class="mb-5 text-[0.6rem] font-semibold tracking-[0.15em] uppercase text-gray-500">תשלומים שהתקבלו</div>
+        <div class="flex items-baseline gap-2">
+          <span id="kpi-payments" class="font-num tabular-nums text-emerald-400" style="font-size:1.8rem;font-weight:400;letter-spacing:-0.04em;">—</span>
+          <span class="font-num text-gray-500" style="font-size:0.85rem;font-weight:300;">₪</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Charts row -->
+  <div class="grid grid-cols-1 lg:grid-cols-5 gap-4">
+    <div class="lg:col-span-3 flex flex-col bg-surface-container-high/40 backdrop-blur-3xl border border-gray-600/10 rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.2)] p-6 md:p-8" style="min-height:280px;">
+      <div class="flex items-center justify-between mb-6">
+        <h2 class="text-[0.78rem] font-semibold tracking-[0.12em] uppercase text-gray-400">תזרים חודשי</h2>
+        <div class="flex gap-4 text-[0.62rem] font-semibold tracking-[0.1em] uppercase">
+          <span class="flex items-center gap-1.5 text-gray-500"><span style="display:inline-block;width:16px;height:2px;background:#f2ca50;border-radius:1px;"></span>הכנסות</span>
+          <span class="flex items-center gap-1.5 text-gray-500"><span style="display:inline-block;width:16px;height:2px;background:#86dfff;border-radius:1px;"></span>עמלות</span>
+        </div>
+      </div>
+      <div class="flex-1 w-full relative flex flex-col justify-end" id="monthly-chart"></div>
+    </div>
+
+    <div class="lg:col-span-2 flex flex-col bg-surface-container-high/40 backdrop-blur-3xl border border-gray-600/10 rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.2)] p-6 md:p-8" style="min-height:280px;">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-[0.7rem] font-semibold tracking-[0.12em] uppercase text-gray-400" id="donut-title">פילוח עמלות לפי לקוח</h2>
+        <button class="px-3 py-1 text-xs font-semibold rounded-full transition-colors text-primary bg-primary/10 border border-primary/20 hover:bg-primary/20" id="toggle-donut-metric">הצג הכנסות</button>
+      </div>
+      <div class="flex-1 w-full flex flex-col sm:flex-row items-center justify-center gap-6 mt-2" id="client-donut"></div>
+    </div>
+  </div>
+
+  <!-- Monthly Breakdown Table -->
+  <div class="bg-surface-container-low/50 backdrop-blur-2xl rounded-2xl border border-gray-600/15 overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.2)]">
+    <div class="px-6 py-4 flex items-center justify-between border-b border-gray-600/10">
+      <h2 class="text-[0.7rem] font-semibold tracking-[0.12em] uppercase text-gray-400">פירוט חודשי</h2>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm text-right data-table" id="monthly-table">
+        <thead>
+          <tr>
+            <th>חודש</th>
+            <th class="num">הכנסות</th>
+            <th class="num">עמלה</th>
+            <th class="num">תשלומים</th>
+            <th class="num">יתרה מצטברת</th>
+          </tr>
+        </thead>
+        <tbody id="monthly-tbody">
+          <tr><td class="empty-state" colspan="5">טוען נתונים…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Per-Client Table -->
+  <div class="bg-surface-container-low/50 backdrop-blur-2xl rounded-2xl border border-gray-600/15 overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.2)]">
+    <div class="px-6 py-4 flex items-center justify-between border-b border-gray-600/10">
+      <h2 class="text-[0.7rem] font-semibold tracking-[0.12em] uppercase text-gray-400">פירוט לפי לקוח</h2>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-right text-sm data-table" id="client-breakdown-table">
+        <thead>
+          <tr>
+            <th>לקוח</th>
+            <th>תיק</th>
+            <th class="num">% עמלה</th>
+            <th class="num">סך הכנסות</th>
+            <th class="num">סך עמלות</th>
+            <th class="text-center">סטטוס</th>
+          </tr>
+        </thead>
+        <tbody id="client-breakdown-tbody">
+          <tr><td class="empty-state" colspan="6">טוען נתונים…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Per-Client Monthly Table -->
+  <div class="bg-surface-container-low/50 backdrop-blur-2xl rounded-2xl border border-gray-600/15 overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.2)]">
+    <div class="px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-600/10">
+      <h2 class="text-[0.7rem] font-semibold tracking-[0.12em] uppercase text-gray-400">הכנסות ועמלות לפי לקוח וחודש</h2>
+      <button class="px-3 py-1.5 text-xs font-semibold rounded-full transition-colors self-start sm:self-auto text-primary bg-primary/10 border border-primary/20 hover:bg-primary/20" id="toggle-client-monthly-metric">הצג הכנסות</button>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm text-right data-table min-w-[900px]" id="client-monthly-table">
+        <thead id="client-monthly-thead"></thead>
+        <tbody id="client-monthly-tbody">
+          <tr><td class="empty-state" colspan="14">טוען נתונים…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ── VIEW: CLIENTS ── -->
+<section class="view hidden max-w-6xl mx-auto space-y-5 relative z-10" id="view-clients">
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div>
+      <h1 class="font-semibold text-white tracking-tight" style="font-size:1.7rem;letter-spacing:-0.03em;">לקוחות ותיקים</h1>
+      <p class="text-gray-500 mt-1 text-sm">ניהול לקוחות ותיקים משויכים</p>
+    </div>
+    <button class="btn-primary flex items-center gap-2" id="btn-add-client">
+      <span class="material-symbols-outlined" style="font-size:18px;">add</span> לקוח חדש
+    </button>
+  </div>
+  <div class="bg-surface-container-high/40 backdrop-blur-3xl border border-gray-600/10 rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.2)] p-4 flex flex-col md:flex-row gap-3">
+    <div class="relative flex-1">
+      <div class="absolute inset-y-0 right-3 flex items-center pointer-events-none">
+        <span class="material-symbols-outlined text-gray-500" style="font-size:18px;">search</span>
+      </div>
+      <input id="clients-search" type="text" placeholder="חפש לקוחות, תיקים או נושאים..."
+        class="block w-full pr-10 pl-4 py-2.5 rounded-full text-sm bg-surface-container/60 border border-gray-600/15 text-gray-100 placeholder-gray-500 focus:outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all" style="font-family:'Assistant',sans-serif;" />
+    </div>
+    <button id="btn-merge-clients" onclick="Clients.openMergeModal()"
+      class="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold text-gray-300 transition-colors bg-surface-container/60 border border-gray-600/15 hover:bg-surface-container-high/60 hover:text-white">
+      <span class="material-symbols-outlined" style="font-size:16px;">merge</span> מיזוג לקוחות
+    </button>
+  </div>
+  <div class="space-y-3" id="clients-list"></div>
+</section>
+
+<!-- ── VIEW: INVOICES ── -->
+<section class="view hidden max-w-6xl mx-auto space-y-5 relative z-10" id="view-invoices">
+  <header class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div>
+      <h1 class="font-semibold text-white tracking-tight" style="font-size:1.7rem;letter-spacing:-0.03em;">חשבוניות</h1>
+      <p class="text-gray-500 mt-1 text-sm">הזנה ידנית, קריאת PDF וצפייה בהיסטוריה</p>
+    </div>
+    <div class="flex flex-wrap items-center gap-2 bg-surface-container-high/40 backdrop-blur-3xl border border-gray-600/15 rounded-full p-2 shadow-[0_8px_32px_rgba(0,0,0,0.2)]">
+      <select class="rounded-full text-sm font-medium py-2 px-4 bg-surface-container/60 border border-gray-600/15 text-gray-200 focus:outline-none cursor-pointer" id="invoice-filter-year" style="font-family:'Inter',sans-serif;"></select>
+      <select class="rounded-full text-sm font-medium py-2 px-4 bg-surface-container/60 border border-gray-600/15 text-gray-200 focus:outline-none cursor-pointer w-44" id="invoice-filter-client">
+        <option value="">כל הלקוחות</option>
+      </select>
+      <button class="btn-primary flex items-center gap-2" id="btn-add-invoice">
+        <span class="material-symbols-outlined" style="font-size:16px;">add</span> חשבונית ידנית
+      </button>
+    </div>
+  </header>
+  <div class="pdf-dropzone w-full cursor-pointer group rounded-2xl bg-primary/5 border-2 border-dashed border-primary/40 hover:border-primary/60 hover:bg-primary/10 transition-all" id="pdf-dropzone">
+    <div class="p-10 text-center flex flex-col items-center justify-center">
+      <div class="w-14 h-14 rounded-2xl flex items-center justify-center mb-4 group-hover:scale-105 transition-transform duration-200 bg-primary/10 border border-primary/30 shadow-[0_0_20px_rgba(242,202,80,0.15)]">
+        <span class="material-symbols-outlined text-primary" style="font-size:26px;">picture_as_pdf</span>
+      </div>
+      <p class="font-semibold text-gray-100 mb-1" style="font-size:0.95rem;">גרור קובץ PDF לחילוץ אוטומטי</p>
+      <p class="text-gray-500 text-sm">או <label class="font-semibold cursor-pointer underline underline-offset-4 text-primary hover:text-primary/80" for="input-pdf-file">לחץ לבחור קובץ</label></p>
+      <input accept=".pdf" class="hidden" id="input-pdf-file" type="file"/>
+    </div>
+  </div>
+  <div class="bg-surface-container-low/50 backdrop-blur-2xl rounded-2xl border border-gray-600/15 overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.2)]">
+    <div class="px-6 py-4 flex items-center justify-between border-b border-gray-600/10">
+      <h2 class="text-[0.7rem] font-semibold tracking-[0.12em] uppercase text-gray-400">היסטוריית חשבוניות</h2>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm text-right data-table" id="invoices-table">
+        <thead>
+          <tr>
+            <th>לקוח</th>
+            <th>תיק</th>
+            <th>חודש</th>
+            <th>שנה</th>
+            <th class="num">סכום</th>
+            <th class="num">% עמלה</th>
+            <th class="num">עמלה</th>
+            <th>מקור</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="invoices-tbody">
+          <tr><td class="empty-state" colspan="9">אין חשבוניות להצגה</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ── VIEW: PAYMENTS ── -->
+<section class="view hidden max-w-5xl mx-auto space-y-5 relative z-10" id="view-payments">
+  <header class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div>
+      <h1 class="font-semibold text-white tracking-tight" style="font-size:1.7rem;letter-spacing:-0.03em;">תשלומים שהתקבלו</h1>
+      <p class="text-gray-500 mt-1 text-sm">רישום תשלומים בפועל</p>
+    </div>
+    <div class="flex items-center gap-2 bg-surface-container-high/40 backdrop-blur-3xl border border-gray-600/15 rounded-full p-2 shadow-[0_8px_32px_rgba(0,0,0,0.2)]">
+      <select class="rounded-full text-sm font-medium py-2 px-4 bg-surface-container/60 border border-gray-600/15 text-gray-200 focus:outline-none cursor-pointer" id="payments-filter-year" style="font-family:'Inter',sans-serif;"></select>
+      <button class="btn-primary flex items-center gap-2" id="btn-add-payment">
+        <span class="material-symbols-outlined" style="font-size:16px;">add</span> תשלום חדש
+      </button>
+    </div>
+  </header>
+  <div class="bg-surface-container-low/50 backdrop-blur-2xl rounded-2xl border border-gray-600/15 overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.2)]">
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm text-right data-table" id="payments-table">
+        <thead>
+          <tr>
+            <th>חודש</th>
+            <th>שנה</th>
+            <th class="num">סכום</th>
+            <th>הערות</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="payments-tbody">
+          <tr><td class="empty-state" colspan="5">אין תשלומים רשומים</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ── VIEW: IMPORT ── -->
+<section class="view hidden max-w-3xl mx-auto space-y-5 relative z-10" id="view-import">
+  <header>
+    <h1 class="font-semibold text-white tracking-tight" style="font-size:1.7rem;letter-spacing:-0.03em;">ייבוא נתונים</h1>
+    <p class="text-gray-500 mt-1 text-sm">טעינת קובץ Excel ראשוני והגדרות מערכת</p>
+  </header>
+  <div class="space-y-4">
+    <!-- Step 1 -->
+    <div class="bg-surface-container-high/40 backdrop-blur-3xl border border-gray-600/10 rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.2)] p-7">
+      <div class="flex items-center gap-3 mb-5">
+        <span class="flex items-center justify-center w-8 h-8 rounded-xl text-black text-xs font-bold flex-shrink-0 bg-primary shadow-[0_0_20px_rgba(242,202,80,0.4)]">1</span>
+        <h2 class="font-semibold text-white" style="font-size:1rem;">בחר קובץ Excel לייבוא</h2>
+      </div>
+      <p class="text-gray-400 text-sm mb-6 leading-relaxed">בחר את קובץ ה-Excel עם הנתונים ההיסטוריים. המערכת תנתח ותייבא לקוחות, תיקים, הכנסות ועמלות.</p>
+      <div class="import-dropzone p-10 text-center flex flex-col items-center justify-center cursor-pointer group rounded-2xl bg-primary/5 border-2 border-dashed border-primary/40 hover:border-primary/60 hover:bg-primary/10 transition-all" id="excel-dropzone">
+        <div class="w-12 h-12 rounded-xl flex items-center justify-center mb-4 group-hover:scale-105 transition-transform duration-200 bg-primary/10 border border-primary/30 shadow-[0_0_20px_rgba(242,202,80,0.15)]">
+          <span class="material-symbols-outlined text-primary" style="font-size:24px;">table</span>
+        </div>
+        <p class="font-semibold text-gray-100 mb-1" style="font-size:0.95rem;">גרור קובץ Excel לכאן</p>
+        <p class="text-gray-500 text-sm">או <label class="font-semibold cursor-pointer underline underline-offset-4 text-primary hover:text-primary/80" for="input-excel-file">לחץ לבחור קובץ</label></p>
+        <input accept=".xlsx,.xls,.csv" class="hidden" id="input-excel-file" type="file"/>
+      </div>
+      <div class="hidden mt-6 rounded-xl overflow-hidden border border-gray-600/15" id="excel-preview"></div>
+      <div class="hidden mt-5 flex justify-end gap-3" id="excel-confirm-actions">
+        <button class="btn-ghost" id="btn-import-cancel">ביטול</button>
+        <button class="btn-primary flex items-center gap-2" id="btn-import-confirm">
+          <span class="material-symbols-outlined" style="font-size:16px;">check_circle</span> אשר ייבוא
+        </button>
+      </div>
+    </div>
+    <!-- Step 2 -->
+    <div class="bg-surface-container-high/40 backdrop-blur-3xl border border-gray-600/10 rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.2)] p-7">
+      <div class="flex items-center gap-3 mb-5">
+        <span class="flex items-center justify-center w-8 h-8 rounded-xl text-black text-xs font-bold flex-shrink-0 bg-primary shadow-[0_0_20px_rgba(242,202,80,0.4)]">2</span>
+        <h2 class="font-semibold text-white" style="font-size:1rem;">הגדר יתרת פתיחה</h2>
+      </div>
+      <p class="text-gray-400 text-sm mb-5 leading-relaxed">הגדר את יתרת הפתיחה עבור כל שנה — בסיס לחישוב היתרה המצטברת בלוח הבקרה.</p>
+      <div class="flex flex-col sm:flex-row items-end gap-4 p-5 rounded-xl bg-surface-container-low/50 border border-gray-600/10" id="balance-inputs">
+        <div class="w-full sm:w-1/3">
+          <label class="block text-[0.65rem] font-bold uppercase tracking-[0.1em] text-gray-500 mb-2">שנה</label>
+          <input class="block w-full rounded-xl text-sm font-medium py-2.5 px-3 bg-surface-container/60 text-white border border-gray-600/20 focus:outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all" id="balance-year" max="2100" min="2000" type="number" value="2025" style="font-family:'Inter',sans-serif;"/>
+        </div>
+        <div class="w-full sm:w-1/3">
+          <label class="block text-[0.65rem] font-bold uppercase tracking-[0.1em] text-gray-500 mb-2">יתרת פתיחה (₪)</label>
+          <input class="block w-full rounded-xl text-sm font-medium py-2.5 px-3 bg-surface-container/60 text-white border border-gray-600/20 focus:outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all" id="balance-amount" placeholder="0.00" step="0.01" type="number" style="font-family:'Inter',sans-serif;"/>
+        </div>
+        <button class="btn-primary w-full sm:w-auto" id="btn-save-balance">שמור יתרה</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── VIEW: SETTINGS ── -->
+<section class="view hidden max-w-2xl mx-auto space-y-5 relative z-10" id="view-settings">
+  <header>
+    <h1 class="font-semibold text-white tracking-tight" style="font-size:1.7rem;letter-spacing:-0.03em;">הגדרות</h1>
+    <p class="text-gray-500 mt-1 text-sm">מידע על המערכת ועדכונים</p>
+  </header>
+  <!-- Version card -->
+  <div class="bg-surface-container-high/40 backdrop-blur-3xl border border-gray-600/10 rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.2)] overflow-hidden">
+    <div class="px-6 py-4 border-b border-gray-600/10">
+      <h2 class="font-semibold text-white" style="font-size:0.95rem;">גרסת המערכת</h2>
+    </div>
+    <div class="p-6 space-y-5">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-5 rounded-xl bg-surface-container-low/50 border border-gray-600/10">
+        <div>
+          <div class="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-500 mb-1.5">גרסה נוכחית</div>
+          <div class="font-num font-semibold text-primary" style="font-size:1.8rem;letter-spacing:-0.02em;text-shadow:0 0 30px rgba(242,202,80,0.4);" id="settings-current-version">—</div>
+        </div>
+        <div>
+          <div class="text-[10px] font-bold uppercase tracking-[0.18em] text-gray-500 mb-1.5">תאריך עדכון</div>
+          <div class="font-num text-sm font-semibold text-gray-200 bg-surface-container/60 px-3 py-1.5 rounded-lg inline-block border border-gray-600/15" id="settings-update-date">—</div>
+        </div>
+      </div>
+      <div class="hidden p-4 rounded-xl text-sm font-medium" id="settings-update-status"></div>
+      <button class="btn-primary flex items-center gap-2" id="btn-check-update">
+        <span class="material-symbols-outlined" style="font-size:16px;">sync</span> בדוק עדכונים
+      </button>
+    </div>
+  </div>
+  <!-- Mobile: backup -->
+  <div class="md:hidden bg-surface-container-high/40 backdrop-blur-3xl border border-gray-600/10 rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.2)] overflow-hidden">
+    <div class="px-6 py-4 border-b border-gray-600/10">
+      <h2 class="font-semibold text-white" style="font-size:0.95rem;">גיבוי ושחזור</h2>
+    </div>
+    <div class="p-4 flex flex-col gap-2">
+      <button class="btn-primary flex items-center justify-center w-full gap-2" id="btn-export-backup-mobile">
+        <span class="material-symbols-outlined" style="font-size:16px;">download</span> גיבוי נתונים
+      </button>
+      <button class="btn-primary flex items-center justify-center w-full gap-2" id="btn-import-backup-mobile">
+        <span class="material-symbols-outlined" style="font-size:16px;">upload</span> שחזור נתונים
+      </button>
+      <input accept=".json" class="hidden" id="input-restore-file-mobile" type="file"/>
+      <div class="border-t border-gray-600/10 my-1"></div>
+      <div id="drive-status-mobile" class="text-xs text-center font-medium py-1 text-gray-500">○ לא מחובר</div>
+      <button class="btn-primary flex items-center justify-center w-full gap-2" id="btn-drive-backup-mobile">
+        <span class="material-symbols-outlined" style="font-size:16px;">cloud_upload</span> גיבוי לדרייב
+      </button>
+      <button class="btn-primary flex items-center justify-center w-full gap-2" id="btn-drive-restore-mobile">
+        <span class="material-symbols-outlined" style="font-size:16px;">cloud_download</span> שחזור מדרייב
+      </button>
+      <button class="hidden flex items-center justify-center w-full gap-2 px-4 py-2.5 text-sm font-medium rounded-full transition-all" id="drive-disconnect-mobile" style="color:#FCA5A5;background:rgba(220,38,38,0.08);border:1px solid rgba(220,38,38,0.25);">
+        <span class="material-symbols-outlined" style="font-size:16px;">logout</span> התנתק מ-Google Drive
+      </button>
+    </div>
+  </div>
+  <!-- About -->
+  <div class="bg-surface-container-high/40 backdrop-blur-3xl border border-gray-600/10 rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.2)] overflow-hidden">
+    <div class="px-6 py-4 border-b border-gray-600/10">
+      <h2 class="font-semibold text-white" style="font-size:0.95rem;">אודות</h2>
+    </div>
+    <div class="p-6 text-sm text-gray-400 space-y-3 leading-relaxed">
+      <p><strong class="text-primary font-semibold">LexLedger</strong> — מערכת פרימיום לניהול שכר טרחה לעורכי דין.</p>
+      <p class="p-4 rounded-xl text-xs bg-surface-container-low/50 border border-gray-600/10 text-gray-400">הנתונים נשמרים מקומית בדפדפן (IndexedDB), עם אפשרות גיבוי ושחזור ל-Google Drive האישי שלך. אין שרת מרכזי שמחזיק את המידע.</p>
+    </div>
+  </div>
+</section>
+</main>
+</div>
+
+<!-- ===== MODALS ===== -->
+<div aria-modal="true" class="modal-overlay hidden fixed inset-0 flex items-center justify-center p-4" id="modal-overlay" role="dialog">
+  <div class="modal w-full max-w-md overflow-hidden transform transition-all scale-95 opacity-0 duration-200" id="modal">
+    <div class="relative px-6 py-5 border-b border-gray-600/15">
+      <h2 class="font-semibold text-white" style="font-size:1rem;" id="modal-title"></h2>
+      <button aria-label="סגור" class="absolute top-4 left-5 text-gray-500 hover:text-white p-1.5 rounded-lg transition-colors hover:bg-surface-container-high/50" id="modal-close">
+        <span class="material-symbols-outlined" style="font-size:18px;">close</span>
+      </button>
+    </div>
+    <div class="px-6 py-5" id="modal-body"></div>
+    <div class="px-6 py-4 flex justify-end gap-2 border-t border-gray-600/15 bg-surface-container-low/40">
+      <button class="btn-ghost" id="modal-cancel">ביטול</button>
+      <button class="btn-primary" id="modal-confirm">שמור</button>
+    </div>
+  </div>
+</div>
+
+<!-- PDF Confirm Modal -->
+<div aria-modal="true" class="modal-overlay hidden fixed inset-0 flex items-center justify-center p-4" id="pdf-modal-overlay" role="dialog">
+  <div class="modal w-full max-w-2xl overflow-hidden transform transition-all flex flex-col max-h-[90vh] scale-95 opacity-0 duration-200" id="pdf-modal">
+    <div class="relative px-6 py-5 border-b border-gray-600/15">
+      <h2 class="font-semibold text-white" style="font-size:1rem;">אישור נתוני PDF</h2>
+      <p class="text-xs text-gray-500 mt-0.5">בדוק את הנתונים שחולצו ואשר שמירה</p>
+      <button aria-label="סגור" class="absolute top-4 left-5 text-gray-500 hover:text-white p-1.5 rounded-lg transition-colors hover:bg-surface-container-high/50" id="pdf-modal-close">
+        <span class="material-symbols-outlined" style="font-size:18px;">close</span>
+      </button>
+    </div>
+    <div class="px-6 py-5 overflow-y-auto flex-1" id="pdf-modal-body" style="background:rgba(0,0,0,0.25);"></div>
+    <div class="px-6 py-4 flex justify-end gap-2 border-t border-gray-600/15 bg-surface-container-low/40">
+      <button class="btn-ghost" id="pdf-modal-cancel">ביטול</button>
+      <button class="btn-primary flex items-center gap-2" id="pdf-modal-save">
+        <span class="material-symbols-outlined" style="font-size:15px;">check_circle</span> אשר ושמור חשבונית
+      </button>
+    </div>
+  </div>
+</div>
+
+<div aria-live="polite" class="fixed bottom-8 left-8 z-50 flex flex-col gap-3" id="toast-container"></div>
+
+<script src="db.js"></script>
+<script src="ui.js"></script>
+<script src="import.js"></script>
+<script src="dashboard.js"></script>
+<script src="clients.js"></script>
+<script src="invoices.js"></script>
+<script src="payments.js"></script>
+<script src="settings.js"></script>
+<script src="drive.js"></script>
+<script src="app.js"></script>
+<script>
+    if ('serviceWorker' in navigator) {
+      let _refreshing = false;
+      // semver-ish compare: returns true iff a > b
+      function _versionGt(a, b) {
+        const pa = String(a || '0').split('.').map(n => parseInt(n, 10) || 0);
+        const pb = String(b || '0').split('.').map(n => parseInt(n, 10) || 0);
+        for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+          const x = pa[i] || 0, y = pb[i] || 0;
+          if (x > y) return true;
+          if (x < y) return false;
+        }
+        return false;
+      }
+      function _doReload() {
+        if (_refreshing) return;
+        // hard guard against tight reload loops (iOS PWA / stale CDN)
+        const last = parseInt(sessionStorage.getItem('_swReloadAt') || '0', 10);
+        if (Date.now() - last < 60000) return;       // never reload more than once per 60s
+        sessionStorage.setItem('_swReloadAt', String(Date.now()));
+        _refreshing = true;
+        window.location.reload();
+      }
+      async function _checkAndUpdate() {
+        try {
+          const d = await fetch('./version.json?_=' + Date.now()).then(r => r.json());
+          // only reload when remote is STRICTLY NEWER than the running bundle.
+          // (a stale-cached older version.json would otherwise loop us forever)
+          if (!window._BUNDLE_VERSION || !_versionGt(d.version, window._BUNDLE_VERSION)) return;
+          const reg = await navigator.serviceWorker.getRegistration('./');
+          if (!reg) { _doReload(); return; }
+          if (reg.waiting) {
+            reg.waiting.postMessage('skipWaiting');
+          } else {
+            // Force Safari/iOS to re-fetch sw.js from network (bypasses HTTP cache)
+            reg.update().then(() => {
+              if (reg.waiting) reg.waiting.postMessage('skipWaiting');
+              else if (!reg.installing) _doReload();
+            });
+          }
+        } catch(e) {}
+      }
+      navigator.serviceWorker.addEventListener('controllerchange', _doReload);
+      window.addEventListener('pageshow', async e => {
+        if (!e.persisted) return;
+        const reg = await navigator.serviceWorker.getRegistration('./');
+        if (reg && reg.waiting) reg.waiting.postMessage('skipWaiting');
+        else { if (reg) reg.update(); _checkAndUpdate(); }
+      });
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') _checkAndUpdate();
+      });
+      navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then(reg => {
+        if (reg.waiting) reg.waiting.postMessage('skipWaiting');
+        window.addEventListener('load', () => setTimeout(_checkAndUpdate, 2000));
+      });
+    }
+    document.addEventListener('DOMContentLoaded', () => {
+      const originalShowModal = window.UI ? window.UI.showModal : null;
+      if (originalShowModal) {
+         window.UI.showModal = function(id) {
+            const overlay = document.getElementById(id);
+            if(overlay) {
+               overlay.classList.remove('hidden');
+               const modal = overlay.querySelector('.modal');
+               if(modal) {
+                 setTimeout(() => {
+                   modal.classList.remove('scale-95', 'opacity-0');
+                   modal.classList.add('scale-100', 'opacity-100');
+                 }, 10);
+               }
+            }
+         }
+      }
+    });
+  </script>
+</body>
+</html>
