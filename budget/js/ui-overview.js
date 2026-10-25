@@ -1,11 +1,11 @@
 // ui-overview.js — סרגל הצד ומסך תיק העסקאות.
 // הסרגל מחליף את רצועת הטאבים העליונה: עסקאות פתוחות בלבד, עם נקודת סטטוס וניצול ביחידה שנבחרה.
 
-import { computePortfolio, isOpenDeal, DEAL_STATUSES, progressByPeriod } from './model.js';
-import { sparkline } from './charts.js';
+import { computePortfolio, isOpenDeal, DEAL_STATUSES, progressByPeriod, round2 } from './model.js';
+import { ring, sparkline } from './charts.js';
 import {
   el, icon, ICONS, measure, fmtU, pctText, toneOf, meterCell, unitSwitch, seg, button, emptyState,
-  limitItems, valueNodes, card, table, runway,
+  limitItems, valueNodes, card, table, avatar, dealSlot,
 } from './ui-kit.js';
 
 /* ============================================================
@@ -31,7 +31,7 @@ export function renderSidebar(root, { deals, snapshots, view, activeId, unit, th
       title: `${deal.name}${deal.client ? ` · ${deal.client}` : ''} — גרירה או Alt+↑/↓ לשינוי הסדר`,
       'aria-current': deal.id === activeId ? 'page' : null,
     }, [
-      el('span', { class: `dot${m && (m.status === 'over' || m.status === 'risk') ? ` dot--${m.status}` : ''}` }),
+      avatar(deal.name, dealSlot(deal), { size: 'xs', alert: m && (m.status === 'over' || m.status === 'risk') ? m.status : '' }),
       el('span', { class: 'side__deal-name', text: deal.name }),
       m && m.budget > 0 ? el('span', { class: `side__deal-val num ${tone}`.trim(), text: pctText(m.util) }) : null,
     ]));
@@ -40,7 +40,7 @@ export function renderSidebar(root, { deals, snapshots, view, activeId, unit, th
 
   root.replaceChildren(
     el('div', { class: 'side__brand' }, [
-      el('span', { class: 'side__logo', text: 'LB', 'aria-hidden': 'true' }),
+      el('span', { class: 'side__logo', html: ICONS.wallet, 'aria-hidden': 'true' }),
       el('div', {}, [el('div', { class: 'side__name', text: 'LexBudget' }), el('span', { class: 'side__tag', text: 'תקציב עסקאות' })]),
     ]),
     link('go-overview', 'briefcase', 'תיק העסקאות', view === 'overview'),
@@ -63,6 +63,16 @@ export function renderSidebar(root, { deals, snapshots, view, activeId, unit, th
 /* ============================================================
    תיק העסקאות
    ============================================================ */
+
+/** שריפה מצטברת של כל העסקאות יחד, לפי חודש — הדופק בכרטיס התיק */
+function portfolioSeries(list, unit) {
+  const byMonth = new Map();
+  for (const s of list) {
+    for (const r of progressByPeriod(s, 'month')) byMonth.set(r.key, (byMonth.get(r.key) || 0) + (unit === 'money' ? r.cost : r.hours));
+  }
+  let acc = 0;
+  return [...byMonth.keys()].sort().map((k) => round2(acc += byMonth.get(k)));
+}
 
 /** התראות שמוצגות בסקירה — רק חריגה וסיכון (התראות "לתשומת לב" נשארות בעסקה עצמה) */
 const urgent = (snap, unit) => (snap.alerts[unit] || []).filter((a) => a.level === 'over' || a.level === 'risk');
@@ -116,33 +126,41 @@ export function renderOverview(root, { snapshots, scope = 'open', unit = 'hours'
     return;
   }
 
-  // ---- כרטיס המצב של התיק: המספר הראשי, יתרה ומה דורש תשומת לב; בתחתית — מסלול התקציב ----
-  const heroCell = (label, value, sub) => el('div', { class: 'hero__cell' }, [
-    el('span', { class: 'hero__label', text: label }), value, el('span', { class: 'hero__sub' }, [].concat(sub)),
-  ]);
+  // ---- כרטיס המצב של התיק: ניצול כטבעת, יתרה, ומה דורש תשומת לב; בתחתית — דופק השריפה המצטברת ----
+  const tone = toneOf(pStatus);
   const cells = [
-    heroCell(pm.remaining < 0 ? 'חריגה' : 'נותרו',
+    el('div', { class: 'hero__cell' }, [
+      el('span', { class: 'hero__label' }, [el('span', { class: 'hero__ic', html: ICONS.clock }), pm.remaining < 0 ? 'חריגה' : 'נותרו']),
       el('span', { class: 'hero__value' }, valueNodes(Math.abs(pm.remaining), unit, { cls: pm.remaining < 0 ? 'is-over' : '' })),
-      'בכל העסקאות שבתצוגה'),
-    heroCell('דורשות תשומת לב',
+      el('span', { class: 'hero__sub', text: 'בכל העסקאות שבתצוגה' }),
+    ]),
+    el('div', { class: 'hero__cell' }, [
+      el('span', { class: 'hero__label' }, [el('span', { class: 'hero__ic', html: ICONS.alert }), 'דורשות תשומת לב']),
       el('span', { class: `hero__value num ${counts.over ? 'is-over' : counts.risk ? 'is-risk' : ''}`.trim(), text: String(counts.over + counts.risk) }),
-      counts.over + counts.risk ? `${counts.over} בחריגה · ${counts.risk} בסיכון` : 'כל העסקאות בתוואי'),
+      el('span', { class: 'hero__sub', text: counts.over + counts.risk ? `${counts.over} בחריגה · ${counts.risk} בסיכון` : 'כל העסקאות בתוואי' }),
+    ]),
   ];
   if (unit === 'money' && p.agreedFee > 0) {
-    cells.push(heroCell('שכ"ט מוסכם', el('span', { class: 'hero__value num', text: fmtU(p.agreedFee, 'money') }),
-      ['מול הביצוע: ', el('span', { class: `num ${p.agreedFee - p.actualCost < 0 ? 'is-over' : ''}`.trim(), text: fmtU(p.agreedFee - p.actualCost, 'money') })]));
+    cells.push(el('div', { class: 'hero__cell' }, [
+      el('span', { class: 'hero__label' }, [el('span', { class: 'hero__ic', html: ICONS.coins }), 'שכ"ט מוסכם']),
+      el('span', { class: 'hero__value num', text: fmtU(p.agreedFee, 'money') }),
+      el('span', { class: 'hero__sub' }, ['מול הביצוע: ', el('span', { class: `num ${p.agreedFee - p.actualCost < 0 ? 'is-over' : ''}`.trim(), text: fmtU(p.agreedFee - p.actualCost, 'money') })]),
+    ]));
   }
-  page.append(el('section', { class: `hero hero--${pStatus}`, 'aria-label': 'סיכום התיק' }, [
-    el('div', { class: 'hero__top' }, [
+  const pulse = portfolioSeries(list, unit);
+  page.append(el('section', { class: `hero hero--${pStatus}${pulse.length > 1 ? ' hero--pulse' : ''}`, 'aria-label': 'סיכום התיק' }, [
+    pulse.length > 1 ? el('div', { class: 'hero__pulse', html: sparkline(pulse, { width: 600, height: 54, budget: pm.budget, budgetLine: false, cls: 'spark--hero', dot: false }) }) : null,
+    el('div', { class: 'hero__main' }, [
+      el('div', { class: 'hero__ring', html: ring(pm.util, pStatus, { size: 124, stroke: 11, label: `ניצול ${pctText(pm.util)}` }) }, [
+        el('span', { class: 'hero__pct' }, [el('span', { class: `num ${tone}`.trim(), text: pctText(pm.util) }), el('span', { class: 'hero__pct-sub', text: 'נוצל' })]),
+      ]),
       el('div', { class: 'hero__lead' }, [
         el('span', { class: 'hero__label', text: unit === 'money' ? 'ניצול תקציבי התיק' : 'ניצול שעות התיק' }),
         el('span', { class: 'hero__big' }, valueNodes(pm.actual, unit)),
-        el('span', { class: 'hero__sub' }, ['מתוך ', ...valueNodes(pm.budget, unit), ' · ',
-          el('span', { class: `num hero__pct ${toneOf(pStatus)}`.trim(), text: pctText(pm.util) }), ' נוצל']),
+        el('span', { class: 'hero__sub' }, ['מתוך ', ...valueNodes(pm.budget, unit)]),
       ]),
-      el('div', { class: 'hero__cells' }, cells),
     ]),
-    runway({ actual: pm.actual, budget: pm.budget, fmt: (v) => fmtU(v, unit) }),
+    el('div', { class: 'hero__cells' }, cells),
   ]));
 
   // ---- טבלת העסקאות ----
@@ -158,9 +176,12 @@ export function renderOverview(root, { snapshots, scope = 'open', unit = 'hours'
       dataset: { action: 'select-deal', id: s.deal.id },
       'aria-label': `פתח את ${s.deal.name}`,
     }, [
-      el('td', {}, [el('div', { class: 'cellname' }, [
-        el('span', { class: 'cellname__main', text: s.deal.name }),
-        el('span', { class: 'cellname__sub', text: [s.deal.client, isOpenDeal(s.deal) ? '' : dealStatus?.label].filter(Boolean).join(' · ') || '—' }),
+      el('td', {}, [el('div', { class: 'dealcell' }, [
+        avatar(s.deal.name, dealSlot(s.deal), { size: 'sm' }),
+        el('div', { class: 'cellname' }, [
+          el('span', { class: 'cellname__main', text: s.deal.name }),
+          el('span', { class: 'cellname__sub', text: [s.deal.client, isOpenDeal(s.deal) ? '' : dealStatus?.label].filter(Boolean).join(' · ') || '—' }),
+        ]),
       ])]),
       el('td', {}, [m.budget > 0 ? meterCell(m.util, m.status) : el('span', { class: 'muted', text: 'אין תקציב' })]),
       // data-label — במסך צר הטבלה נערמת לכרטיסים, והתווית מוצגת ליד המספר
@@ -171,7 +192,7 @@ export function renderOverview(root, { snapshots, scope = 'open', unit = 'hours'
         ? [el('span', { class: 'trend', html: sparkline(trend, { width: 104, height: 30, budget: m.budget, cls: `spark--${m.status}` }) })]
         : [el('span', { class: 'muted', text: '—' })]),
       el('td', { class: 'c-alerts' }, [worst
-        ? el('span', { class: `flag flag--${worst}`, title: al.map((a) => a.text).join('\n') }, [icon('alert'), el('span', { class: 'num', text: String(al.length) })])
+        ? el('span', { class: `pill pill--${worst}`, title: al.map((a) => a.text).join('\n') }, [icon('alert'), String(al.length)])
         : null]),
     ]);
   });

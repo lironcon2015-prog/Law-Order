@@ -40,8 +40,6 @@ const VENDOR = {
 const FONTS = {
   'heebo-hebrew.woff2': b64('fonts/heebo-hebrew.woff2'),
   'heebo-latin.woff2': b64('fonts/heebo-latin.woff2'),
-  'frank-ruhl-hebrew.woff2': b64('fonts/frank-ruhl-hebrew.woff2'),
-  'frank-ruhl-latin.woff2': b64('fonts/frank-ruhl-latin.woff2'),
 };
 let fontsCss = rd('css/fonts.css');
 for (const [file, data] of Object.entries(FONTS)) {
