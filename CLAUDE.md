@@ -47,7 +47,7 @@
 **הכלל:** בכל מקום שמציג מספר — לעולם לא להסתמך על `start`/ברירת מחדל. יישור פיזי מפורש:
 - **טבלאות:** `th`/`td` עם `text-align: right` (לא `start`).
 - **מחסנית תווית↑/ערך↓** (`.total`, `.fact`, `.strip__item`, `.kpi__body`, `.team__stat`,
-  `.dcard__nums > div`; ב-LexBudget: `.band__cell`, `.fact`, `.step`, `.duo__cell`, `.selbar__stat`,
+  `.dcard__nums > div`; ב-LexBudget: `.hero__cell`, `.hero__lead`, `.fact`, `.step`, `.duo__cell`, `.selbar__stat`,
   `.trow__h`/`.trow__num`): `text-align: right` על **המכל**, לא על הערך.
 - כל דפוס חדש כזה — להוסיף לרשימה ב-`css/styles.css` באותה שורה.
 - **ריפוד ושוליים של תאי מספרים — פיזיים** (`padding-right/left`), לא `padding-inline-*`: בגלל ה-`direction: ltr`
@@ -97,7 +97,7 @@
 | `sw.js` | Service Worker | `manifest.json` | PWA |
 | `cloudflare/crm-proxy.worker.js` | Worker שמ-proxy את `lironcon.com/crm` ל-Pages |
 | `v2/` | **המערכת המאוחדת** (CRM + חיוב) — מבנה מקביל: `v2/index.html`, `v2/css/`, `v2/js/`, `v2/sw.js` |
-| `budget/` | **LexBudget** — מערכת תקציב עסקה נפרדת (DB/SW/manifest משלה): `budget/index.html`, `budget/css/`, `budget/js/`. שפה עיצובית משלה — **"Paper"** (בהיר + מצב כהה, Heebo, מתג יחידה `שעות / ₪`); ראה `budget/README.md` §5 |
+| `budget/` | **LexBudget** — מערכת תקציב עסקה נפרדת (DB/SW/manifest משלה): `budget/index.html`, `budget/css/`, `budget/js/`. שפה עיצובית משלה — **"Midnight & Gold"** (בהיר + סרגל כחול-לילה, מצב כהה, Heebo, מתג יחידה `שעות / ₪`); ראה `budget/README.md` §5 |
 | `LexLedger-Offline.html` | **קובץ האופליין של v2** — ארוז לקובץ HTML יחיד (file://, בלי שרת). בשורש ה-repo ב-**main** |
 | `LexBudget-Offline.html` | **קובץ האופליין של LexBudget** — אותו רעיון, נבנה מ-`budget/` |
 | `v2/build-offline.mjs` · `budget/build-offline.mjs` | סקריפטי הבנייה: `node v2/build-offline.mjs` · `node budget/build-offline.mjs` |

@@ -32,21 +32,26 @@ export function renderAnalysisTab(root, { snap, unit = 'hours' }) {
   const m = measure(snap, unit);
   const est = money ? r.estCost : r.estHours;
   const eac = money ? snap.eac : snap.eacHours;
-  const stepCell = (label, value, note = '', noteCls = '', valueCls = '') => el('div', { class: 'step' }, [
+  // כל שלב עם פס באורך יחסי — ההשוואה בין ארבע הנקודות נקראת בלי לקרוא מספרים
+  const top = Math.max(est || 0, m.budget || 0, m.actual || 0, eac || 0) || 1;
+  const stepCell = (label, value, note = '', noteCls = '', valueCls = '', amount = null, bar = '') => el('div', { class: 'step' }, [
     el('span', { class: 'step__label', text: label }),
     el('span', { class: `step__value num ${valueCls}`.trim(), text: value }),
+    amount !== null ? el('span', { class: `step__bar${bar ? ` step__bar--${bar}` : ''}` }, [el('i', { style: `width:${Math.max(2, Math.min(100, (amount / top) * 100))}%` })]) : null,
     note ? el('span', { class: `step__note ${noteCls}`.trim(), text: note }) : null,
   ]);
+  const hasEac = eac !== null && eac !== undefined;
   const finalCell = r.inProgress
-    ? stepCell('תחזית לסיום', eac === null || eac === undefined ? '—' : U(eac),
-      eac === null || eac === undefined ? 'אין עדיין בסיס לתחזית' : `${D(eac - m.budget)} מול התקציב`,
-      eac > m.budget ? 'is-over' : '', eac > m.budget * 1.05 ? 'is-over' : eac > m.budget ? 'is-risk' : '')
+    ? stepCell('תחזית לסיום', hasEac ? U(eac) : '—',
+      hasEac ? `${D(eac - m.budget)} מול התקציב` : 'אין עדיין בסיס לתחזית',
+      hasEac && eac > m.budget ? 'is-over' : '', hasEac && eac > m.budget * 1.05 ? 'is-over' : hasEac && eac > m.budget ? 'is-risk' : '',
+      hasEac ? eac : null, hasEac && eac > m.budget ? (eac > m.budget * 1.05 ? 'over' : 'risk') : 'fc')
     : stepCell('פער מהתקציב', D(m.actual - m.budget), m.actual > m.budget ? 'חריגה' : 'בתוך התקציב',
       m.actual > m.budget ? 'is-over' : '', m.actual > m.budget ? 'is-over' : '');
   const summary = [el('div', { class: 'steps' }, [
-    stepCell('הערכה', U(est), 'לפני מקדם החריגה'),
-    stepCell('תקציב', U(m.budget), `הערכה + ${fmtPct(r.usedFactor)} מקדם`),
-    stepCell(r.inProgress ? 'בוצע עד היום' : 'בפועל', U(m.actual), `${pctText(m.util)} מהתקציב`, toneOf(m.status)),
+    stepCell('הערכה', U(est), 'לפני מקדם החריגה', '', '', est, 'est'),
+    stepCell('תקציב', U(m.budget), `הערכה + ${fmtPct(r.usedFactor)} מקדם`, '', '', m.budget, 'budget'),
+    stepCell(r.inProgress ? 'בוצע עד היום' : 'בפועל', U(m.actual), `${pctText(m.util)} מהתקציב`, toneOf(m.status), '', m.actual, m.status === 'over' ? 'over' : 'actual'),
     finalCell,
   ])];
   if (money && snap.hasFee) {

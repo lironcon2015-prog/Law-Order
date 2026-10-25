@@ -1,10 +1,11 @@
 // ui-overview.js — סרגל הצד ומסך תיק העסקאות.
 // הסרגל מחליף את רצועת הטאבים העליונה: עסקאות פתוחות בלבד, עם נקודת סטטוס וניצול ביחידה שנבחרה.
 
-import { computePortfolio, isOpenDeal, DEAL_STATUSES } from './model.js';
+import { computePortfolio, isOpenDeal, DEAL_STATUSES, progressByPeriod, round2 } from './model.js';
+import { ring, sparkline } from './charts.js';
 import {
-  el, icon, ICONS, measure, fmtU, pctText, toneOf, meterCell, meter, unitSwitch, seg, button, emptyState,
-  limitItems, valueNodes, card, table,
+  el, icon, ICONS, measure, fmtU, pctText, toneOf, meterCell, unitSwitch, seg, button, emptyState,
+  limitItems, valueNodes, card, table, avatar, dealSlot,
 } from './ui-kit.js';
 
 /* ============================================================
@@ -30,7 +31,7 @@ export function renderSidebar(root, { deals, snapshots, view, activeId, unit, th
       title: `${deal.name}${deal.client ? ` · ${deal.client}` : ''} — גרירה או Alt+↑/↓ לשינוי הסדר`,
       'aria-current': deal.id === activeId ? 'page' : null,
     }, [
-      el('span', { class: `dot${m && (m.status === 'over' || m.status === 'risk') ? ` dot--${m.status}` : ''}` }),
+      avatar(deal.name, dealSlot(deal), { size: 'xs', alert: m && (m.status === 'over' || m.status === 'risk') ? m.status : '' }),
       el('span', { class: 'side__deal-name', text: deal.name }),
       m && m.budget > 0 ? el('span', { class: `side__deal-val num ${tone}`.trim(), text: pctText(m.util) }) : null,
     ]));
@@ -62,6 +63,16 @@ export function renderSidebar(root, { deals, snapshots, view, activeId, unit, th
 /* ============================================================
    תיק העסקאות
    ============================================================ */
+
+/** שריפה מצטברת של כל העסקאות יחד, לפי חודש — הדופק בכרטיס התיק */
+function portfolioSeries(list, unit) {
+  const byMonth = new Map();
+  for (const s of list) {
+    for (const r of progressByPeriod(s, 'month')) byMonth.set(r.key, (byMonth.get(r.key) || 0) + (unit === 'money' ? r.cost : r.hours));
+  }
+  let acc = 0;
+  return [...byMonth.keys()].sort().map((k) => round2(acc += byMonth.get(k)));
+}
 
 /** התראות שמוצגות בסקירה — רק חריגה וסיכון (התראות "לתשומת לב" נשארות בעסקה עצמה) */
 const urgent = (snap, unit) => (snap.alerts[unit] || []).filter((a) => a.level === 'over' || a.level === 'risk');
@@ -115,33 +126,42 @@ export function renderOverview(root, { snapshots, scope = 'open', unit = 'hours'
     return;
   }
 
-  // ---- פס מדדים: ניצול, יתרה, ומה דורש תשומת לב ----
+  // ---- כרטיס המצב של התיק: ניצול כטבעת, יתרה, ומה דורש תשומת לב; בתחתית — דופק השריפה המצטברת ----
+  const tone = toneOf(pStatus);
   const cells = [
-    el('div', { class: 'band__cell band__cell--main' }, [
-      el('span', { class: 'band__label', text: unit === 'money' ? 'נוצל מהתקציב (₪)' : 'נוצל משעות התקציב' }),
-      el('span', { class: `band__value num ${toneOf(pStatus)}`.trim(), text: pctText(pm.util) }),
-      meter(pm.util, pStatus, { size: 'lg' }),
-      el('span', { class: 'band__sub' }, [...valueNodes(pm.actual, unit), ' מתוך ', ...valueNodes(pm.budget, unit)]),
+    el('div', { class: 'hero__cell' }, [
+      el('span', { class: 'hero__label' }, [el('span', { class: 'hero__ic', html: ICONS.clock }), pm.remaining < 0 ? 'חריגה' : 'נותרו']),
+      el('span', { class: 'hero__value' }, valueNodes(Math.abs(pm.remaining), unit, { cls: pm.remaining < 0 ? 'is-over' : '' })),
+      el('span', { class: 'hero__sub', text: 'בכל העסקאות שבתצוגה' }),
     ]),
-    el('div', { class: 'band__cell' }, [
-      el('span', { class: 'band__label', text: 'יתרה' }),
-      el('span', { class: 'band__value band__value--md' }, valueNodes(pm.remaining, unit, { cls: pm.remaining < 0 ? 'neg' : '' })),
-      el('span', { class: 'band__sub', text: 'בכל העסקאות שבתצוגה' }),
-    ]),
-    el('div', { class: 'band__cell' }, [
-      el('span', { class: 'band__label', text: 'דורשות תשומת לב' }),
-      el('span', { class: `band__value band__value--md num ${counts.over ? 'is-over' : counts.risk ? 'is-risk' : ''}`.trim(), text: String(counts.over + counts.risk) }),
-      el('span', { class: 'band__sub', text: counts.over + counts.risk ? `${counts.over} בחריגה · ${counts.risk} בסיכון` : 'כל העסקאות בתוואי' }),
+    el('div', { class: 'hero__cell' }, [
+      el('span', { class: 'hero__label' }, [el('span', { class: 'hero__ic', html: ICONS.alert }), 'דורשות תשומת לב']),
+      el('span', { class: `hero__value num ${counts.over ? 'is-over' : counts.risk ? 'is-risk' : ''}`.trim(), text: String(counts.over + counts.risk) }),
+      el('span', { class: 'hero__sub', text: counts.over + counts.risk ? `${counts.over} בחריגה · ${counts.risk} בסיכון` : 'כל העסקאות בתוואי' }),
     ]),
   ];
   if (unit === 'money' && p.agreedFee > 0) {
-    cells.push(el('div', { class: 'band__cell' }, [
-      el('span', { class: 'band__label', text: 'שכ"ט מוסכם' }),
-      el('span', { class: 'band__value band__value--md num', text: fmtU(p.agreedFee, 'money') }),
-      el('span', { class: 'band__sub' }, ['פער מול הביצוע: ', el('span', { class: `num ${p.agreedFee - p.actualCost < 0 ? 'neg' : ''}`.trim(), text: fmtU(p.agreedFee - p.actualCost, 'money') })]),
+    cells.push(el('div', { class: 'hero__cell' }, [
+      el('span', { class: 'hero__label' }, [el('span', { class: 'hero__ic', html: ICONS.coins }), 'שכ"ט מוסכם']),
+      el('span', { class: 'hero__value num', text: fmtU(p.agreedFee, 'money') }),
+      el('span', { class: 'hero__sub' }, ['מול הביצוע: ', el('span', { class: `num ${p.agreedFee - p.actualCost < 0 ? 'is-over' : ''}`.trim(), text: fmtU(p.agreedFee - p.actualCost, 'money') })]),
     ]));
   }
-  page.append(el('section', { class: 'band', 'aria-label': 'סיכום התיק' }, cells));
+  const pulse = portfolioSeries(list, unit);
+  page.append(el('section', { class: `hero hero--${pStatus}${pulse.length > 1 ? ' hero--pulse' : ''}`, 'aria-label': 'סיכום התיק' }, [
+    pulse.length > 1 ? el('div', { class: 'hero__pulse', html: sparkline(pulse, { width: 600, height: 54, budget: pm.budget, budgetLine: false, cls: 'spark--hero', dot: false }) }) : null,
+    el('div', { class: 'hero__main' }, [
+      el('div', { class: 'hero__ring', html: ring(pm.util, pStatus, { size: 124, stroke: 11, label: `ניצול ${pctText(pm.util)}` }) }, [
+        el('span', { class: 'hero__pct' }, [el('span', { class: `num ${tone}`.trim(), text: pctText(pm.util) }), el('span', { class: 'hero__pct-sub', text: 'נוצל' })]),
+      ]),
+      el('div', { class: 'hero__lead' }, [
+        el('span', { class: 'hero__label', text: unit === 'money' ? 'ניצול תקציבי התיק' : 'ניצול שעות התיק' }),
+        el('span', { class: 'hero__big' }, valueNodes(pm.actual, unit)),
+        el('span', { class: 'hero__sub' }, ['מתוך ', ...valueNodes(pm.budget, unit)]),
+      ]),
+    ]),
+    el('div', { class: 'hero__cells' }, cells),
+  ]));
 
   // ---- טבלת העסקאות ----
   const rows = list.map((s) => {
@@ -150,20 +170,27 @@ export function renderOverview(root, { snapshots, scope = 'open', unit = 'hours'
     const al = urgent(s, unit);
     const worst = al.some((a) => a.level === 'over') ? 'over' : al.length ? 'risk' : '';
     const dealStatus = DEAL_STATUSES.find((x) => x.id === s.deal.status);
+    const trend = progressByPeriod(s, 'month').map((r) => (unit === 'money' ? r.cumulativeCost : r.cumulativeHours));
     return el('tr', {
       class: 'is-link', tabindex: '0', role: 'link',
       dataset: { action: 'select-deal', id: s.deal.id },
       'aria-label': `פתח את ${s.deal.name}`,
     }, [
-      el('td', {}, [el('div', { class: 'cellname' }, [
-        el('span', { class: 'cellname__main', text: s.deal.name }),
-        el('span', { class: 'cellname__sub', text: [s.deal.client, isOpenDeal(s.deal) ? '' : dealStatus?.label].filter(Boolean).join(' · ') || '—' }),
+      el('td', {}, [el('div', { class: 'dealcell' }, [
+        avatar(s.deal.name, dealSlot(s.deal), { size: 'sm' }),
+        el('div', { class: 'cellname' }, [
+          el('span', { class: 'cellname__main', text: s.deal.name }),
+          el('span', { class: 'cellname__sub', text: [s.deal.client, isOpenDeal(s.deal) ? '' : dealStatus?.label].filter(Boolean).join(' · ') || '—' }),
+        ]),
       ])]),
       el('td', {}, [m.budget > 0 ? meterCell(m.util, m.status) : el('span', { class: 'muted', text: 'אין תקציב' })]),
       // data-label — במסך צר הטבלה נערמת לכרטיסים, והתווית מוצגת ליד המספר
       el('td', { class: 'num', dataset: { label: 'בוצע / תקציב' }, text: `${fmtU(m.actual, unit, s.deal)} / ${fmtU(m.budget, unit, s.deal)}` }),
       el('td', { class: `num ${m.remaining < 0 ? 'neg' : ''}`.trim(), dataset: { label: 'יתרה' }, text: fmtU(m.remaining, unit, s.deal) }),
       el('td', { class: `num ${eac !== null && eac > m.budget ? 'is-risk' : ''}`.trim(), dataset: { label: 'תחזית' }, text: eac === null ? '—' : fmtU(eac, unit, s.deal) }),
+      el('td', { class: 'c-trend', title: 'שריפה מצטברת לפי חודש, מול קו התקציב' }, trend.length > 1
+        ? [el('span', { class: 'trend', html: sparkline(trend, { width: 104, height: 30, budget: m.budget, cls: `spark--${m.status}` }) })]
+        : [el('span', { class: 'muted', text: '—' })]),
       el('td', { class: 'c-alerts' }, [worst
         ? el('span', { class: `pill pill--${worst}`, title: al.map((a) => a.text).join('\n') }, [icon('alert'), String(al.length)])
         : null]),
@@ -171,7 +198,7 @@ export function renderOverview(root, { snapshots, scope = 'open', unit = 'hours'
   });
   const H = unit === 'money' ? '₪' : 'שעות';
   page.append(card({ title: 'עסקאות', count: list.length, flush: true }, [
-    table(['עסקה', 'ניצול', `בוצע / תקציב (${H})`, 'יתרה', 'תחזית לסיום', { text: '', cls: 'c-alerts' }], rows, { cls: 'tbl--deals' }),
+    table(['עסקה', 'ניצול', `בוצע / תקציב (${H})`, 'יתרה', 'תחזית לסיום', { text: 'מגמה', cls: 'c-trend' }, { text: '', cls: 'c-alerts' }], rows, { cls: 'tbl--deals' }),
   ]));
 
   // ---- דורש תשומת לב ----

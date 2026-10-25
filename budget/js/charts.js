@@ -48,6 +48,7 @@ export function burnLine(series, budget, { fmt = String, axisFmt = fmt, width = 
   const budgetY = budget > 0 ? round2(y(budget)) : null;
 
   return `<svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="שריפה מצטברת מול התקציב" style="direction:ltr">
+    <defs><linearGradient id="burnGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" class="ch-stop-a"/><stop offset="100%" class="ch-stop-b"/></linearGradient></defs>
     ${grid.join('')}
     <line class="ch-base" x1="${pad.l}" y1="${pad.t + h}" x2="${pad.l + w}" y2="${pad.t + h}"/>
     <text class="ch-axis" x="${pad.l - 10}" y="${pad.t + h + 4}" text-anchor="end">0</text>
@@ -57,5 +58,45 @@ export function burnLine(series, budget, { fmt = String, axisFmt = fmt, width = 
     <path class="ch-line" d="${path}"/>
     ${dots}${xLabels}
     <text class="ch-num" x="${round2(x(series.length - 1))}" y="${round2(y(last.cumulative)) - 11}" text-anchor="${series.length > 1 ? 'end' : 'middle'}">${esc(fmt(last.cumulative))}</text>
+  </svg>`;
+}
+
+/**
+ * מד טבעתי — אחוז הניצול כטבעת. מעל 100% הטבעת מלאה ובצבע החריגה.
+ * הצבע מגיע ממחלקה (‎.ring--ok/risk/over) ולכן מתחלף עם ערכת הנושא.
+ */
+export function ring(util, status, { size = 128, stroke = 11, label = '' } = {}) {
+  const u = Number.isFinite(util) ? Math.max(0, util) : (util > 0 ? 1 : 0);
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const shown = Math.min(1, u);
+  const tone = status === 'over' ? 'over' : status === 'risk' ? 'risk' : 'ok';
+  return `<svg class="ring ring--${tone}" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img" aria-label="${esc(label)}">
+    <circle class="ring__track" cx="${size / 2}" cy="${size / 2}" r="${round2(r)}" stroke-width="${stroke}" fill="none"/>
+    <circle class="ring__fill" cx="${size / 2}" cy="${size / 2}" r="${round2(r)}" stroke-width="${stroke}" fill="none"
+      stroke-linecap="round" stroke-dasharray="${round2(c * shown)} ${round2(c)}" transform="rotate(-90 ${size / 2} ${size / 2})"/>
+  </svg>`;
+}
+
+/**
+ * קו מגמה קטן (sparkline) — מצטבר לאורך זמן, משמאל לימין. בלי צירים: הוא מראה צורה וקצב,
+ * והמספרים עצמם נמצאים לידו. budget (אופציונלי) קובע את התקרה של הסקאלה ומסומן כקו אופקי עדין
+ * (budgetLine:false — רק סקאלה, בלי קו).
+ */
+export function sparkline(values, { width = 120, height = 34, budget = 0, budgetLine = true, cls = '', fill = true, dot = true } = {}) {
+  if (!values.length) return '';
+  const pad = 3;
+  const max = Math.max(budget || 0, ...values) || 1;
+  const x = (i) => pad + (values.length === 1 ? (width - 2 * pad) / 2 : (i / (values.length - 1)) * (width - 2 * pad));
+  const y = (v) => height - pad - (v / max) * (height - 2 * pad);
+  const pts = values.map((v, i) => `${round2(x(i))},${round2(y(v))}`);
+  const line = `M${pts.join(' L')}`;
+  const area = `${line} L${round2(x(values.length - 1))},${height - pad} L${round2(x(0))},${height - pad} Z`;
+  const last = values[values.length - 1];
+  return `<svg class="spark ${cls}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true" style="direction:ltr">
+    ${budget > 0 && budgetLine ? `<line class="spark__budget" x1="${pad}" x2="${width - pad}" y1="${round2(y(budget))}" y2="${round2(y(budget))}"/>` : ''}
+    ${fill ? `<path class="spark__area" d="${area}"/>` : ''}
+    <path class="spark__line" d="${line}" vector-effect="non-scaling-stroke"/>
+    ${dot ? `<circle class="spark__dot" cx="${round2(x(values.length - 1))}" cy="${round2(y(last))}" r="2.6"/>` : ''}
   </svg>`;
 }

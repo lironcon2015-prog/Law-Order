@@ -858,6 +858,34 @@ async function onClick(e) {
       return render();
     }
 
+    case 'rename-team': {
+      // שינוי שם רק בלחיצה על השם עצמו: הכפתור מתחלף בשדה; Enter/יציאה שומרים, Esc מבטל
+      const team = store.getTeam(target.dataset.teamId);
+      if (!team) return;
+      const original = team.name;
+      const input = ui.el('input', {
+        class: 'trow__name-input', value: team.name, 'aria-label': 'שם הצוות',
+        dataset: { field: 'name', teamId: team.id },
+      });
+      target.replaceWith(input);
+      input.focus();
+      input.select();
+      input.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
+        else if (ev.key === 'Escape') {
+          ev.preventDefault(); ev.stopPropagation();
+          input.value = original; team.name = original;
+          input.blur();
+        }
+      });
+      // שם ריק לא נשמר — חוזרים לשם הקודם
+      input.addEventListener('blur', async () => {
+        if (!input.value.trim()) { team.name = original; await store.saveTeam(team); }
+        render();
+      }, { once: true });
+      return;
+    }
+
     case 'toggle-team': {
       // לחיצה על שדה בתוך השורה (שם הצוות, סימון) לא מקפלת אותה
       if (e.target.closest('input, select, label, .iconbtn, [data-grip]')) return;
