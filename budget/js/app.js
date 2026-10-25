@@ -606,7 +606,7 @@ function focusTeam(id) {
 /** ערכת הנושא — על <html>, כדי שגם הרקע מחוץ לאפליקציה יתחלף */
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#141517' : '#f5f5f2');
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#0c111a' : '#f4f2ed');
 }
 
 /** אחרי render() ה-DOM מוחלף — מחזירים את הפוקוס לאותו פריט כדי להמשיך להזיז */

@@ -6,7 +6,6 @@ import { BUILD } from './version.js';
 import { personKey } from './importer.js';
 import {
   el, icon, field, fact, button, iconButton, menu, card, table, limitItems, emptyState, fmtDate, fmtDelta,
-  avatar, personSlot,
 } from './ui-kit.js';
 
 /* ============================================================
@@ -169,13 +168,10 @@ export function renderPeopleView(root, { people, usageOf, dupes = [] }) {
     const use = usageOf(person.id);
     return el('tr', { class: person.active ? '' : 'is-inactive', dataset: { personId: person.id, search: [person.key, ...(person.aliases || []).map(personKey)].join(' ') } }, [
       el('td', { class: 'c-pick' }, [el('input', { type: 'checkbox', dataset: { pick: 'person', personId: person.id }, 'aria-label': `סימון ${person.name}` })]),
-      el('td', {}, [el('div', { class: 'pname' }, [
-        avatar(person.name, personSlot(person), { size: 'sm' }),
-        el('div', { class: 'pname__text' }, [
-          el('input', { class: 'qinput strong', value: person.name, dataset: { pfield: 'name', personId: person.id }, 'aria-label': 'שם' }),
-          person.aliases.length ? el('span', { class: 'sub', text: `ידוע גם כ: ${person.aliases.join(' · ')}` }) : null,
-        ]),
-      ])]),
+      el('td', {}, [
+        el('input', { class: 'qinput strong', value: person.name, dataset: { pfield: 'name', personId: person.id }, 'aria-label': 'שם' }),
+        person.aliases.length ? el('span', { class: 'sub', text: `ידוע גם כ: ${person.aliases.join(' · ')}` }) : null,
+      ]),
       el('td', {}, [el('input', { class: 'qinput', value: person.title, placeholder: 'שותף / עו״ד', dataset: { pfield: 'title', personId: person.id }, 'aria-label': 'תפקיד' })]),
       el('td', {}, [el('input', { class: 'qinput', value: person.defaultTeamName, placeholder: 'צוות ברירת מחדל', dataset: { pfield: 'defaultTeamName', personId: person.id }, 'aria-label': 'צוות' })]),
       el('td', {}, [el('input', { class: 'qinput ltr', type: 'email', value: person.email, placeholder: 'name@firm.co.il', dataset: { pfield: 'email', personId: person.id }, 'aria-label': 'דוא״ל' })]),

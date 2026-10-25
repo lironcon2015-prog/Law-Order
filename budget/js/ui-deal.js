@@ -1,21 +1,20 @@
-// ui-deal.js — כותרת העסקה וטאב התקציב: פס מצב, התראות, רשימת הצוותים והגיליון של כל צוות.
+// ui-deal.js — כותרת העסקה וטאב התקציב: כרטיס המצב, התראות, רשימת הצוותים והגיליון של כל צוות.
 // כל מספר מוצג ביחידה שנבחרה (שעות או ₪). ערכים מחושבים נושאים data-calc כדי ש-refreshComputed
 // יעדכן אותם בזמן הקלדה בלי רינדור מלא (רינדור מלא היה מאבד את הפוקוס בשדה).
 
 import {
-  DEAL_STATUSES, FEE_MODELS, aggregateTeams, aggregateByKind, round2, fmtMoney, fmtPct, progressByPeriod,
+  DEAL_STATUSES, FEE_MODELS, aggregateTeams, aggregateByKind, round2, fmtMoney, fmtPct,
 } from './model.js';
-import { ring, sparkline } from './charts.js';
 import {
-  el, icon, ICONS, measure, fmtU, fmtDelta, valueNodes, pctText, toneOf, meterCell, paintMeter,
-  unitSwitch, seg, menu, button, iconButton, emptyState, fmtDate, isFoldOpen, setFold, avatar, teamSlot, dealSlot,
+  el, icon, ICONS, measure, fmtU, fmtDelta, valueNodes, pctText, toneOf, meterCell, paintMeter, runway,
+  unitSwitch, seg, menu, button, iconButton, emptyState, fmtDate, isFoldOpen, setFold, swatch, teamSlot,
 } from './ui-kit.js';
 
 /* ============================================================
    כותרת העסקה + טאבים
    ============================================================ */
 
-const TABS = [['budget', 'תקציב', 'target'], ['reports', 'דיווחים', 'list'], ['analysis', 'ניתוח', 'chart'], ['settings', 'הגדרות', 'settings']];
+const TABS = [['budget', 'תקציב'], ['reports', 'דיווחים'], ['analysis', 'ניתוח'], ['settings', 'הגדרות']];
 
 export function renderDealHeader(root, { snap, tab, unit }) {
   const d = snap.deal;
@@ -56,14 +55,11 @@ export function renderDealHeader(root, { snap, tab, unit }) {
   root.append(el('header', { class: 'dhead' }, [
     el('div', { class: 'dhead__row' }, [
       el('div', { class: 'dhead__id' }, [
-        avatar(d.name, dealSlot(d), { size: 'lg' }),
-        el('div', { class: 'dhead__text' }, [
-          el('h1', { class: 'dhead__title' }, [
-            el('span', { text: d.name }),
-            status ? el('span', { class: `tag${d.status === 'active' ? ' tag--active' : ' tag--muted'}`, text: status.label }) : null,
-          ]),
-          el('p', { class: 'dhead__meta' }, meta.map((t) => el('span', { text: t }))),
+        el('h1', { class: 'dhead__title' }, [
+          el('span', { text: d.name }),
+          status ? el('span', { class: `tag${d.status === 'active' ? ' tag--active' : ' tag--muted'}`, text: status.label }) : null,
         ]),
+        el('p', { class: 'dhead__meta' }, meta.map((t) => el('span', { text: t }))),
       ]),
       el('div', { class: 'dhead__actions' }, [
         tab === 'settings' ? null : unitSwitch(unit),
@@ -72,22 +68,22 @@ export function renderDealHeader(root, { snap, tab, unit }) {
         button('ייבוא דוח שעות', { action: 'import-progress', iconName: 'upload', kind: 'primary', title: 'דוח שעות או חשבון — XLSX, CSV או PDF. אפשר גם לגרור קובץ לכל מקום במסך' }),
       ]),
     ]),
-    el('nav', { class: 'tabs', role: 'tablist', 'aria-label': 'אזורי העסקה' }, TABS.map(([id, label, ic]) => el('button', {
+    el('nav', { class: 'tabs', role: 'tablist', 'aria-label': 'אזורי העסקה' }, TABS.map(([id, label]) => el('button', {
       class: 'tab', type: 'button', role: 'tab', 'aria-selected': String(id === tab),
       dataset: { action: 'set-tab', tab: id },
-    }, [icon(ic), label, id === 'reports' && snap.execution.length ? el('span', { class: 'count', text: String(snap.execution.filter((r) => !r.superseded).length) }) : null]))),
+    }, [label, id === 'reports' && snap.execution.length ? el('span', { class: 'count', text: String(snap.execution.filter((r) => !r.superseded).length) }) : null]))),
   ]));
 }
 
 /* ============================================================
-   כרטיס המצב (hero) — שלוש שאלות: כמה נוצל · כמה נשאר · לאן זה הולך
-   הניצול כטבעת, ובתחתית הכרטיס "דופק" — קו השריפה המצטברת לאורך זמן.
+   כרטיס המצב — שלוש שאלות: כמה נוצל · כמה נשאר · לאן זה הולך.
+   המספר הראשי בגדול, המדדים לצדו, ובתחתית "מסלול" התקציב: בוצע, קו התקציב והתחזית לסיום.
    ============================================================ */
 
-/** תא מדד בכרטיס: סמל, תווית, ערך, ושורת הקשר */
-function heroCell(iconName, label, value, sub) {
+/** תא מדד בכרטיס: תווית, ערך, ושורת הקשר */
+function heroCell(label, value, sub) {
   return el('div', { class: 'hero__cell' }, [
-    el('span', { class: 'hero__label' }, [el('span', { class: 'hero__ic', html: ICONS[iconName] || '' }), label]),
+    el('span', { class: 'hero__label', text: label }),
     value,
     sub ? el('span', { class: 'hero__sub' }, [].concat(sub)) : null,
   ]);
@@ -97,33 +93,28 @@ export function dealHero(snap, unit) {
   const d = snap.deal;
   const m = measure(snap, unit);
   const eac = unit === 'money' ? snap.eac : snap.eacHours;
-  const eacGap = eac === null || eac === undefined ? null : round2(eac - m.budget);
+  const hasEac = eac !== null && eac !== undefined;
+  const eacGap = hasEac ? round2(eac - m.budget) : null;
   const eacTone = eacGap !== null && eacGap > 0 ? (eac > m.budget * 1.05 ? 'is-over' : 'is-risk') : '';
   const over = m.remaining < 0;
 
-  const ringBox = el('div', { class: 'hero__ring', html: ring(m.util, m.status, { size: 124, stroke: 11, label: `ניצול ${pctText(m.util)}` }) }, [
-    el('span', { class: 'hero__pct' }, [
-      el('span', { class: `num ${toneOf(m.status)}`.trim(), text: pctText(m.util) }),
-      el('span', { class: 'hero__pct-sub', text: 'נוצל' }),
-    ]),
-  ]);
-  const main = el('div', { class: 'hero__main' }, [
-    ringBox,
-    el('div', { class: 'hero__lead' }, [
-      el('span', { class: 'hero__label', text: unit === 'money' ? 'ניצול התקציב' : 'ניצול שעות התקציב' }),
-      el('span', { class: 'hero__big' }, valueNodes(m.actual, unit, { deal: d })),
-      el('span', { class: 'hero__sub' }, ['מתוך ', ...valueNodes(m.budget, unit, { deal: d })]),
+  const lead = el('div', { class: 'hero__lead' }, [
+    el('span', { class: 'hero__label', text: unit === 'money' ? 'ניצול התקציב' : 'ניצול שעות התקציב' }),
+    el('span', { class: 'hero__big' }, valueNodes(m.actual, unit, { deal: d })),
+    el('span', { class: 'hero__sub' }, [
+      'מתוך ', ...valueNodes(m.budget, unit, { deal: d }), ' · ',
+      el('span', { class: `num hero__pct ${toneOf(m.status)}`.trim(), text: pctText(m.util) }), ' נוצל',
     ]),
   ]);
 
   const cells = [
-    heroCell(over ? 'alert' : 'clock', over ? 'חריגה מהתקציב' : 'נותרו',
+    heroCell(over ? 'חריגה מהתקציב' : 'נותרו',
       el('span', { class: 'hero__value' }, valueNodes(Math.abs(m.remaining), unit, { deal: d, cls: over ? 'is-over' : '' })),
       snap.lastReportAt ? `דיווח אחרון ${fmtDate(snap.lastReportAt)}` : 'טרם דווחו שעות'),
-    heroCell('trending', 'תחזית לסיום',
-      eac === null || eac === undefined
-        ? el('span', { class: 'hero__value hero__value--none', text: '—' })
-        : el('span', { class: 'hero__value' }, valueNodes(eac, unit, { deal: d, cls: eacTone })),
+    heroCell('תחזית לסיום',
+      hasEac
+        ? el('span', { class: 'hero__value' }, valueNodes(eac, unit, { deal: d, cls: eacTone }))
+        : el('span', { class: 'hero__value hero__value--none', text: '—' }),
       eacGap === null
         ? 'הזן אחוז התקדמות או תאריכים בהגדרות'
         : [...valueNodes(Math.abs(eacGap), unit, { deal: d }), eacGap > 0 ? ' מעל התקציב' : ' מתחת לתקציב',
@@ -132,19 +123,14 @@ export function dealHero(snap, unit) {
   if (unit === 'money' && snap.hasFee) {
     const ref = eac ?? m.actual;
     const gap = round2(snap.agreedFee - ref);
-    cells.push(heroCell('coins', d.feeModel === 'capped' ? 'תקרת שכ"ט' : 'שכ"ט מוסכם',
+    cells.push(heroCell(d.feeModel === 'capped' ? 'תקרת שכ"ט' : 'שכ"ט מוסכם',
       el('span', { class: 'hero__value num', text: fmtU(snap.agreedFee, 'money', d) }),
-      [eac !== null && eac !== undefined ? 'מול התחזית: ' : 'מול הביצוע: ', el('span', { class: `num ${gap < 0 ? 'is-over' : ''}`.trim(), text: fmtDelta(gap, 'money', d) })]));
+      [hasEac ? 'מול התחזית: ' : 'מול הביצוע: ', el('span', { class: `num ${gap < 0 ? 'is-over' : ''}`.trim(), text: fmtDelta(gap, 'money', d) })]));
   }
 
-  // הדופק: שריפה מצטברת לפי שבוע — צורה וקצב, בלי צירים (הגרף המלא בטאב הדיווחים). רצועה בתחתית,
-  // מתחת למספרים; התקציב קובע את תקרת הסקאלה, כך שהגובה של הקו בסוף = כמה מהתקציב נשרף
-  const series = progressByPeriod(snap, 'week').map((r) => (unit === 'money' ? r.cumulativeCost : r.cumulativeHours));
-  const pulse = series.length > 1;
-  return el('section', { class: `hero hero--${m.status}${pulse ? ' hero--pulse' : ''}`, dataset: { region: 'hero' }, 'aria-label': 'מצב העסקה' }, [
-    pulse ? el('div', { class: 'hero__pulse', html: sparkline(series, { width: 600, height: 54, budget: m.budget, budgetLine: false, cls: 'spark--hero', dot: false }) }) : null,
-    main,
-    el('div', { class: 'hero__cells' }, cells),
+  return el('section', { class: `hero hero--${m.status}`, dataset: { region: 'hero' }, 'aria-label': 'מצב העסקה' }, [
+    el('div', { class: 'hero__top' }, [lead, el('div', { class: 'hero__cells' }, cells)]),
+    runway({ actual: m.actual, budget: m.budget, eac: hasEac ? eac : null, fmt: (v) => fmtU(v, unit, d) }),
   ]);
 }
 
@@ -232,7 +218,7 @@ export function renderBudgetTab(root, { snap, rateCard, unit = 'hours', selected
 
   root.append(el('section', { class: 'card teams' }, [
     el('header', { class: 'card__head' }, [
-      el('h2', { class: 'card__title' }, [el('span', { class: 'card__ic', html: ICONS.users }), 'צוותים', el('span', { class: 'count', text: String(snap.teams.length) })]),
+      el('h2', { class: 'card__title' }, ['צוותים', el('span', { class: 'count', text: String(snap.teams.length) })]),
       el('div', { class: 'card__tools' }, [
         seg([['priority', 'לפי דחיפות', 'צוותים בחריגה או בסיכון ראשונים'], ['manual', 'הסדר שלי', 'הסדר שנקבע בגרירה']], sort, 'set-team-sort', 'sort', { cls: 'seg--sm', label: 'מיון הצוותים' }),
         button('צוות', { action: 'add-team', iconName: 'plus', title: 'הוספת צוות (שורה לכל דרגה בתעריפון)' }),
@@ -247,7 +233,7 @@ export function renderBudgetTab(root, { snap, rateCard, unit = 'hours', selected
 
 /**
  * שורת צוות ברשימה. לחיצה בכל מקום בשורה פותחת את הגיליון; רק לחיצה על השם עצמו משנה אותו
- * (rename-team ב-app.js מחליף את הכפתור בשדה עריכה). הצבע — סמל הזהות של הצוות.
+ * (rename-team ב-app.js מחליף את הכפתור בשדה עריכה). הריבוע הצבעוני — הזהות של הצוות בפס החלוקה.
  */
 function teamRow(team, { snap, unit, selected, expanded }) {
   const d = snap.deal;
@@ -266,7 +252,7 @@ function teamRow(team, { snap, unit, selected, expanded }) {
       'aria-label': `שינוי מיקום הצוות ${team.name}`, dataset: { grip: 'team', teamId: team.id },
     }),
     el('div', { class: 'trow__id' }, [
-      avatar(team.name, teamSlot(team), { size: 'sm' }),
+      swatch(teamSlot(team)),
       el('div', { class: 'trow__idtext' }, [
         el('button', {
           class: 'trow__name', type: 'button', title: 'לחיצה לשינוי שם הצוות',

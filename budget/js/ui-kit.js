@@ -72,10 +72,10 @@ export function icon(name, cls) {
   return el('span', { class: cls || 'ic', html: ICONS[name] || '', 'aria-hidden': 'true' });
 }
 
-/* ---------- צבעי זהות: צוותים ועסקאות ----------
- * שישה גוונים (‎--id-0..5 ב-CSS), בסדר שנבדק לעיוורון צבעים בשתי הערכות. הצבע הולך עם הישות
- * ולא עם המיקום שלה ברשימה: צוות — לפי הצבע ששמור עליו מאז שנוצר, עסקה — לפי המזהה שלה.
- * הגוונים לא כוללים אדום/ענבר — אלה שמורים לחריגה ולסיכון.
+/* ---------- צבעי זהות לצוותים ----------
+ * שישה גוונים (‎--id-0..5 ב-CSS), בסדר שנבדק לעיוורון צבעים בשתי הערכות. הצבע הולך עם הצוות
+ * ולא עם המיקום שלו ברשימה — לפי הצבע ששמור עליו מאז שנוצר. הוא מופיע רק כסימון קטן ליד השם
+ * ובפס החלוקה. הגוונים לא כוללים אדום/ענבר — אלה שמורים לחריגה ולסיכון.
  */
 export const ID_SLOTS = 6;
 const hashId = (s) => { let h = 7; for (const ch of String(s || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; };
@@ -83,22 +83,9 @@ export const teamSlot = (team) => {
   const i = TEAM_COLORS.indexOf(team?.color);
   return (i >= 0 ? i : hashId(team?.id)) % ID_SLOTS;
 };
-export const dealSlot = (deal) => hashId(deal?.id) % ID_SLOTS;
-export const personSlot = (person) => hashId(person?.id) % ID_SLOTS;
 
-/** ראשי תיבות לסמל: שתי המילים הראשונות ("רכישת אלפא טכנולוגיות" → "רא") */
-export function initials(name, n = 2) {
-  const words = String(name || '').replace(/["'׳״—–\-·]/g, ' ').split(/\s+/).filter(Boolean);
-  return words.slice(0, n).map((w) => w[0]).join('') || '·';
-}
-
-/** סמל זהות: ריבוע מעוגל בצבע הישות עם ראשי התיבות שלה */
-export function avatar(name, slot, { size = '', alert = '' } = {}) {
-  return el('span', {
-    class: `av${size ? ` av--${size}` : ''}`, 'aria-hidden': 'true',
-    dataset: alert ? { slot: String(slot), alert } : { slot: String(slot) }, text: initials(name),
-  });
-}
+/** סימון זהות קטן ליד שם הצוות — מקשר את השורה למקטע שלה בפס החלוקה */
+export const swatch = (slot) => el('i', { class: 'swatch', dataset: { slot: String(slot) }, 'aria-hidden': 'true' });
 
 /* ---------- יחידה: שעות או ₪ ----------
  * כל מספר על המסך מוצג ביחידה אחת שנבחרה במתג. אחוזים, מקדמים וספירות הם בלי יחידה
@@ -186,6 +173,36 @@ export function meterCell(util, status, { calc = '', size = '' } = {}) {
   return el('div', { class: 'mcell' }, [
     meter(util, status, { size, calc: calc ? `${calc}-meter` : '' }),
     el('span', { class: `mcell__pct num ${toneOf(status)}`.trim(), dataset: calc ? { calc: `${calc}-pct` } : null, text: pctText(util) }),
+  ]);
+}
+
+/* ---------- מסלול התקציב (כרטיס המצב) ----------
+ * פס אחד: בוצע מול התקציב, והתחזית לסיום כהמשך מקווקו. הסקאלה היא התקציב — או הביצוע/התחזית
+ * כשהם גבוהים ממנו, ואז מה שעובר את קו התקציב נצבע כחריגה. ב-RTL הפס גדל מימין לשמאל.
+ */
+export function runway({ actual = 0, budget = 0, eac = null, fmt = String } = {}) {
+  const top = Math.max(budget, actual, eac ?? 0) || 1;
+  const at = (v) => `${Math.round(Math.max(0, Math.min(1, v / top)) * 1000) / 10}%`;
+  const part = (cls, from, to) => (to > from ? el('span', { class: cls, style: `inset-inline-start:${at(from)};width:${at(to - from)}` }) : null);
+  const cap = budget > 0 ? budget : Infinity;
+  const fc = eac !== null && eac > actual;
+  const share = (v) => (budget > 0 ? pctText(v / budget) : '');
+  return el('div', {
+    class: 'runway', role: 'img',
+    'aria-label': `בוצע ${fmt(actual)} מתוך תקציב ${fmt(budget)}${fc ? ` · תחזית לסיום ${fmt(eac)}` : ''}`,
+  }, [
+    el('div', { class: 'runway__track' }, [
+      part('runway__fill', 0, Math.min(actual, cap)),
+      part('runway__over', cap, actual),
+      fc ? part('runway__fc', actual, Math.min(eac, cap)) : null,
+      fc ? part('runway__fc runway__fc--over', Math.max(actual, cap), eac) : null,
+      budget > 0 ? el('span', { class: 'runway__mark', style: `inset-inline-start:${at(budget)}` }) : null,
+    ]),
+    el('div', { class: 'runway__legend', 'aria-hidden': 'true' }, [
+      el('span', { class: 'runway__key runway__key--actual' }, [el('i'), 'בוצע', budget > 0 ? el('span', { class: 'num', text: share(actual) }) : null]),
+      budget > 0 ? el('span', { class: 'runway__key runway__key--budget' }, [el('i'), 'תקציב']) : null,
+      fc ? el('span', { class: `runway__key runway__key--fc${eac > budget ? ' runway__key--over' : ''}` }, [el('i'), 'תחזית לסיום', budget > 0 ? el('span', { class: 'num', text: share(eac) }) : null]) : null,
+    ]),
   ]);
 }
 

@@ -2,7 +2,7 @@
 // app-shell = network-first (פרסומים נכנסים לתוקף מיד), פונטים/אייקונים = cache-first.
 // offline עובד מלא: כל הנתונים ב-IndexedDB, ה-shell במטמון.
 
-const CACHE = 'lexbudget-v30';
+const CACHE = 'lexbudget-v31';
 
 const ASSETS = [
   './',
@@ -32,6 +32,8 @@ const ASSETS = [
   './vendor/pdf.worker.min.js',
   './fonts/heebo-hebrew.woff2',
   './fonts/heebo-latin.woff2',
+  './fonts/frank-ruhl-hebrew.woff2',
+  './fonts/frank-ruhl-latin.woff2',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/icon-maskable-512.png',

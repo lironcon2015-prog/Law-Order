@@ -6,7 +6,7 @@
   <title>LexBudget · דמו</title>
   <meta name="description" content="LexBudget — ניהול תקציב עסקאות M&amp;A: תקציב לפי צוותים ודרגות, ייבוא דוחות שעות, ובקרת תקציב מול ביצוע בשעות או בשקלים. offline-first." />
 
-  <meta name="theme-color" content="#f5f5f2" />
+  <meta name="theme-color" content="#f4f2ed" />
   <meta name="color-scheme" content="light dark" />
   <link rel="manifest" href="../manifest.json" />
   <link rel="apple-touch-icon" href="../icons/icon-192.png" />
@@ -15,7 +15,7 @@
     try {
       if (localStorage.getItem('lb_theme') === 'dark') {
         document.documentElement.dataset.theme = 'dark';
-        document.querySelector('meta[name="theme-color"]').setAttribute('content', '#141517');
+        document.querySelector('meta[name="theme-color"]').setAttribute('content', '#0c111a');
       }
     } catch (e) { /* localStorage חסום — נשאר בהיר */ }
   </script>
@@ -38,7 +38,7 @@
         <button class="iconbtn" type="button" data-action="toggle-nav" aria-label="פתיחת הניווט">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg>
         </button>
-        <span class="side__logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/></svg></span>
+        <span class="side__logo" aria-hidden="true">LB</span>
         <span class="mbar__title" id="mbar-title">LexBudget</span>
       </header>
       <main class="main" id="main"></main>
