@@ -106,6 +106,9 @@ export function statusOf(util) {
 
 export const STATUS_LABEL = { ok: 'תקין', watch: 'לתשומת לב', risk: 'סיכון', over: 'חריגה' };
 
+/** ניצול כיחס: בפועל ÷ תקציב. תקציב 0 עם ביצוע = חריגה אינסופית */
+export const ratioOf = (actual, budget) => (budget > 0 ? actual / budget : (actual > 0 ? Infinity : 0));
+
 /* ============================================================
    נרמול רשומות
    ============================================================ */
@@ -556,6 +559,9 @@ export function computeDeal({ deal, teams, entries, rateCard, progress: progress
           remainingCost: round2(cost - aCost),
           util,
           status: statusOf(util),
+          // ניצול לפי עלות — לתצוגת ₪ (בשורה הוא זהה לשעות כשיש תעריף)
+          costUtil: ratioOf(aCost, cost),
+          costStatus: statusOf(ratioOf(aCost, cost)),
         };
       });
       const budgetCost = round2(lines.reduce((s, l) => s + l.budgetCost, 0));
@@ -580,6 +586,10 @@ export function computeDeal({ deal, teams, entries, rateCard, progress: progress
         remainingHours: round2(budgetHours - actualHours),
         util,
         status: statusOf(util),
+        // בצוות ניצול העלות יכול להיות שונה מניצול השעות — תמהיל דרגות יקר או זול מהמתוכנן
+        costUtil: ratioOf(actualCost, budgetCost),
+        costStatus: statusOf(ratioOf(actualCost, budgetCost)),
+        estCost: round2(lines.reduce((s, l) => s + num(l.estHours) * l.rate, 0)),
         lastReportAt,
         unassignedTeamHours,
       };
@@ -588,6 +598,8 @@ export function computeDeal({ deal, teams, entries, rateCard, progress: progress
   const budgetCost = round2(teamRows.reduce((s, t) => s + t.budgetCost, 0));
   const budgetHours = round2(teamRows.reduce((s, t) => s + t.budgetHours, 0));
   const estHours = round2(teamRows.reduce((s, t) => s + t.estHours, 0));
+  // שווי ההערכה המקורית (לפני מקדם החריגה) — נקודת הייחוס הראשונה בתצוגת ₪
+  const estCost = round2(teamRows.reduce((s, t) => s + t.estCost, 0));
 
   // תעריף בלנדד (כמו בגיליון): עלות הדרגות שאינן ג'וניור חלקי שעות אותן דרגות.
   // הג'וניורים יוצאים משני צדי השבר.
@@ -615,6 +627,7 @@ export function computeDeal({ deal, teams, entries, rateCard, progress: progress
 
   // המדד הוא שעות — כמו בצוותים, בשורות ובסקירה (קודם העסקה נמדדה בכסף והראתה מספר אחר)
   const util = budgetHours > 0 ? actualHours / budgetHours : (actualHours > 0 ? Infinity : 0);
+  const costUtil = ratioOf(actualCost, budgetCost);
   const progress = deal.progressPct / 100;
 
   // תחזית לסיום (EAC): לפי התקדמות אם דווחה, אחרת לפי קצב זמן
@@ -709,12 +722,13 @@ export function computeDeal({ deal, teams, entries, rateCard, progress: progress
 
   return {
     deal, teams: teamRows, entries: dealEntries, rateCard,
-    estHours, budgetHours, budgetCost,
+    estHours, estCost, budgetHours, budgetCost,
     actualHours: round2(actualHours), actualCost: round2(actualCost),
     unassignedHours: round2(unassignedHours), unassignedTeamHours,
     remainingCost: round2(budgetCost - actualCost),
     remainingHours: round2(budgetHours - actualHours),
     util, status: statusOf(util),
+    costUtil, costStatus: statusOf(costUtil),
     blendedRate, blendedAll, effectiveRate, blendedActual,
     juniorCost: round2(juniorCost), juniorHours: round2(juniorHours),
     seniorHours: round2(seniorHours), seniorCost: round2(seniorCost),
@@ -727,7 +741,12 @@ export function computeDeal({ deal, teams, entries, rateCard, progress: progress
     timePace, progress,
     agreedFee: agreed, hasFee, margin, marginPct, feeUtil,
     byRole: byRoleRows,
-    alerts: buildAlerts({ deal, teamRows, util, actualHours, budgetHours, actualCost, budgetCost, eac, feeUtil, unassignedHours, progress, capBudget }),
+    // התראות לפי יחידה — כל התראה מנוסחת ונמדדת ביחידה שעל המסך (שעות או ₪), בלי לערבב
+    alerts: buildAlerts({
+      teamRows, progress, feeUtil, capBudget, unassignedHours,
+      hours: { util, actual: actualHours, budget: budgetHours, eac: eacHours },
+      money: { util: costUtil, actual: actualCost, budget: budgetCost, eac },
+    }),
     baselineDelta: baselineDelta(deal, budgetCost),
   };
 }
@@ -785,38 +804,59 @@ function baselineDelta(deal, budgetCost) {
   return { base, delta: round2(budgetCost - base), pct: base > 0 ? (budgetCost - base) / base : null, capturedAt: deal.baseline.capturedAt };
 }
 
-function buildAlerts({ deal, teamRows, util, actualHours, budgetHours, actualCost, budgetCost, eac, feeUtil, unassignedHours, progress, capBudget }) {
-  const out = [];
-  if (capBudget?.applies) {
-    out.push({ level: 'watch', text: `התקציב (${fmtMoney(capBudget.cost)}) גבוה מהתקרה (${fmtMoney(capBudget.collected)}) — הנחה אפקטיבית של ${fmtPct(capBudget.discountPct, 1)} על כל התעריפים.` });
-  }
-  if (budgetHours > 0 && util > 1) {
-    out.push({ level: 'over', text: `חריגה: ${fmtHours(actualHours - budgetHours)} שעות מעל התקציב (${fmtMoney(actualCost - budgetCost)} לפי תעריפי התכנון).` });
-  } else if (budgetHours > 0 && util >= THRESHOLDS.risk) {
-    out.push({ level: 'risk', text: `נשרפו ${fmtPct(util)} משעות התקציב — נותרו ${fmtHours(budgetHours - actualHours)} שעות.` });
-  }
-  for (const t of teamRows) {
-    if (t.util > 1) out.push({ level: 'over', text: `הצוות "${t.name}" חרג ב-${fmtHours(t.actualHours - t.budgetHours)} שעות (${fmtMoney(t.actualCost - t.budgetCost)}).`, teamId: t.id });
-    else if (t.util >= THRESHOLDS.risk) out.push({ level: 'risk', text: `הצוות "${t.name}" בניצול ${fmtPct(t.util)} מהשעות.`, teamId: t.id });
-    for (const l of t.lines) {
-      if (l.budgetHours > 0 && l.actualHours > l.budgetHours) {
-        out.push({ level: 'watch', text: `"${t.name}" · ${l.roleName}: ${fmtHours(l.actualHours)} שעות בפועל מול ${fmtHours(l.budgetHours)} בתקציב.`, teamId: t.id });
+/**
+ * התראות העסקה — רשימה נפרדת לכל יחידה. בשעות נמדד ניצול השעות, ב-₪ ניצול העלות, וכל
+ * התראה מנוסחת ביחידה של המסך: בלי "18 שעות (₪5,690)" באותו משפט.
+ * כל פריט: { level, kind, teamId?, text }. `teamId` מאפשר לקפוץ מההתראה לצוות.
+ */
+function buildAlerts({ teamRows, progress, feeUtil, capBudget, unassignedHours, hours, money }) {
+  const H = (n) => `${fmtHours(n)} שעות`;
+  const units = {
+    hours: { m: hours, fmt: H, util: (x) => x.util, act: (x) => x.actualHours, bud: (x) => x.budgetHours, of: 'משעות התקציב' },
+    money: { m: money, fmt: (n) => fmtMoney(n), util: (x) => x.costUtil, act: (x) => x.actualCost, bud: (x) => x.budgetCost, of: 'מתקציב העלות' },
+  };
+  const out = {};
+  for (const [unit, u] of Object.entries(units)) {
+    const list = [];
+    if (capBudget?.applies) {
+      list.push({ level: 'watch', kind: 'cap', text: unit === 'money'
+        ? `התקציב (${fmtMoney(capBudget.cost)}) גבוה מהתקרה (${fmtMoney(capBudget.collected)}) — הנחה אפקטיבית של ${fmtPct(capBudget.discountPct, 1)} על כל התעריפים.`
+        : `התקציב עובר את תקרת שכר הטרחה — הנחה אפקטיבית של ${fmtPct(capBudget.discountPct, 1)} על כל התעריפים.` });
+    }
+    const { m } = u;
+    if (m.budget > 0 && m.util > 1) {
+      list.push({ level: 'over', kind: 'deal', text: `העסקה חרגה ב-${u.fmt(m.actual - m.budget)} מעל התקציב.` });
+    } else if (m.budget > 0 && m.util >= THRESHOLDS.risk) {
+      list.push({ level: 'risk', kind: 'deal', text: `נוצלו ${fmtPct(m.util)} ${u.of} — נותרו ${u.fmt(m.budget - m.actual)}.` });
+    }
+    for (const t of teamRows) {
+      const tu = u.util(t);
+      if (tu > 1) list.push({ level: 'over', kind: 'team', teamId: t.id, text: `הצוות "${t.name}" חרג ב-${u.fmt(u.act(t) - u.bud(t))}.` });
+      else if (tu >= THRESHOLDS.risk) list.push({ level: 'risk', kind: 'team', teamId: t.id, text: `הצוות "${t.name}" ניצל ${fmtPct(tu)} ${u.of}.` });
+      for (const l of t.lines) {
+        if (u.bud(l) > 0 && u.act(l) > u.bud(l)) {
+          const who = l.personName ? `${l.roleName} (${l.personName})` : l.roleName;
+          list.push({ level: 'watch', kind: 'line', teamId: t.id, lineId: l.id, text: `"${t.name}" · ${who}: ${u.fmt(u.act(l))} בפועל מול ${u.fmt(u.bud(l))} בתקציב.` });
+        }
       }
     }
+    if (m.eac !== null && m.eac !== undefined && m.budget > 0 && m.eac > m.budget * 1.05) {
+      list.push({ level: 'risk', kind: 'eac', text: `התחזית לסיום ${u.fmt(m.eac)} — ${u.fmt(m.eac - m.budget)} מעל התקציב.` });
+    }
+    if (feeUtil !== null && feeUtil > 1) {
+      list.push({ level: 'over', kind: 'fee', text: `הביצוע עבר את שכר הטרחה המוסכם (${fmtPct(feeUtil)}).` });
+    }
+    if (progress > 0 && m.budget > 0 && m.util > progress + 0.15) {
+      list.push({ level: 'watch', kind: 'pace', text: `קצב השריפה מקדים את ההתקדמות: ${fmtPct(m.util)} ${u.of} מול ${fmtPct(progress)} התקדמות.` });
+    }
+    if (unassignedHours > 0) {
+      list.push({ level: 'watch', kind: 'unassigned', text: unit === 'hours'
+        ? `${H(unassignedHours)} דווחו בלי שיוך לשורת תקציב — אין להן תעריף ולכן אינן נספרות בעלות.`
+        : 'יש דיווחים בלי שיוך לשורת תקציב — אין להם תעריף ולכן אינם נספרים בעלות.' });
+    }
+    if (!teamRows.length) list.push({ level: 'info', kind: 'empty', text: 'לא הוגדרו צוותים לעסקה — הוסף צוות כדי לבנות תקציב.' });
+    out[unit] = list;
   }
-  if (eac !== null && budgetCost > 0 && eac > budgetCost * 1.05) {
-    out.push({ level: 'risk', text: `תחזית לסיום ${fmtMoney(eac)} — ${fmtMoney(eac - budgetCost)} מעל התקציב.` });
-  }
-  if (feeUtil !== null && feeUtil > 1) {
-    out.push({ level: 'over', text: `העלות בפועל עברה את שכר הטרחה המוסכם (${fmtPct(feeUtil)}).` });
-  }
-  if (progress > 0 && budgetCost > 0 && util > progress + 0.15) {
-    out.push({ level: 'watch', text: `קצב השריפה מקדים את ההתקדמות: ${fmtPct(util)} משעות התקציב מול ${fmtPct(progress)} התקדמות.` });
-  }
-  if (unassignedHours > 0) {
-    out.push({ level: 'watch', text: `${fmtHours(unassignedHours)} שעות דווחו בלי שיוך לשורת תקציב — אין להן תעריף ולכן אינן נספרות בעלות.` });
-  }
-  if (!teamRows.length) out.push({ level: 'info', text: 'לא הוגדרו צוותים לעסקה — הוסף צוות כדי לבנות תקציב.' });
   return out;
 }
 
@@ -996,6 +1036,8 @@ export function aggregateTeams(snapshot, teamIds) {
   t.remainingHours = round2(t.budgetHours - t.actualHours);
   t.util = t.budgetHours > 0 ? t.actualHours / t.budgetHours : (t.actualHours > 0 ? Infinity : 0);
   t.status = statusOf(t.util);
+  t.costUtil = ratioOf(t.actualCost, t.budgetCost);
+  t.costStatus = statusOf(t.costUtil);
   t.blendedAll = t.budgetHours > 0 ? round2(t.budgetCost / t.budgetHours) : 0;
   t.blendedRate = t.seniorHours > 0 ? round2(t.seniorCost / t.seniorHours) : t.blendedAll;
   t.effectiveRate = t.actualHours > 0 ? round2(t.actualCost / t.actualHours) : 0;
@@ -1018,21 +1060,25 @@ export function aggregateByKind(snapshot) {
   };
 }
 
-/** סיכום תיק העסקאות (לתצוגת הסקירה) */
+/** סיכום תיק העסקאות (לתצוגת הסקירה). הספירה של חריגה/סיכון — לכל יחידה בנפרד */
 export function computePortfolio(snapshots) {
   const t = {
     budgetCost: 0, actualCost: 0, actualHours: 0, budgetHours: 0, agreedFee: 0,
     deals: snapshots.length, over: 0, risk: 0,
+    byUnit: { hours: { over: 0, risk: 0 }, money: { over: 0, risk: 0 } },
   };
   for (const s of snapshots) {
     t.budgetCost += s.budgetCost; t.actualCost += s.actualCost;
     t.actualHours += s.actualHours; t.budgetHours += s.budgetHours;
     t.agreedFee += s.agreedFee;
-    // הסטטוס נקבע לפי המסלול השוטף אם הוזן, אחרת לפי החשבונות
-    if (s.status === 'over') t.over += 1;
-    else if (s.status === 'risk') t.risk += 1;
+    for (const [unit, st] of [['hours', s.status], ['money', s.costStatus]]) {
+      if (st === 'over') t.byUnit[unit].over += 1;
+      else if (st === 'risk') t.byUnit[unit].risk += 1;
+    }
   }
+  t.over = t.byUnit.hours.over; t.risk = t.byUnit.hours.risk;
   t.util = t.budgetHours > 0 ? t.actualHours / t.budgetHours : 0;
+  t.costUtil = t.budgetCost > 0 ? t.actualCost / t.budgetCost : 0;
   t.remainingCost = round2(t.budgetCost - t.actualCost);
   t.remainingHours = round2(t.budgetHours - t.actualHours);
   return t;

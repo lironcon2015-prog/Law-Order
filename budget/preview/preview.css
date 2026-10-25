@@ -1,8 +1,9 @@
 /* preview.css — פס "סביבת דמו" בלבד. העיצוב עצמו הוא של האפליקציה (../css/styles.css). */
 .demo-bar {
   position: fixed; inset-block-end: 16px; inset-inline-end: 16px; z-index: 200;
-  display: flex; align-items: center; gap: 10px; padding: 5px 5px 5px 14px;
-  background: #24242b; border: 1px solid rgba(255,255,255,.14); border-radius: 999px;
-  box-shadow: 0 10px 30px rgba(0,0,0,.35); font-size: 12.5px; color: #cfcfd6;
+  display: flex; align-items: center; gap: 10px; padding: 5px 14px 5px 5px;
+  background: var(--toast-bg); color: var(--toast-text); border-radius: 999px;
+  box-shadow: var(--shadow-pop); font-size: 12.5px;
 }
-.demo-bar button { border: 0; background: #fff; color: #111; padding: 6px 12px; border-radius: 999px; font-weight: 700; }
+.demo-bar button { border: 0; background: var(--surface); color: var(--text); padding: 6px 12px; border-radius: 999px; font-weight: 600; }
+@media (max-width: 900px) { .demo-bar { inset-inline-end: 8px; inset-block-end: 8px; } .demo-bar span { display: none; } }

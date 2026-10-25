@@ -17,7 +17,12 @@ const b64 = (p) => readFileSync(join(BUDGET, p)).toString('base64');
 const BUILD = stamp({ channel: 'web' });   // version.js לאתר החי
 
 /* ---------- 1) מודולי JS בסדר תלויות ---------- */
-const ORDER = ['version.js', 'model.js', 'db.js', 'xlsx.js', 'xlsx-write.js', 'pdf-table.js', 'charts.js', 'importer.js', 'store.js', 'file-store.js', 'ui.js', 'app.js'];
+const ORDER = [
+  'version.js', 'model.js', 'db.js', 'xlsx.js', 'xlsx-write.js', 'pdf-table.js', 'charts.js', 'importer.js', 'store.js', 'file-store.js',
+  // שכבת התצוגה: היסודות קודם, אחריהם המסכים, ו-ui.js (שמייצא את כולם) אחרון
+  'ui-kit.js', 'ui-overview.js', 'ui-deal.js', 'ui-reports.js', 'ui-analysis.js', 'ui-admin.js', 'ui.js',
+  'app.js',
+];
 const SRC = {};
 for (const name of ORDER) {
   // בקובץ האופליין הערוץ הוא 'offline' — כך רואים במסך ההגדרות מאיזה מקור הגרסה
@@ -33,10 +38,8 @@ const VENDOR = {
 
 /* ---------- 2) CSS + פונטים מוטבעים ---------- */
 const FONTS = {
-  'assistant-hebrew.woff2': b64('fonts/assistant-hebrew.woff2'),
-  'assistant-latin.woff2': b64('fonts/assistant-latin.woff2'),
-  'inter-latin.woff2': b64('fonts/inter-latin.woff2'),
-  'ibmplexmono.woff2': b64('fonts/ibmplexmono.woff2'),
+  'heebo-hebrew.woff2': b64('fonts/heebo-hebrew.woff2'),
+  'heebo-latin.woff2': b64('fonts/heebo-latin.woff2'),
 };
 let fontsCss = rd('css/fonts.css');
 for (const [file, data] of Object.entries(FONTS)) {

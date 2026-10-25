@@ -473,15 +473,17 @@ export async function deleteProgressBatch(batchId) {
  * עם ההיקף שנגזר מכל אחד. משמש למחיקת מקור על כל מה שנלקח ממנו.
  * @returns {Array<{key,kind,label,fileName,fileId,count,hours,periods,from,to,deletable}>}
  */
-export function dataSourcesOf(dealId) {
+export function dataSourcesOf(dealId, { costOf = null } = {}) {
   const out = new Map();
   const touch = (key, base) => {
-    if (!out.has(key)) out.set(key, { key, count: 0, hours: 0, periods: new Set(), from: '', to: '', files: new Set(), ...base });
+    if (!out.has(key)) out.set(key, { key, count: 0, hours: 0, cost: 0, periods: new Set(), from: '', to: '', files: new Set(), ...base });
     return out.get(key);
   };
-  const add = (g, { hours, date, period, fileId }) => {
+  // costOf(id) — עלות הרשומה לפי השורה שאליה שויכה בסנאפשוט (לתצוגת ₪); בלעדיו העלות נשארת 0
+  const add = (g, { id, hours, date, period, fileId }) => {
     g.count += 1;
     g.hours = round2(g.hours + num(hours));
+    if (costOf) g.cost = round2(g.cost + num(costOf(id)));
     if (period) g.periods.add(period);
     if (date) { if (!g.from || date < g.from) g.from = date; if (!g.to || date > g.to) g.to = date; }
     if (fileId) g.files.add(fileId);
@@ -493,7 +495,7 @@ export function dataSourcesOf(dealId) {
     const g = touch(key, isImport
       ? { kind: p.source, label: p.fileName || (p.source === 'invoice' ? 'חשבון' : 'דוח שעות'), fileName: p.fileName || '', batchId: p.batchId || '', deletable: true }
       : { kind: 'manual', label: 'הזנה ידנית', fileName: '', deletable: false });
-    add(g, { hours: p.hours, date: p.date, period: p.billPeriod, fileId: p.fileId });
+    add(g, { id: p.id, hours: p.hours, date: p.date, period: p.billPeriod, fileId: p.fileId });
   }
 
   for (const e of entriesOf(dealId)) {
@@ -503,7 +505,7 @@ export function dataSourcesOf(dealId) {
     const g = touch(key, imported
       ? { kind: 'invoice', label: e.fileName || 'חשבון שיובא', fileName: e.fileName || '', deletable: true }
       : { kind: 'invoice', label: 'חשבונות שנרשמו ידנית', fileName: '', deletable: false });
-    add(g, { hours: e.hours, date: e.date, period: '', fileId: e.fileId });
+    add(g, { id: e.id, hours: e.hours, date: e.date, period: '', fileId: e.fileId });
   }
 
   return [...out.values()]

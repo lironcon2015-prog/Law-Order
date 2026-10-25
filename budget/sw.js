@@ -2,7 +2,7 @@
 // app-shell = network-first (פרסומים נכנסים לתוקף מיד), פונטים/אייקונים = cache-first.
 // offline עובד מלא: כל הנתונים ב-IndexedDB, ה-shell במטמון.
 
-const CACHE = 'lexbudget-v28';
+const CACHE = 'lexbudget-v29';
 
 const ASSETS = [
   './',
@@ -15,6 +15,12 @@ const ASSETS = [
   './js/store.js',
   './js/model.js',
   './js/ui.js',
+  './js/ui-kit.js',
+  './js/ui-overview.js',
+  './js/ui-deal.js',
+  './js/ui-reports.js',
+  './js/ui-analysis.js',
+  './js/ui-admin.js',
   './js/charts.js',
   './js/importer.js',
   './js/xlsx.js',
@@ -24,10 +30,8 @@ const ASSETS = [
   './js/version.js',
   './vendor/pdf.min.js',
   './vendor/pdf.worker.min.js',
-  './fonts/assistant-hebrew.woff2',
-  './fonts/assistant-latin.woff2',
-  './fonts/inter-latin.woff2',
-  './fonts/ibmplexmono.woff2',
+  './fonts/heebo-hebrew.woff2',
+  './fonts/heebo-latin.woff2',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/icon-maskable-512.png',

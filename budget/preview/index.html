@@ -4,60 +4,45 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>LexBudget · דמו</title>
-  <meta name="description" content="LexBudget — ניהול תקציב עסקאות M&amp;A: תקציב לפי צוותים ודרגות, העלאת חשבונות, ובקרת תקציב מול ביצוע בזמן אמת. offline-first." />
+  <meta name="description" content="LexBudget — ניהול תקציב עסקאות M&amp;A: תקציב לפי צוותים ודרגות, ייבוא דוחות שעות, ובקרת תקציב מול ביצוע בשעות או בשקלים. offline-first." />
 
-  <meta name="theme-color" content="#0a0a0d" />
-  <meta name="color-scheme" content="dark" />
+  <meta name="theme-color" content="#f5f5f2" />
+  <meta name="color-scheme" content="light dark" />
   <link rel="manifest" href="../manifest.json" />
   <link rel="apple-touch-icon" href="../icons/icon-192.png" />
+  <script>
+    /* ערכת הנושא נקבעת לפני הציור הראשון — בלי הבהוב של מצב בהיר כשנבחר כהה */
+    try {
+      if (localStorage.getItem('lb_theme') === 'dark') {
+        document.documentElement.dataset.theme = 'dark';
+        document.querySelector('meta[name="theme-color"]').setAttribute('content', '#141517');
+      }
+    } catch (e) { /* localStorage חסום — נשאר בהיר */ }
+  </script>
 
-  <link rel="preload" href="../fonts/assistant-hebrew.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="../fonts/heebo-hebrew.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="stylesheet" href="../css/fonts.css" />
   <link rel="stylesheet" href="../css/styles.css" />
   <link rel="stylesheet" href="./preview.css" />
   <script>window.LB_DB_NAME = "lexBudgetPreviewDB";</script>
 </head>
 <body>
-  <!-- שכבות עומק/טקסטורה — אובסידיאן -->
-  <div class="bg-glow" aria-hidden="true"></div>
-  <div class="bg-grain" aria-hidden="true"></div>
-  <div class="bg-vignette" aria-hidden="true"></div>
+  <div class="app" id="app">
+    <!-- סרגל הצד מרונדר ב-JS (ui-overview.js → renderSidebar) -->
+    <aside class="side" id="side" aria-label="ניווט ראשי"></aside>
+    <div class="scrim" data-action="close-nav" aria-hidden="true"></div>
 
-  <div class="app">
-    <header class="topbar">
-      <div class="brand">
-        <span class="brand__logo" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/>
-            <path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/>
-          </svg>
-        </span>
-        <span class="brand__text">
-          <span class="brand__name">LexBudget</span>
-          <span class="brand__sub">תקציב עסקה</span>
-        </span>
-      </div>
-
-      <div class="tabs-host" id="deal-tabs"></div>
-
-      <div class="topbar__actions">
-        <span class="save-state" id="save-state" aria-live="polite">נשמר</span>
-        <button class="btn btn--ghost btn--sm" type="button" data-action="go-people" title="ספריית אנשי הצוות">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-          <span class="hide-sm">אנשי צוות</span>
+    <div class="content">
+      <!-- פס עליון — במסכים צרים בלבד; הסרגל נפתח ממנו כמגירה -->
+      <header class="mbar">
+        <button class="iconbtn" type="button" data-action="toggle-nav" aria-label="פתיחת הניווט">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg>
         </button>
-        <button class="btn btn--ghost btn--sm" type="button" data-action="go-rates" title="ניהול תעריפונים">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="m16.71 13.88.7.71-2.82 2.82"/></svg>
-          <span class="hide-sm">תעריפונים</span>
-        </button>
-        <button class="btn btn--ghost btn--sm" type="button" data-action="backup" title="גיבוי ונתונים">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19a4.5 4.5 0 0 0 0-9h-1.8A7 7 0 1 0 4 16.3"/><path d="M12 12v9"/><path d="m8 17 4 4 4-4"/></svg>
-          <span class="hide-sm">גיבוי</span>
-        </button>
-      </div>
-    </header>
-
-    <main class="main" id="main"></main>
+        <span class="side__logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/></svg></span>
+        <span class="mbar__title" id="mbar-title">LexBudget</span>
+      </header>
+      <main class="main" id="main"></main>
+    </div>
   </div>
 
   <dialog class="modal" id="modal">

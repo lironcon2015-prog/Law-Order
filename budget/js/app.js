@@ -23,12 +23,20 @@ import {
    State
    ============================================================ */
 
-const LS = { deal: 'lb_dealId', tab: 'lb_tab', view: 'lb_view', scope: 'lb_ovScope', teamSort: 'lb_teamSort', expanded: 'lb_open_' };
+const LS = { deal: 'lb_dealId', tab: 'lb_tab', view: 'lb_view', scope: 'lb_ovScope', teamSort: 'lb_teamSort', expanded: 'lb_open_', unit: 'lb_unit', theme: 'lb_theme' };
+
+/** טאבים שבוטלו באיחוד המסכים → הטאב שקלט את התוכן שלהם */
+const LEGACY_TAB = { actuals: 'reports', progress: 'reports', control: 'analysis', review: 'analysis' };
+const TABS = ['budget', 'reports', 'analysis', 'settings'];
+const normTab = (t) => { const v = LEGACY_TAB[t] || t; return TABS.includes(v) ? v : 'budget'; };
 
 const state = {
-  view: 'overview',        // 'overview' | 'deal' | 'rates'
+  view: 'overview',        // 'overview' | 'deal' | 'rates' | 'people'
   dealId: null,
-  tab: 'budget',           // 'budget' | 'progress' | 'control' | 'review' | 'settings'
+  tab: 'budget',           // 'budget' | 'reports' | 'analysis' | 'settings'
+  // יחידת התצוגה: כל מספר על המסך בשעות או ב-₪ — לא שניהם יחד
+  unit: localStorage.getItem('lb_unit') === 'money' ? 'money' : 'hours',
+  theme: document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light',
   snapshots: new Map(),
   selectedTeams: new Set(),   // צוותים מסומנים לחישוב מצרפי (בעסקה הפעילה)
   expandedTeams: new Set(),   // צוותים שהגיליון שלהם פתוח
@@ -48,7 +56,9 @@ let importCtx = null;
 
 async function init() {
   els = {
-    tabs: document.getElementById('deal-tabs'),
+    app: document.getElementById('app'),
+    side: document.getElementById('side'),
+    mbarTitle: document.getElementById('mbar-title'),
     main: document.getElementById('main'),
     modal: document.getElementById('modal'),
     modalTitle: document.getElementById('modal-title'),
@@ -72,9 +82,8 @@ async function init() {
   if (lastDeal && store.getDeal(lastDeal)) {
     state.dealId = lastDeal;
     state.view = 'deal';
-    const savedTab = localStorage.getItem(LS.tab);
-    // טאב החשבונות בוטל — מי שנשאר עליו עובר לדיווח
-    state.tab = savedTab === 'actuals' ? 'progress' : (savedTab || 'budget');
+    // טאבים שבוטלו (חשבונות, בקרה, תחקיר) ממופים לטאב שקלט את התוכן שלהם
+    state.tab = normTab(localStorage.getItem(LS.tab));
   } else if (localStorage.getItem(LS.view) === 'rates') {
     state.view = 'rates';
   } else if (localStorage.getItem(LS.view) === 'people') {
@@ -113,18 +122,13 @@ function currentSnapshot() {
 
 function render() {
   rebuildSnapshots();
-
-  ui.renderDealTabs(els.tabs, {
-    deals: store.cache.deals,
-    snapshots: state.snapshots,
-    activeId: state.view === 'deal' ? state.dealId : null,
-  });
-
+  closeMenus();
+  renderSide();
   els.main.replaceChildren();
 
   if (state.view === 'rates') {
     ui.renderRatesView(els.main, { rateCards: store.cache.rateCards, deals: store.cache.deals });
-    return;
+    return setMobileTitle('תעריפונים');
   }
 
   if (state.view === 'people') {
@@ -133,45 +137,65 @@ function render() {
       usageOf: store.personUsage,
       dupes: store.suggestPeopleMerges(),
     });
-    return;
+    return setMobileTitle('אנשי צוות');
   }
 
   if (state.view === 'deal') {
     const snap = currentSnapshot();
     if (!snap) { state.view = 'overview'; state.dealId = null; return render(); }
-    ui.renderDealHeader(els.main, { snap, tab: state.tab });
-    const body = ui.el('div', { class: 'tab-body' });
-    els.main.append(body);
+    setMobileTitle(snap.deal.name);
+    const page = ui.el('div', { class: 'page' });
+    els.main.append(page);
+    ui.renderDealHeader(page, { snap, tab: state.tab, unit: state.unit });
     if (state.tab === 'budget') {
-      // מצב הפתיחה נזכר לכל עסקה; בכניסה ראשונה נפתחים רק הצוותים שדורשים טיפול
+      // מצב הפתיחה נזכר לכל עסקה; בכניסה ראשונה הרשימה סגורה (צוות יחיד — פתוח)
       if (state.expandedFor !== snap.deal.id) {
         state.expandedFor = snap.deal.id;
         const saved = readExpanded(snap.deal.id);
-        if (saved) {
-          const live = new Set(snap.teams.map((t) => t.id));
-          state.expandedTeams = new Set(saved.filter((id) => live.has(id)));
-        } else {
-          state.expandedTeams = new Set(snap.teams.filter((t) => t.status === 'over' || t.status === 'risk').map((t) => t.id));
-          if (!state.expandedTeams.size && snap.teams.length === 1) state.expandedTeams.add(snap.teams[0].id);
-        }
+        const live = new Set(snap.teams.map((t) => t.id));
+        state.expandedTeams = new Set(saved ? saved.filter((id) => live.has(id)) : (snap.teams.length === 1 ? [snap.teams[0].id] : []));
       }
-      ui.renderBudgetTab(body, {
-        snap, rateCard: store.rateCardFor(snap.deal),
+      ui.renderBudgetTab(page, {
+        snap, rateCard: store.rateCardFor(snap.deal), unit: state.unit,
         selected: state.selectedTeams, expanded: state.expandedTeams, sort: state.teamSort,
       });
+    } else if (state.tab === 'reports') {
+      ui.renderReportsTab(page, {
+        snap, unit: state.unit, period: state.progressPeriod,
+        sources: store.dataSourcesOf(snap.deal.id, { costOf: costOfRecord(snap) }),
+        allocation: store.allocationBreakdown(snap.deal.id),
+      });
+    } else if (state.tab === 'analysis') {
+      ui.renderAnalysisTab(page, { snap, unit: state.unit });
+    } else {
+      ui.renderDealSettings(page, { snap, rateCards: store.cache.rateCards });
+      refreshFolderState();
     }
-    else if (state.tab === 'progress') ui.renderProgressTab(body, {
-      snap, period: state.progressPeriod,
-      sources: store.dataSourcesOf(snap.deal.id),
-      allocation: store.allocationBreakdown(snap.deal.id),
-    });
-    else if (state.tab === 'control') ui.renderControlTab(body, { snap });
-    else if (state.tab === 'review') ui.renderReviewTab(body, { snap });
-    else { ui.renderDealSettings(body, { snap, rateCards: store.cache.rateCards }); refreshFolderState(); }
     return;
   }
 
-  ui.renderOverview(els.main, { snapshots: state.snapshots, scope: state.overviewScope });
+  setMobileTitle('תיק העסקאות');
+  ui.renderOverview(els.main, { snapshots: state.snapshots, scope: state.overviewScope, unit: state.unit });
+}
+
+/** סרגל הצד — נבנה מחדש בכל רינדור (הוא קטן), כולל ניצול כל עסקה ביחידה שנבחרה */
+function renderSide() {
+  ui.renderSidebar(els.side, {
+    deals: store.cache.deals, snapshots: state.snapshots, view: state.view,
+    activeId: state.view === 'deal' ? state.dealId : null, unit: state.unit, theme: state.theme,
+  });
+}
+
+function setMobileTitle(text) {
+  if (els.mbarTitle) els.mbarTitle.textContent = text;
+}
+
+/** עלות של רשומת ביצוע לפי השורה שאליה שויכה (לתצוגת ₪ במקורות הדיווח) */
+function costOfRecord(snap) {
+  const rate = new Map();
+  for (const t of snap.teams) for (const l of t.lines) rate.set(l.id, l.rate);
+  const byId = new Map((snap.execution || []).map((r) => [r.id, num(r.hours) * num(rate.get(r.lineId) || 0)]));
+  return (id) => byId.get(id) || 0;
 }
 
 /** רענון קל: מעדכן רק תאים מחושבים (בזמן הקלדה בגיליון התקציב) */
@@ -183,7 +207,7 @@ function refreshLive() {
     rateCard: store.rateCardFor(deal), progress: store.cache.progress, people: store.cache.people,
   });
   state.snapshots.set(deal.id, snap);
-  ui.refreshComputed(snap, state.selectedTeams);
+  ui.refreshComputed(snap, { unit: state.unit, selected: state.selectedTeams });
 }
 
 /** מציג את מצב תיקיית המסמכים במסך ההגדרות */
@@ -202,19 +226,16 @@ async function refreshFolderState() {
 /** מרענן את כותרת העסקה (תגיות + סרגל) בלי לרנדר מחדש את הטופס שבו המשתמש עובד */
 function refreshDealHeader() {
   const deal = store.getDeal(state.dealId);
-  const head = els.main.querySelector('.deal-head');
+  const head = els.main.querySelector('.dhead');
   if (!deal || !head) return;
   rebuildSnapshots();
   const snap = currentSnapshot();
   if (!snap) return;
   const holder = ui.el('div');
-  ui.renderDealHeader(holder, { snap, tab: state.tab });
+  ui.renderDealHeader(holder, { snap, tab: state.tab, unit: state.unit });
   head.replaceWith(holder.firstElementChild);
-  ui.renderDealTabs(els.tabs, {
-    deals: store.cache.deals,
-    snapshots: state.snapshots,
-    activeId: state.view === 'deal' ? state.dealId : null,
-  });
+  setMobileTitle(snap.deal.name);
+  renderSide();
 }
 
 function markDirty() {
@@ -230,7 +251,7 @@ function goDeal(id, tab) {
   if (id !== state.dealId) { state.selectedTeams.clear(); state.expandedFor = null; }   // הסימון שייך לעסקה שממנה יצאנו
   state.view = 'deal';
   state.dealId = id;
-  state.tab = tab || state.tab || 'budget';
+  state.tab = normTab(tab || state.tab);
   localStorage.setItem(LS.deal, id);
   localStorage.setItem(LS.tab, state.tab);
   localStorage.setItem(LS.view, 'deal');
@@ -316,9 +337,49 @@ function bindEvents() {
   });
 
   window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && els.modal.open) closeModal();
+    if (e.key !== 'Escape') return;
+    if (els.modal.open) return closeModal();
+    if (document.querySelector('.menu:not([hidden])')) return closeMenus(true);
+    if (els.app.classList.contains('nav-open')) setNav(false);
+  });
+  // שורות ואזורים שאינם כפתורים (שורת עסקה בטבלה, אזור הגרירה) — Enter/רווח מפעילים אותם כמו לחיצה
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const t = e.target;
+    if (!t?.dataset?.action || t.matches('button, input, select, textarea, a, summary')) return;
+    if (t.getAttribute('tabindex') !== '0') return;
+    e.preventDefault();
+    t.click();
   });
   document.addEventListener('keydown', onSheetKeydown);
+}
+
+/* ============================================================
+   תפריטים נפתחים ומגירת הניווט (מובייל)
+   ============================================================ */
+
+function closeMenus(refocus = false) {
+  for (const m of document.querySelectorAll('.menu:not([hidden])')) {
+    m.hidden = true;
+    const trigger = m.previousElementSibling;
+    trigger?.setAttribute('aria-expanded', 'false');
+    if (refocus) trigger?.focus();
+  }
+}
+
+function toggleMenu(trigger) {
+  const list = trigger.nextElementSibling;
+  if (!list) return;
+  const opening = list.hidden;
+  closeMenus();
+  if (!opening) return;
+  list.hidden = false;
+  trigger.setAttribute('aria-expanded', 'true');
+  list.querySelector('.menu__item')?.focus();
+}
+
+function setNav(open) {
+  els.app.classList.toggle('nav-open', !!open);
 }
 
 /* ============================================================
@@ -415,7 +476,7 @@ function bindReorder() {
   document.addEventListener('pointerdown', (e) => {
     const grip = e.target.closest('[data-grip]');
     if (!grip) return;
-    const item = grip.closest('.trow, .dtab, tr.bline');
+    const item = grip.closest('.trow, tr.bline');
     if (item) item.setAttribute('draggable', 'true');
   });
   document.addEventListener('pointerup', () => {
@@ -425,7 +486,7 @@ function bindReorder() {
   document.addEventListener('dragstart', (e) => {
     const row = e.target.closest?.('.trow[draggable="true"]');
     const line = e.target.closest?.('tr.bline[draggable="true"]');
-    const tab = e.target.closest?.('.dtab[data-action="select-deal"]');
+    const tab = e.target.closest?.('.side__deal[data-action="select-deal"]');
     const item = row || line || tab;
     if (!item) return;
     if (row) drag = { kind: 'team', id: row.dataset.teamId, el: row };
@@ -441,9 +502,9 @@ function bindReorder() {
 
   document.addEventListener('dragover', (e) => {
     if (!drag) return;
-    const item = drag.kind === 'team' ? e.target.closest?.('.trow:not(.trow--head)')
+    const item = drag.kind === 'team' ? e.target.closest?.('.trow[data-team-id]')
       : drag.kind === 'line' ? e.target.closest?.('tr.bline')
-        : e.target.closest?.('.dtab[data-action="select-deal"]');
+        : e.target.closest?.('.side__deal[data-action="select-deal"]');
     // שורת דרגה זזה רק בתוך הצוות שלה — מעבר בין צוותים גורר איתו דיווחי ביצוע
     if (!item || item === drag.el) { clearMarks(); return; }
     if (drag.kind === 'line' && item.dataset.teamId !== drag.teamId) { clearMarks(); return; }
@@ -451,10 +512,8 @@ function bindReorder() {
     e.dataTransfer.dropEffect = 'move';
     clearMarks();
     const r = item.getBoundingClientRect();
-    // אנכי: חצי עליון/תחתון · עסקאות: RTL — הצד הימני הוא "לפני"
-    const after = drag.kind === 'deal'
-      ? e.clientX < r.left + r.width / 2
-      : e.clientY > r.top + r.height / 2;
+    // כל הרשימות אנכיות (גם העסקאות בסרגל הצד): חצי עליון = לפני, תחתון = אחרי
+    const after = e.clientY > r.top + r.height / 2;
     item.classList.add(after ? 'drop-after' : 'drop-before');
   });
 
@@ -479,24 +538,24 @@ function bindReorder() {
       return render();
     }
     // סדר לפי מה שרואים על המסך — כך גרירה במיון "לפי דחיפות" מקבעת אותו כסדר ידני
-    const visible = [...document.querySelectorAll('.trow:not(.trow--head)')].map((n) => n.dataset.teamId);
+    const visible = [...document.querySelectorAll('.trow[data-team-id]')].map((n) => n.dataset.teamId);
     await store.reorderTeams(state.dealId, moveId(visible, id, marked.dataset.teamId, after));
     setTeamSort('manual');
   });
 
-  // חלופה למקלדת: Alt+↑/↓ לצוות, Alt+←/→ לעסקה (RTL — ימין הוא לכיוון ההתחלה)
+  // חלופה למקלדת: Alt+↑/↓ לצוות, לשורה ולעסקה בסרגל הצד
   document.addEventListener('keydown', async (e) => {
     if (!e.altKey) return;
     const dir = { ArrowUp: -1, ArrowRight: -1, ArrowDown: 1, ArrowLeft: 1 }[e.key];
     if (!dir) return;
     const grip = e.target.closest?.('[data-grip="team"]');
     const lineGrip = e.target.closest?.('[data-grip="line"]') || e.target.closest?.('tr.bline')?.querySelector('[data-grip="line"]');
-    const tab = e.target.closest?.('.dtab[data-action="select-deal"]');
+    const tab = e.target.closest?.('.side__deal[data-action="select-deal"]');
     const vertical = e.key === 'ArrowUp' || e.key === 'ArrowDown';
 
     if (grip && vertical) {
       e.preventDefault();
-      const visible = [...document.querySelectorAll('.trow:not(.trow--head)')].map((n) => n.dataset.teamId);
+      const visible = [...document.querySelectorAll('.trow[data-team-id]')].map((n) => n.dataset.teamId);
       const i = visible.indexOf(grip.dataset.teamId);
       const j = i + dir;
       if (i < 0 || j < 0 || j >= visible.length) return;
@@ -518,7 +577,7 @@ function bindReorder() {
         ? `tr[data-line-id="${CSS.escape(ids[i])}"] [data-field="${CSS.escape(focusField)}"]`
         : `[data-grip="line"][data-line-id="${CSS.escape(ids[i])}"]`;
       focusAfterRender(sel);
-    } else if (tab && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+    } else if (tab && vertical) {
       e.preventDefault();
       const ids = store.cache.deals.map((d) => d.id);
       const i = ids.indexOf(tab.dataset.id);
@@ -526,9 +585,28 @@ function bindReorder() {
       if (i < 0 || j < 0 || j >= ids.length) return;
       await store.reorderDeals(moveId(ids, ids[i], ids[j], dir > 0));
       render();
-      focusAfterRender(`.dtab[data-id="${CSS.escape(tab.dataset.id)}"]`);
+      focusAfterRender(`.side__deal[data-id="${CSS.escape(tab.dataset.id)}"]`);
     }
   });
+}
+
+/** פותח את הגיליון של צוות, גולל אליו ומדגיש אותו לרגע (מהתראה או מקישור) */
+function focusTeam(id) {
+  if (!id) return;
+  state.expandedTeams.add(id);
+  writeExpanded();
+  render();
+  const row = document.querySelector(`.trow[data-team-id="${CSS.escape(id)}"]`);
+  if (!row) return;
+  row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  row.classList.add('trow--flash');
+  setTimeout(() => row.classList.remove('trow--flash'), 1200);
+}
+
+/** ערכת הנושא — על <html>, כדי שגם הרקע מחוץ לאפליקציה יתחלף */
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#141517' : '#f5f5f2');
 }
 
 /** אחרי render() ה-DOM מוחלף — מחזירים את הפוקוס לאותו פריט כדי להמשיך להזיז */
@@ -563,7 +641,7 @@ function writeExpanded() {
    ============================================================ */
 function onSheetKeydown(e) {
   if (e.key !== 'Enter' || e.altKey || e.ctrlKey || e.metaKey) return;
-  const cell = e.target.closest?.('.btable--sheet .cellinput');
+  const cell = e.target.closest?.('.tbl--sheet .cell-input');
   if (!cell) return;
   const field = cell.dataset.field;
   const row = cell.closest('tr');
@@ -580,11 +658,45 @@ function onSheetKeydown(e) {
 }
 
 async function onClick(e) {
+  // תפריט פתוח נסגר בלחיצה מחוצה לו, וגם אחרי בחירת פריט בו
+  if (!e.target.closest('.menu-wrap') || e.target.closest('.menu__item')) closeMenus();
   const target = e.target.closest('[data-action]');
   if (!target) return;
   const { action } = target.dataset;
+  // ניווט מתוך מגירת המובייל סוגר אותה
+  if (els.app.classList.contains('nav-open') && target.closest('.side') && action !== 'toggle-theme') setNav(false);
 
   switch (action) {
+    case 'toggle-menu':
+      return toggleMenu(target);
+
+    case 'toggle-nav':
+      return setNav(!els.app.classList.contains('nav-open'));
+
+    case 'close-nav':
+      return setNav(false);
+
+    case 'set-unit': {
+      const unit = target.dataset.unit === 'money' ? 'money' : 'hours';
+      if (unit === state.unit) return;
+      state.unit = unit;
+      localStorage.setItem(LS.unit, unit);
+      return render();
+    }
+
+    case 'toggle-theme': {
+      state.theme = state.theme === 'dark' ? 'light' : 'dark';
+      applyTheme(state.theme);
+      try { localStorage.setItem(LS.theme, state.theme); } catch { /* העדפה בלבד */ }
+      return renderSide();
+    }
+
+    case 'open-alert': {
+      goDeal(target.dataset.id, 'budget');
+      if (target.dataset.teamId) focusTeam(target.dataset.teamId);
+      return;
+    }
+
     case 'go-overview':
       state.view = 'overview'; state.dealId = null;
       localStorage.setItem(LS.view, 'overview');
@@ -604,7 +716,7 @@ async function onClick(e) {
       return goDeal(target.dataset.id);
 
     case 'set-tab':
-      state.tab = target.dataset.tab;
+      state.tab = normTab(target.dataset.tab);
       localStorage.setItem(LS.tab, state.tab);
       return render();
 
@@ -756,19 +868,9 @@ async function onClick(e) {
       return render();
     }
 
-    case 'focus-team': {
-      const id = target.dataset.teamId;
-      state.expandedTeams.add(id);
-      writeExpanded();
-      render();
-      const row = document.querySelector(`.trow[data-team-id="${CSS.escape(id)}"]`);
-      if (row) {
-        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        row.classList.add('trow--flash');
-        setTimeout(() => row.classList.remove('trow--flash'), 1200);
-      }
-      return;
-    }
+    case 'focus-team':
+      if (state.tab !== 'budget') { state.tab = 'budget'; localStorage.setItem(LS.tab, 'budget'); }
+      return focusTeam(target.dataset.teamId);
 
     case 'set-scope':
       state.overviewScope = target.dataset.scope === 'all' ? 'all' : 'open';
@@ -1030,6 +1132,7 @@ async function onClick(e) {
 /** הקלדה בגיליון התקציב — עדכון חי ללא רינדור מלא */
 function onInput(e) {
   if (e.target.dataset?.pickerSearch) return filterPicker(e.target.value);
+  if (e.target.dataset?.peopleSearch !== undefined) return ui.filterPeople(e.target.value);
   const node = e.target;
 
 
@@ -1715,7 +1818,8 @@ function renderProgressImportModal() {
       replaced ? `${replaced} דיווחים קודמים בטווח הוחלפו` : '',
     ].filter(Boolean).join(' · ');
     ui.toast(`${list.length} עדכונים נוספו למעקב${extra ? ` · ${extra}` : ''}`);
-    state.tab = 'progress';
+    state.tab = 'reports';
+    localStorage.setItem(LS.tab, 'reports');
     render();
   });
   const cancel = btn('ביטול');
