@@ -6,7 +6,7 @@ import { burnLine } from './charts.js';
 import { TARGET_FIELDS } from './importer.js';
 import {
   el, icon, ICONS, fmtU, pctText, monthLabel, fmtDate, seg, button, iconButton, field, card, table,
-  emptyState, foldPanel, isFoldOpen, setFold,
+  emptyState, foldPanel, isFoldOpen, setFold, infoTip,
 } from './ui-kit.js';
 
 const PERIODS = [['day', 'יומי'], ['week', 'שבועי'], ['month', 'חודשי']];
@@ -36,7 +36,7 @@ export function renderReportsTab(root, { snap, unit = 'hours', period = 'week', 
     el('span', { class: 'dropzone__ic', html: ICONS.upload }),
     el('div', { class: 'dropzone__text' }, [
       el('div', { class: 'dropzone__title', text: 'גרור לכאן דוח שעות או חשבון' }),
-      el('div', { class: 'dropzone__hint', text: 'XLSX, CSV או PDF — השורות מוצגות לאישור לפני שהן נקלטות. דוח של אותה תקופה לא נספר פעמיים.' }),
+      el('div', { class: 'dropzone__hint' }, ['XLSX, CSV או PDF', infoTip('השורות מוצגות לאישור לפני שהן נקלטות. דוח של אותה תקופה לא נספר פעמיים.')]),
     ]),
     el('div', { class: 'dropzone__actions' }, [
       button('בחר קובץ', { action: 'import-progress', iconName: 'upload', kind: 'primary' }),
@@ -448,7 +448,7 @@ export function renderProgressImportPreview({
       el('option', { value: 'add', text: 'הוסף בכל זאת (ייספר פעמיים)', selected: overlap === 'add' ? 'selected' : null }),
     ]),
     `זיהוי לפי שורת תקציב + ${billPeriods.length ? 'תקופת חיוב' : 'תאריך'} + שם. ${duplicates ? `זוהו ${duplicates} שורות שכבר דווחו.` : 'לא זוהתה חפיפה עם דיווחים קיימים.'}${
-      dateRange ? ` הדוח מכסה ${fmtDate(dateRange.from)} עד ${fmtDate(dateRange.to)}.` : ''}`));
+      dateRange ? ` הדוח מכסה ${fmtDate(dateRange.from)} עד ${fmtDate(dateRange.to)}.` : ''}`, { note: true }));
     if (overlap === 'replace' && dateRange) {
       docBody.push(el('div', { class: 'notice notice--warn' }, [icon('alert'), el('span', { text: `כל מה שיובא בעבר לטווח ${fmtDate(dateRange.from)}–${fmtDate(dateRange.to)} (לשורות שבדוח) יימחק ויוחלף בתוכן הקובץ. הזנה ידנית לא תיפגע.` })]));
     }

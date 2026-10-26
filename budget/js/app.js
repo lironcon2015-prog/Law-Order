@@ -23,7 +23,23 @@ import {
    State
    ============================================================ */
 
-const LS = { deal: 'lb_dealId', tab: 'lb_tab', view: 'lb_view', scope: 'lb_ovScope', teamSort: 'lb_teamSort', expanded: 'lb_open_', unit: 'lb_unit', theme: 'lb_theme' };
+const LS = {
+  deal: 'lb_dealId', tab: 'lb_tab', view: 'lb_view', scope: 'lb_ovScope', teamSort: 'lb_teamSort', teamFilter: 'lb_teamFilter',
+  dealSort: 'lb_dealSort', expanded: 'lb_open_', unit: 'lb_unit', theme: 'lb_theme', rail: 'lb_side',
+};
+
+/** מיון שנשמר כ"מפתח:כיוון" (למשל "util:desc") — או null לסדר הידני */
+const readSort = (raw) => {
+  const [key, dir] = String(raw || '').split(':');
+  return key && (dir === 'asc' || dir === 'desc') ? { key, dir } : null;
+};
+/** לחיצה על כותרת: עמודה חדשה → כיוון ברירת המחדל שלה; אותה עמודה → היפוך; היפוך שני → חזרה לסדר הקודם */
+function nextSort(current, key, defaults) {
+  const first = defaults[key] || 'desc';
+  if (!current || current.key !== key) return { key, dir: first };
+  if (current.dir === first) return { key, dir: first === 'asc' ? 'desc' : 'asc' };
+  return null;
+}
 
 /** טאבים שבוטלו באיחוד המסכים → הטאב שקלט את התוכן שלהם */
 const LEGACY_TAB = { actuals: 'reports', progress: 'reports', control: 'analysis', review: 'analysis' };
@@ -44,7 +60,12 @@ const state = {
   progressPeriod: 'week',     // תקופת הסיכום במסך המעקב: day | week | month
   // מסך הסקירה: 'open' = פעילות + בהמתנה (ברירת מחדל) · 'all' = כולל שנסגרו ובארכיון
   overviewScope: localStorage.getItem('lb_ovScope') === 'all' ? 'all' : 'open',
-  teamSort: localStorage.getItem('lb_teamSort') === 'manual' ? 'manual' : 'priority',
+  // מיון הצוותים: 'priority' · 'manual' · 'מפתח:כיוון' (לחיצה על כותרת עמודה)
+  teamSort: (() => { const v = localStorage.getItem('lb_teamSort') || ''; return v === 'manual' || readSort(v) ? v : 'priority'; })(),
+  teamFilter: ['over', 'risk'].includes(localStorage.getItem('lb_teamFilter')) ? localStorage.getItem('lb_teamFilter') : 'all',
+  dealSort: readSort(localStorage.getItem('lb_dealSort')),   // null = הסדר הידני
+  dealQuery: '',                                             // חיפוש ברשימת התיק — לא נשמר
+  sideRail: localStorage.getItem('lb_side') === 'rail',     // סרגל מכווץ לאייקונים
 };
 
 let els = {};
@@ -58,6 +79,7 @@ async function init() {
   els = {
     app: document.getElementById('app'),
     side: document.getElementById('side'),
+    dlist: document.getElementById('dlist'),
     mbarTitle: document.getElementById('mbar-title'),
     main: document.getElementById('main'),
     modal: document.getElementById('modal'),
@@ -91,6 +113,7 @@ async function init() {
   }
 
   store.setMutationListener(() => { markDirty(); });
+  ui.initTips();
   bindEvents();
   registerSW();
   render();
@@ -123,7 +146,12 @@ function currentSnapshot() {
 function render() {
   rebuildSnapshots();
   closeMenus();
+  ui.hideTip();
+  // תצוגה מפוצלת: בתוך עסקה רשימת התיק נשארת ליד העסקה (מוצגת רק במסך רחב — ראה styles.css)
+  els.app.classList.toggle('app--split', state.view === 'deal');
+  els.app.classList.toggle('app--rail', state.sideRail);
   renderSide();
+  renderList();
   els.main.replaceChildren();
 
   if (state.view === 'rates') {
@@ -157,7 +185,7 @@ function render() {
       }
       ui.renderBudgetTab(page, {
         snap, rateCard: store.rateCardFor(snap.deal), unit: state.unit,
-        selected: state.selectedTeams, expanded: state.expandedTeams, sort: state.teamSort,
+        selected: state.selectedTeams, expanded: state.expandedTeams, sort: state.teamSort, filter: state.teamFilter,
       });
     } else if (state.tab === 'reports') {
       ui.renderReportsTab(page, {
@@ -175,14 +203,25 @@ function render() {
   }
 
   setMobileTitle('תיק העסקאות');
-  ui.renderOverview(els.main, { snapshots: state.snapshots, scope: state.overviewScope, unit: state.unit });
+  ui.renderOverview(els.main, { snapshots: state.snapshots, scope: state.overviewScope, unit: state.unit, sort: state.dealSort });
 }
 
 /** סרגל הצד — נבנה מחדש בכל רינדור (הוא קטן), כולל ניצול כל עסקה ביחידה שנבחרה */
 function renderSide() {
   ui.renderSidebar(els.side, {
     deals: store.cache.deals, snapshots: state.snapshots, view: state.view,
-    activeId: state.view === 'deal' ? state.dealId : null, unit: state.unit, theme: state.theme,
+    activeId: state.view === 'deal' ? state.dealId : null, unit: state.unit, theme: state.theme, rail: state.sideRail,
+  });
+}
+
+/** רשימת התיק שליד העסקה — רק בתוך עסקה */
+function renderList() {
+  if (!els.dlist) return;
+  els.dlist.hidden = state.view !== 'deal';
+  if (state.view !== 'deal') return els.dlist.replaceChildren();
+  ui.renderDealList(els.dlist, {
+    snapshots: state.snapshots, scope: state.overviewScope, unit: state.unit,
+    activeId: state.dealId, sort: state.dealSort, query: state.dealQuery,
   });
 }
 
@@ -236,6 +275,7 @@ function refreshDealHeader() {
   head.replaceWith(holder.firstElementChild);
   setMobileTitle(snap.deal.name);
   renderSide();
+  renderList();
 }
 
 function markDirty() {
@@ -486,7 +526,7 @@ function bindReorder() {
   document.addEventListener('dragstart', (e) => {
     const row = e.target.closest?.('.trow[draggable="true"]');
     const line = e.target.closest?.('tr.bline[draggable="true"]');
-    const tab = e.target.closest?.('.side__deal[data-action="select-deal"]');
+    const tab = e.target.closest?.('[data-deal-row][draggable="true"]');
     const item = row || line || tab;
     if (!item) return;
     if (row) drag = { kind: 'team', id: row.dataset.teamId, el: row };
@@ -504,7 +544,7 @@ function bindReorder() {
     if (!drag) return;
     const item = drag.kind === 'team' ? e.target.closest?.('.trow[data-team-id]')
       : drag.kind === 'line' ? e.target.closest?.('tr.bline')
-        : e.target.closest?.('.side__deal[data-action="select-deal"]');
+        : e.target.closest?.('[data-deal-row]');
     // שורת דרגה זזה רק בתוך הצוות שלה — מעבר בין צוותים גורר איתו דיווחי ביצוע
     if (!item || item === drag.el) { clearMarks(); return; }
     if (drag.kind === 'line' && item.dataset.teamId !== drag.teamId) { clearMarks(); return; }
@@ -550,7 +590,8 @@ function bindReorder() {
     if (!dir) return;
     const grip = e.target.closest?.('[data-grip="team"]');
     const lineGrip = e.target.closest?.('[data-grip="line"]') || e.target.closest?.('tr.bline')?.querySelector('[data-grip="line"]');
-    const tab = e.target.closest?.('.side__deal[data-action="select-deal"]');
+    // עסקה: ברשימת התיק או בסרגל — רק בסדר הידני (במיון לפי עמודה הסדר נקבע מהנתונים)
+    const tab = state.dealSort && e.target.closest?.('.ditem') ? null : e.target.closest?.('[data-deal-row]');
     const vertical = e.key === 'ArrowUp' || e.key === 'ArrowDown';
 
     if (grip && vertical) {
@@ -585,7 +626,7 @@ function bindReorder() {
       if (i < 0 || j < 0 || j >= ids.length) return;
       await store.reorderDeals(moveId(ids, ids[i], ids[j], dir > 0));
       render();
-      focusAfterRender(`.side__deal[data-id="${CSS.escape(tab.dataset.id)}"]`);
+      focusAfterRender(`${tab.classList.contains('ditem') ? '.ditem' : '.side__deal'}[data-id="${CSS.escape(tab.dataset.id)}"]`);
     }
   });
 }
@@ -658,6 +699,8 @@ function onSheetKeydown(e) {
 }
 
 async function onClick(e) {
+  // ⓘ מציג הסבר בלבד — לא מפעיל את השורה או הכפתור שהוא יושב בהם (ui-kit.initTips)
+  if (e.target.closest('.infotip')) return;
   // תפריט פתוח נסגר בלחיצה מחוצה לו, וגם אחרי בחירת פריט בו
   if (!e.target.closest('.menu-wrap') || e.target.closest('.menu__item')) closeMenus();
   const target = e.target.closest('[data-action]');
@@ -825,6 +868,27 @@ async function onClick(e) {
 
     case 'set-team-sort':
       return setTeamSort(target.dataset.sort);
+
+    case 'sort-teams': {
+      // כותרת עמודה: כיוון ברירת המחדל → היפוך → חזרה ל"לפי דחיפות"
+      const next = nextSort(readSort(state.teamSort), target.dataset.sort, ui.TEAM_SORT_DIR);
+      return setTeamSort(next ? `${next.key}:${next.dir}` : 'priority');
+    }
+
+    case 'filter-teams':
+      state.teamFilter = ['over', 'risk'].includes(target.dataset.filter) ? target.dataset.filter : 'all';
+      localStorage.setItem(LS.teamFilter, state.teamFilter);
+      return render();
+
+    case 'sort-deals':
+      state.dealSort = nextSort(state.dealSort, target.dataset.sort, ui.DEAL_SORT_DIR);
+      localStorage.setItem(LS.dealSort, state.dealSort ? `${state.dealSort.key}:${state.dealSort.dir}` : '');
+      return render();
+
+    case 'toggle-rail':
+      state.sideRail = !state.sideRail;
+      localStorage.setItem(LS.rail, state.sideRail ? 'rail' : '');
+      return render();
 
     /*
      * דריסה של שדה מחושב היא פעולה מפורשת: הערך המחושב הנוכחי נכנס כערך
@@ -1160,6 +1224,7 @@ async function onClick(e) {
 /** הקלדה בגיליון התקציב — עדכון חי ללא רינדור מלא */
 function onInput(e) {
   if (e.target.dataset?.pickerSearch) return filterPicker(e.target.value);
+  if (e.target.dataset?.dealQuery) { state.dealQuery = e.target.value; return ui.filterDealList(e.target.value); }
   if (e.target.dataset?.peopleSearch !== undefined) return ui.filterPeople(e.target.value);
   const node = e.target;
 

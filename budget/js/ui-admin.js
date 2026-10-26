@@ -6,16 +6,20 @@ import { BUILD } from './version.js';
 import { personKey } from './importer.js';
 import {
   el, icon, field, fact, button, iconButton, menu, card, table, limitItems, emptyState, fmtDate, fmtDelta,
-  avatar, personSlot,
+  avatar, personSlot, infoTip,
 } from './ui-kit.js';
 
 /* ============================================================
-   הגדרות עסקה — שני טורים: כותרת והסבר | שדות
+   הגדרות עסקה — שני טורים: כותרת | שדות. ההסבר על כל מקטע מאחורי ⓘ;
+   רק אזהרה (מחיקה) נשארת גלויה.
    ============================================================ */
 
-function srow(title, text, body, cls = '') {
+function srow(title, text, body, cls = '', { visible = false } = {}) {
   return el('section', { class: `srow ${cls}`.trim() }, [
-    el('div', { class: 'srow__info' }, [el('h2', { class: 'srow__title', text: title }), text ? el('p', { class: 'srow__text', text }) : null]),
+    el('div', { class: 'srow__info' }, [
+      el('h2', { class: 'srow__title' }, [title, text && !visible ? infoTip(text) : null]),
+      text && visible ? el('p', { class: 'srow__text', text }) : null,
+    ]),
     el('div', { class: 'srow__body' }, [].concat(body)),
   ]);
 }
@@ -86,7 +90,7 @@ export function renderDealSettings(root, { snap, rateCards }) {
   extra.append(renderBuildRow());
   extra.append(srow('מחיקת העסקה', 'מוחקת את העסקה, הצוותים והדיווחים שלה. הפעולה אינה הפיכה — כדאי לייצא גיבוי לפני.', [
     el('div', {}, [button('מחק את העסקה', { action: 'delete-deal', iconName: 'trash', kind: 'danger' })]),
-  ], 'srow--danger'));
+  ], 'srow--danger', { visible: true }));
   root.append(el('section', { class: 'card card--pad' }, [extra]));
 }
 
@@ -131,8 +135,7 @@ export function renderPeopleView(root, { people, usageOf, dupes = [] }) {
   root.append(page);
   page.append(el('header', { class: 'phead' }, [
     el('div', { class: 'phead__main' }, [
-      el('h1', { class: 'phead__title', text: 'אנשי צוות' }),
-      el('p', { class: 'phead__sub', text: 'מקור האמת לשמות: כל שם בעסקה נבחר מכאן, ותיקון כאן משתקף בכל העסקאות ובכל הייצואים.' }),
+      el('h1', { class: 'phead__title' }, ['אנשי צוות', infoTip('מקור האמת לשמות: כל שם בעסקה נבחר מכאן, ותיקון כאן משתקף בכל העסקאות ובכל הייצואים.')]),
     ]),
     el('div', { class: 'phead__actions' }, [
       menu({
@@ -148,7 +151,7 @@ export function renderPeopleView(root, { people, usageOf, dupes = [] }) {
   ]));
 
   if (dupes.length) {
-    page.append(card({ title: 'ייתכן שאותו אדם נרשם פעמיים', count: dupes.length, sub: 'מיזוג מעביר את כל השורות לרשומה שנשארת, ושומר את הכתיב השני כזיהוי נוסף.', flush: true }, [
+    page.append(card({ title: 'ייתכן שאותו אדם נרשם פעמיים', count: dupes.length, info: 'מיזוג מעביר את כל השורות לרשומה שנשארת, ושומר את הכתיב השני כזיהוי נוסף.', flush: true }, [
       el('ul', { class: 'alist' }, dupes.map(([a, b]) => el('li', { class: 'alist__item' }, [el('div', { class: 'dupe' }, [
         el('span', { class: 'strong', text: `${a.name}  ·  ${b.name}` }),
         el('span', { class: 'toolbar__spacer' }),
@@ -350,8 +353,7 @@ export function renderRatesView(root, { rateCards, deals }) {
   root.append(page);
   page.append(el('header', { class: 'phead' }, [
     el('div', { class: 'phead__main' }, [
-      el('h1', { class: 'phead__title', text: 'תעריפונים' }),
-      el('p', { class: 'phead__sub', text: 'הדרגות והתעריפים שכל העסקאות משתמשות בהם. אפשר להחזיק כמה תעריפונים — לקוח אסטרטגי, שנה קודמת, מטבע אחר.' }),
+      el('h1', { class: 'phead__title' }, ['תעריפונים', infoTip('הדרגות והתעריפים שכל העסקאות משתמשות בהם. אפשר להחזיק כמה תעריפונים — לקוח אסטרטגי, שנה קודמת, מטבע אחר.')]),
     ]),
     el('div', { class: 'phead__actions' }, [button('תעריפון חדש', { action: 'new-ratecard', iconName: 'plus', kind: 'primary' })]),
   ]));

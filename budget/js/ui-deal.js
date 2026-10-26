@@ -1,14 +1,15 @@
-// ui-deal.js — כותרת העסקה וטאב התקציב: פס מצב, התראות, רשימת הצוותים והגיליון של כל צוות.
+// ui-deal.js — כותרת העסקה וטאב התקציב: אריחי המדדים, התראות, טבלת הצוותים והגיליון של כל צוות.
 // כל מספר מוצג ביחידה שנבחרה (שעות או ₪). ערכים מחושבים נושאים data-calc כדי ש-refreshComputed
 // יעדכן אותם בזמן הקלדה בלי רינדור מלא (רינדור מלא היה מאבד את הפוקוס בשדה).
 
 import {
-  DEAL_STATUSES, FEE_MODELS, aggregateTeams, aggregateByKind, round2, fmtMoney, fmtPct, progressByPeriod,
+  DEAL_STATUSES, FEE_MODELS, aggregateTeams, aggregateByKind, round2, fmtMoney, fmtPct, progressByPeriod, dealReview,
 } from './model.js';
 import { ring, sparkline } from './charts.js';
 import {
   el, icon, ICONS, measure, fmtU, fmtDelta, valueNodes, pctText, toneOf, meterCell, paintMeter,
   unitSwitch, seg, menu, button, iconButton, emptyState, fmtDate, isFoldOpen, setFold, avatar, teamSlot, dealSlot,
+  tile, tileBar, infoTip, chips, sortButton,
 } from './ui-kit.js';
 
 /* ============================================================
@@ -80,72 +81,95 @@ export function renderDealHeader(root, { snap, tab, unit }) {
 }
 
 /* ============================================================
-   כרטיס המצב (hero) — שלוש שאלות: כמה נוצל · כמה נשאר · לאן זה הולך
-   הניצול כטבעת, ובתחתית הכרטיס "דופק" — קו השריפה המצטברת לאורך זמן.
+   אריחי המדדים — ארבע הנקודות של התקציב זו לצד זו: הערכה → תקציב → בוצע → תחזית לסיום
+   (ב-₪ גם שכ"ט). האריח המודגש — הביצוע, עם טבעת הניצול ו"דופק" השריפה השבועית.
+   כל אריח עם פס באורך יחסי, כך שההשוואה נקראת בלי לקרוא מספרים.
    ============================================================ */
 
-/** תא מדד בכרטיס: סמל, תווית, ערך, ושורת הקשר */
-function heroCell(iconName, label, value, sub) {
-  return el('div', { class: 'hero__cell' }, [
-    el('span', { class: 'hero__label' }, [el('span', { class: 'hero__ic', html: ICONS[iconName] || '' }), label]),
-    value,
-    sub ? el('span', { class: 'hero__sub' }, [].concat(sub)) : null,
-  ]);
-}
+/** טקסט הריחוף לנקודה בקו השבועי: שבוע · מצטבר · אחוז מהתקציב */
+const weekTip = (unit, deal, budget) => (key, value) => [
+  `שבוע ${fmtDate(key)}`,
+  `${fmtU(value, unit, deal)}${unit === 'money' ? '' : ' שעות'}`,
+  budget > 0 ? `${pctText(value / budget)} מהתקציב` : '',
+].filter(Boolean).join(' · ');
 
-export function dealHero(snap, unit) {
+export function kpiTiles(snap, unit) {
   const d = snap.deal;
+  const money = unit === 'money';
+  const r = dealReview(snap);
   const m = measure(snap, unit);
-  const eac = unit === 'money' ? snap.eac : snap.eacHours;
-  const eacGap = eac === null || eac === undefined ? null : round2(eac - m.budget);
-  const eacTone = eacGap !== null && eacGap > 0 ? (eac > m.budget * 1.05 ? 'is-over' : 'is-risk') : '';
+  const est = money ? r.estCost : r.estHours;
+  const eac = money ? snap.eac : snap.eacHours;
+  const hasEac = eac !== null && eac !== undefined;
+  const live = r.inProgress;   // עסקה פעילה: תחזית לסיום · עסקה שנסגרה: הפער מהתקציב
+  const fee = money && snap.hasFee ? snap.agreedFee : 0;
+  const top = Math.max(est || 0, m.budget || 0, m.actual || 0, live && hasEac ? eac : 0, fee) || 1;
   const over = m.remaining < 0;
+  const value = (n, opts = {}) => el('span', { class: `tile__value${opts.lg ? ' tile__value--lg' : ''}` }, valueNodes(n, unit, { deal: d, cls: opts.cls || '' }));
 
-  const ringBox = el('div', { class: 'hero__ring', html: ring(m.util, m.status, { size: 124, stroke: 11, label: `ניצול ${pctText(m.util)}` }) }, [
-    el('span', { class: 'hero__pct' }, [
-      el('span', { class: `num ${toneOf(m.status)}`.trim(), text: pctText(m.util) }),
-      el('span', { class: 'hero__pct-sub', text: 'נוצל' }),
-    ]),
-  ]);
-  const main = el('div', { class: 'hero__main' }, [
-    ringBox,
-    el('div', { class: 'hero__lead' }, [
-      el('span', { class: 'hero__label', text: unit === 'money' ? 'ניצול התקציב' : 'ניצול שעות התקציב' }),
-      el('span', { class: 'hero__big' }, valueNodes(m.actual, unit, { deal: d })),
-      el('span', { class: 'hero__sub' }, ['מתוך ', ...valueNodes(m.budget, unit, { deal: d })]),
-    ]),
-  ]);
+  // הדופק: שריפה מצטברת לפי שבוע — הערך המדויק של כל שבוע בריחוף
+  const weeks = progressByPeriod(snap, 'week');
+  const weekVals = weeks.map((w) => (money ? w.cumulativeCost : w.cumulativeHours));
+  const tipOf = weekTip(unit, d, m.budget);
 
-  const cells = [
-    heroCell(over ? 'alert' : 'clock', over ? 'חריגה מהתקציב' : 'נותרו',
-      el('span', { class: 'hero__value' }, valueNodes(Math.abs(m.remaining), unit, { deal: d, cls: over ? 'is-over' : '' })),
-      snap.lastReportAt ? `דיווח אחרון ${fmtDate(snap.lastReportAt)}` : 'טרם דווחו שעות'),
-    heroCell('trending', 'תחזית לסיום',
-      eac === null || eac === undefined
-        ? el('span', { class: 'hero__value hero__value--none', text: '—' })
-        : el('span', { class: 'hero__value' }, valueNodes(eac, unit, { deal: d, cls: eacTone })),
-      eacGap === null
-        ? 'הזן אחוז התקדמות או תאריכים בהגדרות'
-        : [...valueNodes(Math.abs(eacGap), unit, { deal: d }), eacGap > 0 ? ' מעל התקציב' : ' מתחת לתקציב',
-          el('span', { class: 'hero__note', text: snap.eacBasis })]),
+  const tiles = [
+    tile({ label: 'הערכה', tip: 'סך השעות שהוערכו בשורות התקציב, לפני מקדם החריגה.', value: value(est), sub: 'לפני מקדם החריגה', extra: tileBar(est, top, 'est') }),
+    tile({ label: 'תקציב', tip: 'הערכה × (1 + מקדם החריגה), מעוגל כלפי מעלה בכל שורה — או דריסה ידנית.', value: value(m.budget), sub: `הערכה + ${fmtPct(r.usedFactor)} מקדם`, extra: tileBar(m.budget, top, 'budget') }),
+    tile({
+      cls: `tile--lead tile--${m.status}`, label: live ? 'בוצע עד היום' : 'בפועל',
+      value: el('div', { class: 'tile__lead' }, [
+        el('div', { class: 'tile__ring', html: ring(m.util, m.status, { size: 84, stroke: 8, label: `ניצול ${pctText(m.util)}` }) }, [
+          el('span', { class: `tile__pct num ${toneOf(m.status)}`.trim(), text: pctText(m.util) }),
+        ]),
+        el('div', { class: 'tile__leadtext' }, [
+          value(m.actual, { lg: true }),
+          el('span', { class: 'tile__sub' }, [over ? 'חריגה של ' : 'נותרו ', ...valueNodes(Math.abs(m.remaining), unit, { deal: d, cls: over ? 'is-over' : '' })]),
+          el('span', { class: 'tile__note', text: snap.lastReportAt ? `דיווח אחרון ${fmtDate(snap.lastReportAt)}` : 'טרם דווחו שעות' }),
+        ]),
+      ]),
+      extra: weekVals.length > 1 ? el('span', { class: 'tile__pulse', html: sparkline(weekVals, {
+        width: 300, height: 40, budget: m.budget, budgetLine: false, cls: 'spark--hero', dot: false,
+        tips: weeks.map((w, i) => tipOf(w.key, weekVals[i])),
+      }) }) : null,
+    }),
   ];
-  if (unit === 'money' && snap.hasFee) {
-    const ref = eac ?? m.actual;
-    const gap = round2(snap.agreedFee - ref);
-    cells.push(heroCell('coins', d.feeModel === 'capped' ? 'תקרת שכ"ט' : 'שכ"ט מוסכם',
-      el('span', { class: 'hero__value num', text: fmtU(snap.agreedFee, 'money', d) }),
-      [eac !== null && eac !== undefined ? 'מול התחזית: ' : 'מול הביצוע: ', el('span', { class: `num ${gap < 0 ? 'is-over' : ''}`.trim(), text: fmtDelta(gap, 'money', d) })]));
+
+  if (live) {
+    const gap = hasEac ? round2(eac - m.budget) : null;
+    const tone = gap !== null && gap > 0 ? (eac > m.budget * 1.05 ? 'over' : 'risk') : '';
+    tiles.push(tile({
+      label: 'תחזית לסיום',
+      tip: hasEac
+        ? `${snap.eacBasis}: הביצוע עד היום מוקרן לסיום העסקה. ${snap.eacBasis === 'לפי התקדמות שדווחה' ? `התקדמות מדווחת ${fmtPct(r.progressPct / 100)}.` : ''}`.trim()
+        : 'אין עדיין בסיס לתחזית — הזן אחוז התקדמות או תאריכי עסקה בהגדרות.',
+      value: hasEac ? value(eac, { cls: tone ? `is-${tone}` : '' }) : el('span', { class: 'tile__value tile__value--none', text: '—' }),
+      sub: gap === null ? 'הזן התקדמות בהגדרות'
+        : [el('span', { class: `num ${tone ? `is-${tone}` : ''}`.trim(), text: fmtDelta(gap, unit, d) }), gap > 0 ? ' מעל התקציב' : ' מתחת לתקציב'],
+      extra: hasEac ? tileBar(eac, top, tone || 'fc') : null,
+    }));
+  } else {
+    const gap = round2(m.actual - m.budget);
+    tiles.push(tile({
+      label: 'פער מהתקציב',
+      value: el('span', { class: `tile__value num ${gap > 0 ? 'is-over' : ''}`.trim(), text: fmtDelta(gap, unit, d) }),
+      sub: gap > 0 ? 'חריגה' : 'בתוך התקציב',
+    }));
   }
 
-  // הדופק: שריפה מצטברת לפי שבוע — צורה וקצב, בלי צירים (הגרף המלא בטאב הדיווחים). רצועה בתחתית,
-  // מתחת למספרים; התקציב קובע את תקרת הסקאלה, כך שהגובה של הקו בסוף = כמה מהתקציב נשרף
-  const series = progressByPeriod(snap, 'week').map((r) => (unit === 'money' ? r.cumulativeCost : r.cumulativeHours));
-  const pulse = series.length > 1;
-  return el('section', { class: `hero hero--${m.status}${pulse ? ' hero--pulse' : ''}`, dataset: { region: 'hero' }, 'aria-label': 'מצב העסקה' }, [
-    pulse ? el('div', { class: 'hero__pulse', html: sparkline(series, { width: 600, height: 54, budget: m.budget, budgetLine: false, cls: 'spark--hero', dot: false }) }) : null,
-    main,
-    el('div', { class: 'hero__cells' }, cells),
-  ]);
+  if (money && snap.hasFee) {
+    const ref = hasEac ? eac : m.actual;
+    const gap = round2(snap.agreedFee - ref);
+    tiles.push(tile({
+      label: d.feeModel === 'capped' ? 'תקרת שכ"ט' : 'שכ"ט מוסכם',
+      tip: `רווח גולמי עד היום: ${fmtMoney(snap.margin)}${snap.marginPct === null ? '' : ` (${fmtPct(snap.marginPct, 1)})`}.`,
+      value: el('span', { class: 'tile__value num', text: fmtU(snap.agreedFee, 'money', d) }),
+      sub: [hasEac ? 'מול התחזית: ' : 'מול הביצוע: ', el('span', { class: `num ${gap < 0 ? 'is-over' : ''}`.trim(), text: fmtDelta(gap, 'money', d) })],
+      extra: tileBar(snap.agreedFee, top, 'fee'),
+    }));
+  }
+
+  // האריח המודגש תופס שתי עמודות — מכאן ‎+1
+  return el('section', { class: 'tiles', style: `--tiles:${tiles.length + 1};--small:${tiles.length - 1}`, dataset: { region: 'hero' }, 'aria-label': 'מדדי העסקה' }, tiles);
 }
 
 /* ============================================================
@@ -188,8 +212,37 @@ export function alertsCallout(snap, unit) {
    ============================================================ */
 
 const statusRank = (s) => ({ over: 0, risk: 1, watch: 2, ok: 3 }[s] ?? 3);
+const finite = (v) => (Number.isFinite(v) ? v : (v > 0 ? 1e12 : -1e12));
 
-export function renderBudgetTab(root, { snap, rateCard, unit = 'hours', selected = new Set(), expanded = new Set(), sort = 'priority' }) {
+/*
+ * מיון הצוותים: 'priority' (בחריגה ובסיכון ראשונים) · 'manual' (הסדר שנקבע בגרירה) ·
+ * 'מפתח:כיוון' — לחיצה על כותרת עמודה (למשל 'remaining:asc' = החריגה הגדולה ראשונה).
+ */
+const TEAM_SORT = {
+  name: (t) => t.name,
+  est: (t, unit) => measure(t, unit).est,
+  budget: (t, unit) => measure(t, unit).budget,
+  actual: (t, unit) => measure(t, unit).actual,
+  remaining: (t, unit) => measure(t, unit).remaining,
+  util: (t, unit) => finite(measure(t, unit).util),
+};
+/** כיוון ברירת המחדל בלחיצה ראשונה: שם — א-ב; יתרה — החריגה הגדולה ראשונה; השאר — מהגבוה */
+export const TEAM_SORT_DIR = { name: 'asc', remaining: 'asc' };
+
+export function sortTeams(teams, sort, unit) {
+  if (sort === 'manual') return teams;
+  const [key, dir] = String(sort || '').split(':');
+  const f = TEAM_SORT[key];
+  if (!f) return [...teams].sort((a, b) => statusRank(measure(a, unit).status) - statusRank(measure(b, unit).status) || a.order - b.order);
+  const k = dir === 'asc' ? 1 : -1;
+  return [...teams].sort((a, b) => {
+    const x = f(a, unit);
+    const y = f(b, unit);
+    return (typeof x === 'string' ? x.localeCompare(y, 'he') : x - y) * k || a.order - b.order;
+  });
+}
+
+export function renderBudgetTab(root, { snap, rateCard, unit = 'hours', selected = new Set(), expanded = new Set(), sort = 'priority', filter = 'all' }) {
   if (!snap.teams.length) {
     root.append(el('section', { class: 'card' }, [emptyState('עוד אין צוותים בעסקה',
       'כל צוות בנוי באותה מתודולוגיה: שורה לכל דרגה, שעות מוערכות, מקדם חריגה ותעריף מהתעריפון.',
@@ -198,29 +251,38 @@ export function renderBudgetTab(root, { snap, rateCard, unit = 'hours', selected
     return;
   }
 
-  root.append(dealHero(snap, unit));
+  root.append(kpiTiles(snap, unit));
   const alerts = alertsCallout(snap, unit);
   if (alerts) root.append(alerts);
 
-  // סדר הצוותים: לפי דחיפות (ביחידה שעל המסך) או הסדר שנקבע בגרירה
-  const teams = sort === 'manual'
-    ? snap.teams
-    : [...snap.teams].sort((a, b) => statusRank(measure(a, unit).status) - statusRank(measure(b, unit).status) || a.order - b.order);
+  // סינון לפי מצב (ביחידה שעל המסך) ומיון — לפי דחיפות, הסדר שלי, או עמודה
+  const statusOf = (t) => measure(t, unit).status;
+  const nOver = snap.teams.filter((t) => statusOf(t) === 'over').length;
+  const nRisk = snap.teams.filter((t) => statusOf(t) === 'risk').length;
+  const shown = filter === 'over' || filter === 'risk' ? snap.teams.filter((t) => statusOf(t) === filter) : snap.teams;
+  const teams = sortTeams(shown, sort, unit);
+  const [sortKey, sortDir] = String(sort).split(':');
 
   const list = el('div', { class: `tlist${selected.size ? ' tlist--picking' : ''}`, dataset: { droplist: 'teams' } });
   const H = unit === 'money' ? '₪' : 'שעות';
-  list.append(el('div', { class: 'trow trow--head', 'aria-hidden': 'true' }, [
+  // כותרת לחיצה = מיון; מצב המיון נקרא מתווית הכפתור (aria-sort שייך רק לטבלה אמיתית)
+  const hcell = (text, key, cls) => el('span', { class: `trow__h ${cls}` }, [sortButton(text, key, sortKey === key ? sortDir : '', 'sort-teams')]);
+  list.append(el('div', { class: 'trow trow--head' }, [
     el('span'), el('span'),
-    el('span', { class: 'trow__h', text: 'צוות' }),
-    el('span', { class: 'trow__h', text: 'ניצול' }),
-    el('span', { class: 'trow__h', text: `בוצע / תקציב (${H})` }),
-    el('span', { class: 'trow__h', text: 'יתרה' }),
+    hcell('צוות', 'name', 'c-team'),
+    hcell('הערכה', 'est', 'c-est'),
+    hcell('תקציב', 'budget', 'c-budget'),
+    hcell('בוצע', 'actual', 'c-actual'),
+    hcell(`בוצע / תקציב (${H})`, 'actual', 'c-used'),
+    hcell('יתרה', 'remaining', 'c-rem'),
+    hcell('ניצול', 'util', 'c-util'),
     el('span'),
   ]));
   for (const team of teams) {
     list.append(teamRow(team, { snap, unit, selected, expanded }));
     if (expanded.has(team.id)) list.append(teamSheet(team, { snap, rateCard, unit }));
   }
+  if (!teams.length) list.append(el('p', { class: 'tlist__empty', text: filter === 'over' ? 'אין צוותים בחריגה' : 'אין צוותים בסיכון' }));
 
   // שורות סיכום — הפרדת בדיקת הנאותות (כשיש) ואז סה"כ העסקה
   const kinds = aggregateByKind(snap);
@@ -234,6 +296,7 @@ export function renderBudgetTab(root, { snap, rateCard, unit = 'hours', selected
     el('header', { class: 'card__head' }, [
       el('h2', { class: 'card__title' }, [el('span', { class: 'card__ic', html: ICONS.users }), 'צוותים', el('span', { class: 'count', text: String(snap.teams.length) })]),
       el('div', { class: 'card__tools' }, [
+        chips([['all', 'הכל', snap.teams.length], ['over', 'בחריגה', nOver], ['risk', 'בסיכון', nRisk]], filter, 'filter-teams', 'filter', { label: 'סינון הצוותים לפי מצב' }),
         seg([['priority', 'לפי דחיפות', 'צוותים בחריגה או בסיכון ראשונים'], ['manual', 'הסדר שלי', 'הסדר שנקבע בגרירה']], sort, 'set-team-sort', 'sort', { cls: 'seg--sm', label: 'מיון הצוותים' }),
         button('צוות', { action: 'add-team', iconName: 'plus', title: 'הוספת צוות (שורה לכל דרגה בתעריפון)' }),
       ]),
@@ -280,9 +343,12 @@ function teamRow(team, { snap, unit, selected, expanded }) {
         ]),
       ]),
     ]),
-    el('div', { class: 'trow__meter' }, [meterCell(m.util, m.status, { calc: `team-${team.id}` })]),
-    el('span', { class: 'trow__num trow__num--main num', dataset: { calc: `team-used-${team.id}` }, text: `${fmtU(m.actual, unit, d)} / ${fmtU(m.budget, unit, d)}` }),
-    el('span', { class: `trow__num num ${m.remaining < 0 ? 'neg' : ''}`.trim(), dataset: { calc: `team-rem-${team.id}` }, text: fmtU(m.remaining, unit, d) }),
+    el('span', { class: 'trow__num num c-est', dataset: { calc: `tr-est-${team.id}` }, text: fmtU(m.est, unit, d) }),
+    el('span', { class: 'trow__num num c-budget', dataset: { calc: `tr-budget-${team.id}` }, text: fmtU(m.budget, unit, d) }),
+    el('span', { class: 'trow__num trow__num--main num c-actual', dataset: { calc: `tr-actual-${team.id}` }, text: fmtU(m.actual, unit, d) }),
+    el('span', { class: 'trow__num trow__num--main num c-used', dataset: { calc: `team-used-${team.id}` }, text: `${fmtU(m.actual, unit, d)} / ${fmtU(m.budget, unit, d)}` }),
+    el('span', { class: `trow__num num c-rem ${m.remaining < 0 ? 'neg' : ''}`.trim(), dataset: { calc: `team-rem-${team.id}` }, text: fmtU(m.remaining, unit, d) }),
+    el('div', { class: 'trow__meter c-util' }, [meterCell(m.util, m.status, { calc: `team-${team.id}` })]),
     el('div', { class: 'trow__tools' }, [
       iconButton('copy', { action: 'duplicate-team', title: 'שכפול הצוות', dataset: { teamId: team.id } }),
       iconButton('trash', { action: 'delete-team', title: 'מחיקת הצוות', danger: true, dataset: { teamId: team.id } }),
@@ -317,12 +383,16 @@ function distribution(snap, unit) {
 /** שורת סיכום (בדיקת נאותות / יתר / סה"כ) — בלי שדות, ולכן נבנית מחדש בכל רענון */
 function sumRow(label, agg, unit, snap, key, cls) {
   const m = measure(agg, unit);
+  const d = snap.deal;
   return el('div', { class: `trow ${cls}`, dataset: { region: key } }, [
     el('span'), el('span'),
     el('span', { class: 'trow__label', text: label }),
-    el('div', { class: 'trow__meter' }, [meterCell(m.util, m.status)]),
-    el('span', { class: 'trow__num trow__num--main num', text: `${fmtU(m.actual, unit, snap.deal)} / ${fmtU(m.budget, unit, snap.deal)}` }),
-    el('span', { class: `trow__num num ${m.remaining < 0 ? 'neg' : ''}`.trim(), text: fmtU(m.remaining, unit, snap.deal) }),
+    el('span', { class: 'trow__num num c-est', text: fmtU(m.est, unit, d) }),
+    el('span', { class: 'trow__num num c-budget', text: fmtU(m.budget, unit, d) }),
+    el('span', { class: 'trow__num trow__num--main num c-actual', text: fmtU(m.actual, unit, d) }),
+    el('span', { class: 'trow__num trow__num--main num c-used', text: `${fmtU(m.actual, unit, d)} / ${fmtU(m.budget, unit, d)}` }),
+    el('span', { class: `trow__num num c-rem ${m.remaining < 0 ? 'neg' : ''}`.trim(), text: fmtU(m.remaining, unit, d) }),
+    el('div', { class: 'trow__meter c-util' }, [meterCell(m.util, m.status)]),
     el('span'),
   ]);
 }
@@ -473,8 +543,8 @@ function teamSheet(team, { snap, rateCard, unit }) {
       button('שורה', { action: 'add-line', iconName: 'plus', kind: 'ghost', dataset: { teamId: team.id }, title: 'הוספת שורת דרגה' }),
       button('פריסה לפי אנשי צוות', { action: 'split-by-person', iconName: 'users', kind: 'ghost', dataset: { teamId: team.id }, title: 'שורה לכל עורך דין — לתמחור לפי אדם' }),
       el('span', { class: 'spacer' }),
-      el('label', { class: 'inline-field', title: 'ריק = המקדם של העסקה. 0.2 = תוספת של 20% לשעות המוערכות' }, [
-        'מקדם חריגה',
+      el('label', { class: 'inline-field' }, [
+        'מקדם חריגה', infoTip('ריק = המקדם של העסקה. 0.2 = תוספת של 20% לשעות המוערכות.'),
         el('input', {
           class: 'cell-input', type: 'number', step: '0.05', min: '0', max: '2',
           value: team.overrunFactor === null ? '' : String(team.overrunFactor), placeholder: String(d.overrunFactor),
@@ -488,11 +558,7 @@ function teamSheet(team, { snap, rateCard, unit }) {
         el('span', { text: 'צוות בדיקת נאותות' }),
       ]),
     ]),
-    el('div', { class: 'legend' }, [
-      el('span', { class: 'legend__item' }, [el('span', { class: 'legend__box' }), 'שדה הזנה']),
-      el('span', { class: 'legend__item' }, ['ערך מחושב — ✎ בריחוף לדריסה ידנית']),
-      el('span', { class: 'legend__item' }, [el('span', { class: 'legend__box legend__box--ovr' }), 'נדרס ידנית (↺ חוזר לחישוב)']),
-    ]),
+    el('span', { class: 'legend' }, ['מקרא', infoTip('מסגרת לבנה = שדה הזנה. ערך בלי מסגרת = מחושב — ✎ בריחוף לדריסה ידנית. רקע כתום = נדרס ידנית; ↺ מחזיר לחישוב.', { label: 'מקרא הגיליון' })]),
   ]);
 }
 
@@ -547,6 +613,9 @@ export function refreshComputed(snap, { unit = 'hours', selected = new Set() } =
     setMeter(`team-${team.id}`, m.util, m.status);
     setMeter(`team-foot-${team.id}`, m.util, m.status);
     setText(`team-used-${team.id}`, `${fmtU(m.actual, unit, d)} / ${fmtU(m.budget, unit, d)}`);
+    setText(`tr-est-${team.id}`, fmtU(m.est, unit, d));
+    setText(`tr-budget-${team.id}`, fmtU(m.budget, unit, d));
+    setText(`tr-actual-${team.id}`, fmtU(m.actual, unit, d));
     setText(`team-rem-${team.id}`, fmtU(m.remaining, unit, d), m.remaining < 0);
     setText(`team-rem2-${team.id}`, fmtU(m.remaining, unit, d), m.remaining < 0);
     setText(`team-est-${team.id}`, fmtU(team.estHours, 'hours'));
@@ -573,7 +642,7 @@ export function refreshComputed(snap, { unit = 'hours', selected = new Set() } =
   }
 
   // אזורים בלי שדות הזנה — נבנים מחדש
-  swap('hero', dealHero(snap, unit));
+  swap('hero', kpiTiles(snap, unit));
   const alertsNode = document.querySelector('[data-region="alerts"]');
   const freshAlerts = alertsCallout(snap, unit);
   if (alertsNode && freshAlerts) alertsNode.replaceWith(freshAlerts);
@@ -589,8 +658,9 @@ export function refreshComputed(snap, { unit = 'hours', selected = new Set() } =
   swap('dist', distribution(snap, unit));
   if (selected.size) swap('selbar', selectionBar(snap, selected, unit));
 
-  // הניצול בסרגל הצד
+  // הניצול בסרגל הצד וברשימת התיק
   const m = measure(snap, unit);
+  setMeter(`dl-${d.id}`, m.util, m.status);
   const side = document.querySelector(`.side__deal[data-id="${CSS.escape(d.id)}"]`);
   if (side) {
     const val = side.querySelector('.side__deal-val');

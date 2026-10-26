@@ -1018,18 +1018,18 @@ export function aggregateTeams(snapshot, teamIds) {
   const teams = snapshot.teams.filter((t) => ids.has(t.id));
   const t = {
     count: teams.length, names: teams.map((x) => x.name),
-    budgetCost: 0, budgetHours: 0, estHours: 0, actualCost: 0, actualHours: 0,
+    budgetCost: 0, budgetHours: 0, estHours: 0, estCost: 0, actualCost: 0, actualHours: 0,
     juniorCost: 0, juniorHours: 0, seniorHours: 0, seniorCost: 0,
   };
   for (const team of teams) {
-    t.budgetCost += team.budgetCost; t.budgetHours += team.budgetHours; t.estHours += team.estHours;
+    t.budgetCost += team.budgetCost; t.budgetHours += team.budgetHours; t.estHours += team.estHours; t.estCost += team.estCost || 0;
     t.actualCost += team.actualCost; t.actualHours += team.actualHours;
     for (const l of team.lines) {
       if (l.junior) { t.juniorCost += l.budgetCost; t.juniorHours += l.budgetHours; }
       else { t.seniorHours += l.budgetHours; t.seniorCost += l.budgetCost; }
     }
   }
-  for (const k of ['budgetCost', 'budgetHours', 'estHours', 'actualCost', 'actualHours', 'juniorCost', 'juniorHours', 'seniorHours', 'seniorCost']) {
+  for (const k of ['budgetCost', 'budgetHours', 'estHours', 'estCost', 'actualCost', 'actualHours', 'juniorCost', 'juniorHours', 'seniorHours', 'seniorCost']) {
     t[k] = round2(t[k]);
   }
   t.remainingCost = round2(t.budgetCost - t.actualCost);

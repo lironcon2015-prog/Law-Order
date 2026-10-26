@@ -44,6 +44,8 @@ export const ICONS = {
   coins: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="m16.71 13.88.7.71-2.82 2.82"/></svg>',
   chart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>',
   list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg>',
+  sidebar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/></svg>',
+  expand: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>',
   database: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>',
 };
 
@@ -232,11 +234,15 @@ export function menu({ label = '', iconName = '', title = '', cls = 'btn btn--sm
   return el('div', { class: 'menu-wrap' }, [trigger, list]);
 }
 
-export function field(label, control, hint) {
+/**
+ * שדה טופס. hint = הסבר — מוצג כ-ⓘ ליד התווית (בריחוף/פוקוס), לא כמשפט מתחת לשדה.
+ * note:true — כשהטקסט הוא מצב ולא הסבר (למשל "זוהו 3 שורות שכבר דווחו") ולכן חייב להיראות תמיד.
+ */
+export function field(label, control, hint, { note = false } = {}) {
   return el('label', { class: 'field' }, [
-    el('span', { class: 'field__label', text: label }),
+    el('span', { class: 'field__label' }, [label, hint && !note ? infoTip(hint) : null]),
     control,
-    hint ? el('span', { class: 'field__hint', text: hint }) : null,
+    hint && note ? el('span', { class: 'field__hint', text: hint }) : null,
   ]);
 }
 
@@ -322,11 +328,11 @@ export function limitItems(items, limit, { colspan = 0, noun = 'פריטים' } 
 }
 
 /** כרטיס עם כותרת. body = מערך צמתים; flush = בלי ריפוד (לטבלאות) */
-export function card({ title, sub = '', tools = null, count = null, cls = '', flush = false, id = null }, body = []) {
+export function card({ title, sub = '', info = '', tools = null, count = null, cls = '', flush = false, id = null }, body = []) {
   return el('section', { class: `card ${cls}`.trim(), id }, [
     title ? el('header', { class: 'card__head' }, [
       el('div', {}, [
-        el('h2', { class: 'card__title' }, [title, count !== null ? el('span', { class: 'count', text: String(count) }) : null]),
+        el('h2', { class: 'card__title' }, [title, count !== null ? el('span', { class: 'count', text: String(count) }) : null, info ? infoTip(info) : null]),
         sub ? el('p', { class: 'card__sub', text: sub }) : null,
       ]),
       tools ? el('div', { class: 'card__tools' }, [].concat(tools)) : null,
@@ -335,17 +341,184 @@ export function card({ title, sub = '', tools = null, count = null, cls = '', fl
   ]);
 }
 
-/** טבלה. head = [text | {text, cls, title}], rows = מערך tr. more = כמה שורות להציג לפני "הצג עוד" */
-export function table(head, rows, { cls = '', foot = null, more = 0, noun = 'שורות' } = {}) {
-  const th = head.map((h) => (typeof h === 'string'
-    ? el('th', { text: h })
-    : el('th', { class: h.cls || null, title: h.title || null }, h.text || '')));
+/**
+ * טבלה. head = [text | {text, cls, title, sort}], rows = מערך tr. more = כמה שורות להציג לפני "הצג עוד".
+ * sort = { key, dir, action } — כל כותרת עם sort הופכת לכפתור מיון (aria-sort מסמן את המצב).
+ */
+export function table(head, rows, { cls = '', foot = null, more = 0, noun = 'שורות', sort = null } = {}) {
+  const th = head.map((h) => {
+    if (typeof h === 'string') return el('th', { text: h });
+    const on = !!(sort && h.sort && sort.key === h.sort);
+    return el('th', {
+      class: h.cls || null, title: h.title || null,
+      'aria-sort': sort && h.sort ? (on ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none') : null,
+    }, sort && h.sort ? [sortButton(h.text, h.sort, on ? sort.dir : '', sort.action)] : (h.text || ''));
+  });
   const body = el('tbody', { class: more ? 'has-more' : null }, more ? limitItems(rows, more, { colspan: head.length, noun }) : rows);
   return el('div', { class: 'tbl-wrap' }, el('table', { class: `tbl ${cls}`.trim() }, [
     el('thead', {}, el('tr', {}, th)),
     body,
     foot ? el('tfoot', {}, foot) : null,
   ]));
+}
+
+/** כפתור מיון בכותרת עמודה — החץ מציג את הכיוון; בלי מיון החץ מופיע רק בריחוף */
+export function sortButton(text, key, dir, action) {
+  const state = dir ? (dir === 'asc' ? 'ממוין בסדר עולה' : 'ממוין בסדר יורד') : '';
+  return el('button', {
+    class: `sortbtn${dir ? ` is-${dir}` : ''}`, type: 'button', dataset: { action, sort: key },
+    title: dir ? `${state} — לחיצה להפוך` : 'מיון לפי העמודה',
+    'aria-label': `${text || 'התראות'}${state ? ` — ${state}` : ' — מיון'}`,
+  }, [text, el('span', { class: 'sortbtn__arrow', 'aria-hidden': 'true' })]);
+}
+
+/** צ'יפים לסינון: items = [[value, label, count]] */
+export function chips(items, current, action, key, { label = '' } = {}) {
+  return el('div', { class: 'chips', role: 'group', 'aria-label': label || null }, items.map(([value, text, count]) => el('button', {
+    class: `chip${value === current ? ' is-on' : ''}`, type: 'button', 'aria-pressed': String(value === current),
+    disabled: count === 0 && value !== current ? '' : null, dataset: { action, [key]: value },
+  }, [text, count !== undefined ? el('span', { class: 'chip__n num', text: String(count) }) : null])));
+}
+
+/* ---------- אריח מדד (KPI) ---------- */
+
+/** אריח: תווית (+ ⓘ), ערך, שורת הקשר, ותוספת חזותית (פס יחסי / קו מגמה / טבעת) */
+export function tile({ label, value, sub = null, tip = '', cls = '', extra = null }) {
+  return el('div', { class: `tile ${cls}`.trim() }, [
+    el('span', { class: 'tile__label' }, [label, tip ? infoTip(tip) : null]),
+    value,
+    sub ? el('span', { class: 'tile__sub' }, [].concat(sub)) : null,
+    extra,
+  ]);
+}
+
+/** פס יחסי באריח — ההשוואה בין האריחים נקראת בלי לקרוא מספרים */
+export function tileBar(amount, top, tone = '') {
+  const w = top > 0 ? Math.max(2, Math.min(100, (amount / top) * 100)) : 0;
+  return el('span', { class: `tile__bar${tone ? ` tile__bar--${tone}` : ''}`, 'aria-hidden': 'true' }, [el('i', { style: `width:${Math.round(w * 10) / 10}%` })]);
+}
+
+/* ---------- טולטיפים ----------
+ * רכיב אחד לכל האפליקציה: כל אלמנט עם data-tip מציג את הטקסט בריחוף (עכבר) או בפוקוס (מקלדת);
+ * במגע — הקשה על ⓘ. הסברים ארוכים יושבים מאחורי ⓘ ולא כמשפטים מתחת לנתונים.
+ * גרף עם data-pts (נקודות ביחידות ה-viewBox) ו-data-tips (JSON של טקסטים) מציג את הערך המדויק
+ * של הנקודה הקרובה לסמן.
+ */
+
+/** ⓘ עם הסבר. span ולא button: בתוך <label> כפתור היה "חוטף" את התווית מהשדה */
+export function infoTip(text, { label = 'הסבר' } = {}) {
+  return el('span', { class: 'infotip', tabindex: '0', role: 'img', 'aria-label': `${label}: ${text}`, dataset: { tip: text }, html: ICONS.info });
+}
+
+let tipNode = null;
+let tipDot = null;
+let tipTimer = null;
+let tipFor = null;
+
+function tipEls() {
+  if (!tipNode || !tipNode.isConnected) {
+    tipNode = el('div', { class: 'tip', role: 'tooltip', id: 'tip' });
+    tipDot = el('span', { class: 'tip-dot', 'aria-hidden': 'true' });
+    document.body.append(tipNode, tipDot);
+  }
+  return tipNode;
+}
+
+/** מציג טולטיפ מעל עוגן (מלבן או נקודה); אם אין מקום מעל — מתחת */
+export function showTip(text, anchor, { dot = false } = {}) {
+  const node = tipEls();
+  node.textContent = text;
+  node.classList.add('is-on');
+  const r = anchor.width !== undefined ? anchor : { left: anchor.x, top: anchor.y, bottom: anchor.y, width: 0 };
+  const w = node.offsetWidth;
+  const h = node.offsetHeight;
+  const cx = r.left + r.width / 2;
+  let top = r.top - h - 10;
+  const below = top < 8;
+  if (below) top = r.bottom + 10;
+  const left = Math.min(Math.max(8, cx - w / 2), window.innerWidth - w - 8);
+  node.style.top = `${Math.round(top)}px`;
+  node.style.left = `${Math.round(left)}px`;
+  node.style.setProperty('--arrow-x', `${Math.round(Math.min(Math.max(12, cx - left), w - 12))}px`);
+  node.classList.toggle('tip--below', below);
+  tipDot.classList.toggle('is-on', dot);
+  if (dot) {
+    tipDot.style.left = `${Math.round(anchor.x)}px`;
+    tipDot.style.top = `${Math.round(anchor.y)}px`;
+  }
+}
+
+export function hideTip() {
+  clearTimeout(tipTimer);
+  tipFor = null;
+  tipNode?.classList.remove('is-on');
+  tipDot?.classList.remove('is-on');
+  for (const g of document.querySelectorAll('.ch-guide.is-on')) g.classList.remove('is-on');
+}
+
+/** הנקודה בגרף הקרובה לסמן (לפי ציר X בלבד — כמו קו אנכי שעוקב אחרי העכבר) */
+function chartPoint(svg, clientX) {
+  const pts = (svg.dataset.pts || '').split(' ').filter(Boolean).map((p) => p.split(',').map(Number));
+  if (!pts.length) return null;
+  const vb = svg.viewBox.baseVal;
+  const r = svg.getBoundingClientRect();
+  if (!vb || !vb.width || !r.width) return null;
+  const x = ((clientX - r.left) / r.width) * vb.width;
+  let best = 0;
+  pts.forEach((p, i) => { if (Math.abs(p[0] - x) < Math.abs(pts[best][0] - x)) best = i; });
+  let tips = [];
+  try { tips = JSON.parse(svg.dataset.tips || '[]'); } catch { /* בלי טקסטים — בלי טולטיפ */ }
+  return {
+    vx: pts[best][0], text: tips[best] || '',
+    x: r.left + (pts[best][0] / vb.width) * r.width,
+    y: r.top + (pts[best][1] / vb.height) * r.height,
+  };
+}
+
+/** מחבר את הטולטיפים לכל המסמך — פעם אחת, באתחול */
+export function initTips() {
+  const target = (e) => e.target.closest?.('[data-tip]');
+  document.addEventListener('pointerover', (e) => {
+    if (e.pointerType !== 'mouse') return;
+    const t = target(e);
+    if (!t || t === tipFor) return;
+    clearTimeout(tipTimer);
+    tipFor = t;
+    tipTimer = setTimeout(() => { if (tipFor === t && t.isConnected) showTip(t.dataset.tip, t.getBoundingClientRect()); }, 260);
+  });
+  document.addEventListener('pointerout', (e) => {
+    const t = target(e);
+    if (t && t === tipFor && !t.contains(e.relatedTarget)) hideTip();
+  });
+  document.addEventListener('focusin', (e) => {
+    const t = target(e);
+    if (t && t.matches(':focus-visible')) { tipFor = t; showTip(t.dataset.tip, t.getBoundingClientRect()); }
+  });
+  document.addEventListener('focusout', (e) => { if (target(e) && target(e) === tipFor) hideTip(); });
+  // מגע ולחיצה: ⓘ מציג/מסתיר — ולא מפעיל את השורה או התווית שהוא יושב בהן
+  document.addEventListener('click', (e) => {
+    const t = e.target.closest?.('.infotip');
+    if (!t) return;
+    e.preventDefault();
+    if (tipFor === t && tipNode?.classList.contains('is-on')) hideTip();
+    else { clearTimeout(tipTimer); tipFor = t; showTip(t.dataset.tip, t.getBoundingClientRect()); }
+  });
+  // גרפים: הערך המדויק של הנקודה הקרובה לסמן
+  document.addEventListener('pointermove', (e) => {
+    const svg = e.target.closest?.('svg[data-pts]');
+    if (!svg) { if (tipFor?.matches?.('svg[data-pts]')) hideTip(); return; }
+    const p = chartPoint(svg, e.clientX);
+    if (!p || !p.text) return;
+    clearTimeout(tipTimer);
+    tipFor = svg;
+    showTip(p.text, { x: p.x, y: p.y }, { dot: true });
+    const guide = svg.querySelector('.ch-guide');
+    if (guide) { guide.setAttribute('x1', p.vx); guide.setAttribute('x2', p.vx); guide.classList.add('is-on'); }
+  });
+  document.addEventListener('pointerleave', hideTip);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideTip(); });
+  window.addEventListener('scroll', hideTip, { capture: true, passive: true });
+  window.addEventListener('resize', hideTip);
 }
 
 /* ---------- Toast ---------- */

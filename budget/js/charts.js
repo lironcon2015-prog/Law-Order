@@ -6,6 +6,11 @@ import { round2 } from './model.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+/** מאפייני ריחוף: נקודות (ביחידות ה-viewBox) וטקסט לכל נקודה — ui-kit.initTips מציג את הקרובה לסמן */
+const hoverAttrs = (pts, tips) => (tips && tips.length === pts.length
+  ? ` data-pts="${pts.map(([x, y]) => `${round2(x)},${round2(y)}`).join(' ')}" data-tips="${esc(JSON.stringify(tips))}"`
+  : '');
+
 /** צעד "עגול" לקווי הרשת: 1 / 2 / 2.5 / 5 × חזקת 10 */
 function niceStep(raw) {
   if (!(raw > 0)) return 1;
@@ -42,12 +47,14 @@ export function burnLine(series, budget, { fmt = String, axisFmt = fmt, width = 
   const xLabels = series.map((s, i) => (i % every === 0 || i === series.length - 1)
     ? `<text class="ch-axis" x="${round2(x(i))}" y="${height - 10}" text-anchor="middle">${esc(s.label)}</text>` : '').join('');
   const dots = series.length <= 40
-    ? series.map((s, i) => `<circle class="ch-dot" cx="${round2(x(i))}" cy="${round2(y(s.cumulative))}" r="3.2"><title>${esc(s.title || s.label)} · ${esc(fmt(s.cumulative))}</title></circle>`).join('')
+    ? series.map((s, i) => `<circle class="ch-dot" cx="${round2(x(i))}" cy="${round2(y(s.cumulative))}" r="3.2"/>`).join('')
     : '';
   const last = series[series.length - 1];
   const budgetY = budget > 0 ? round2(y(budget)) : null;
+  const tips = series.map((s) => `${s.title || s.label} · ${fmt(s.cumulative)}${budget > 0 ? ` · ${Math.round((s.cumulative / budget) * 100)}% מהתקציב` : ''}`);
+  const hover = hoverAttrs(series.map((s, i) => [x(i), y(s.cumulative)]), tips);
 
-  return `<svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="שריפה מצטברת מול התקציב" style="direction:ltr">
+  return `<svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="שריפה מצטברת מול התקציב" style="direction:ltr"${hover}>
     <defs><linearGradient id="burnGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" class="ch-stop-a"/><stop offset="100%" class="ch-stop-b"/></linearGradient></defs>
     ${grid.join('')}
     <line class="ch-base" x1="${pad.l}" y1="${pad.t + h}" x2="${pad.l + w}" y2="${pad.t + h}"/>
@@ -55,6 +62,7 @@ export function burnLine(series, budget, { fmt = String, axisFmt = fmt, width = 
     ${budgetY !== null ? `<line class="ch-budget" x1="${pad.l}" y1="${budgetY}" x2="${pad.l + w}" y2="${budgetY}"/>
       <text class="ch-label" x="${pad.l + w}" y="${budgetY - 7}" text-anchor="end">תקציב ${esc(fmt(budget))}</text>` : ''}
     <path class="ch-area" d="${area}"/>
+    <line class="ch-guide" x1="0" x2="0" y1="${pad.t}" y2="${pad.t + h}"/>
     <path class="ch-line" d="${path}"/>
     ${dots}${xLabels}
     <text class="ch-num" x="${round2(x(series.length - 1))}" y="${round2(y(last.cumulative)) - 11}" text-anchor="${series.length > 1 ? 'end' : 'middle'}">${esc(fmt(last.cumulative))}</text>
@@ -81,9 +89,9 @@ export function ring(util, status, { size = 128, stroke = 11, label = '' } = {})
 /**
  * קו מגמה קטן (sparkline) — מצטבר לאורך זמן, משמאל לימין. בלי צירים: הוא מראה צורה וקצב,
  * והמספרים עצמם נמצאים לידו. budget (אופציונלי) קובע את התקרה של הסקאלה ומסומן כקו אופקי עדין
- * (budgetLine:false — רק סקאלה, בלי קו).
+ * (budgetLine:false — רק סקאלה, בלי קו). tips = טקסט לכל נקודה — הערך המדויק בריחוף.
  */
-export function sparkline(values, { width = 120, height = 34, budget = 0, budgetLine = true, cls = '', fill = true, dot = true } = {}) {
+export function sparkline(values, { width = 120, height = 34, budget = 0, budgetLine = true, cls = '', fill = true, dot = true, tips = null } = {}) {
   if (!values.length) return '';
   const pad = 3;
   const max = Math.max(budget || 0, ...values) || 1;
@@ -93,7 +101,8 @@ export function sparkline(values, { width = 120, height = 34, budget = 0, budget
   const line = `M${pts.join(' L')}`;
   const area = `${line} L${round2(x(values.length - 1))},${height - pad} L${round2(x(0))},${height - pad} Z`;
   const last = values[values.length - 1];
-  return `<svg class="spark ${cls}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true" style="direction:ltr">
+  const hover = hoverAttrs(values.map((v, i) => [x(i), y(v)]), tips);
+  return `<svg class="spark ${cls}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true" style="direction:ltr"${hover}>
     ${budget > 0 && budgetLine ? `<line class="spark__budget" x1="${pad}" x2="${width - pad}" y1="${round2(y(budget))}" y2="${round2(y(budget))}"/>` : ''}
     ${fill ? `<path class="spark__area" d="${area}"/>` : ''}
     <path class="spark__line" d="${line}" vector-effect="non-scaling-stroke"/>

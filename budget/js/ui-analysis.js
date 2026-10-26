@@ -1,10 +1,12 @@
-// ui-analysis.js — טאב הניתוח (מה שהיה "בקרה" + "תחקיר"): תכנון מול ביצוע, מסקנות לתמחור הבא,
+// ui-analysis.js — טאב הניתוח (מה שהיה "בקרה" + "תחקיר"): אריחי תכנון מול ביצוע, מסקנות לתמחור הבא,
 // ופילוח לפי צוות / דרגה / אדם / שורה. כל טבלה ביחידה שנבחרה; פירוק הפער והתעריפים — רק ב-₪.
+// במסך רחב הכרטיסים הקטנים יושבים בזוגות (שני טורים) והטבלאות ברוחב מלא.
 
 import { dealReview, aggregateByKind, fmtMoney, fmtPct, statusOf } from './model.js';
 import {
-  el, icon, measure, fmtU, fmtDelta, pctText, toneOf, meterCell, card, table, foldPanel, fact, emptyState, button, fmtDate,
+  el, icon, measure, fmtU, fmtDelta, pctText, meterCell, card, table, foldPanel, fact, emptyState, button, fmtDate, infoTip,
 } from './ui-kit.js';
+import { kpiTiles } from './ui-deal.js';
 
 const sign = (n) => (n > 0 ? 'neg' : '');   // פער חיובי = מעל התקציב = רע
 
@@ -21,48 +23,22 @@ export function renderAnalysisTab(root, { snap, unit = 'hours' }) {
     return;
   }
 
-  // עסקה פתוחה: הביצוע עד היום אינו הסוף — המסקנות לתמחור נגזרות מהתחזית לסיום
-  if (r.inProgress) {
-    root.append(el('div', { class: 'notice' }, [icon('info'), el('span', { text: r.basisHours === null || r.basisHours === undefined
-      ? `העסקה עדיין פעילה (התקדמות מדווחת ${fmtPct(r.progressPct / 100)}), והנתונים חלקיים. אין עדיין תחזית לסיום — המסקנות לתמחור יופיעו כשיוזנו אחוז התקדמות או תאריכי העסקה.`
-      : `העסקה עדיין פעילה (התקדמות מדווחת ${fmtPct(r.progressPct / 100)}), והנתונים חלקיים. המסקנות לתמחור מחושבות לפי התחזית לסיום (${r.eacBasis}).` })]));
-  }
-
-  /* ---------- 1. תכנון מול ביצוע: הערכה → תקציב → בפועל → תחזית ---------- */
+  /* ---------- 1. תכנון מול ביצוע — אותם אריחים כמו בראש התקציב ---------- */
   const m = measure(snap, unit);
-  const est = money ? r.estCost : r.estHours;
-  const eac = money ? snap.eac : snap.eacHours;
-  // כל שלב עם פס באורך יחסי — ההשוואה בין ארבע הנקודות נקראת בלי לקרוא מספרים
-  const top = Math.max(est || 0, m.budget || 0, m.actual || 0, eac || 0) || 1;
-  const stepCell = (label, value, note = '', noteCls = '', valueCls = '', amount = null, bar = '') => el('div', { class: 'step' }, [
-    el('span', { class: 'step__label', text: label }),
-    el('span', { class: `step__value num ${valueCls}`.trim(), text: value }),
-    amount !== null ? el('span', { class: `step__bar${bar ? ` step__bar--${bar}` : ''}` }, [el('i', { style: `width:${Math.max(2, Math.min(100, (amount / top) * 100))}%` })]) : null,
-    note ? el('span', { class: `step__note ${noteCls}`.trim(), text: note }) : null,
-  ]);
-  const hasEac = eac !== null && eac !== undefined;
-  const finalCell = r.inProgress
-    ? stepCell('תחזית לסיום', hasEac ? U(eac) : '—',
-      hasEac ? `${D(eac - m.budget)} מול התקציב` : 'אין עדיין בסיס לתחזית',
-      hasEac && eac > m.budget ? 'is-over' : '', hasEac && eac > m.budget * 1.05 ? 'is-over' : hasEac && eac > m.budget ? 'is-risk' : '',
-      hasEac ? eac : null, hasEac && eac > m.budget ? (eac > m.budget * 1.05 ? 'over' : 'risk') : 'fc')
-    : stepCell('פער מהתקציב', D(m.actual - m.budget), m.actual > m.budget ? 'חריגה' : 'בתוך התקציב',
-      m.actual > m.budget ? 'is-over' : '', m.actual > m.budget ? 'is-over' : '');
-  const summary = [el('div', { class: 'steps' }, [
-    stepCell('הערכה', U(est), 'לפני מקדם החריגה', '', '', est, 'est'),
-    stepCell('תקציב', U(m.budget), `הערכה + ${fmtPct(r.usedFactor)} מקדם`, '', '', m.budget, 'budget'),
-    stepCell(r.inProgress ? 'בוצע עד היום' : 'בפועל', U(m.actual), `${pctText(m.util)} מהתקציב`, toneOf(m.status), '', m.actual, m.status === 'over' ? 'over' : 'actual'),
-    finalCell,
-  ])];
-  if (money && snap.hasFee) {
-    summary.push(el('div', { class: 'card__body card__body--split' }, [el('div', { class: 'facts' }, [
-      fact(d.feeModel === 'capped' ? 'תקרת שכ"ט' : 'שכ"ט מוסכם', fmtMoney(snap.agreedFee)),
-      fact('רווח גולמי עד היום', fmtMoney(snap.margin), snap.margin < 0 ? 'neg' : ''),
-      fact('שיעור רווח', snap.marginPct === null ? '—' : fmtPct(snap.marginPct, 1), snap.margin < 0 ? 'neg' : ''),
-      snap.eac !== null ? fact('פער צפוי בסיום', fmtDelta(snap.agreedFee - snap.eac, 'money'), snap.agreedFee - snap.eac < 0 ? 'neg' : '') : null,
-    ])]));
+  root.append(kpiTiles(snap, unit));
+
+  // עסקה פתוחה: הביצוע עד היום אינו הסוף — המסקנות לתמחור נגזרות מהתחזית לסיום.
+  // ההסבר המלא מאחורי ⓘ; על המסך — שורת מצב קצרה
+  if (r.inProgress) {
+    const why = r.basisHours === null || r.basisHours === undefined
+      ? 'אין עדיין תחזית לסיום — המסקנות לתמחור יופיעו כשיוזנו אחוז התקדמות או תאריכי העסקה.'
+      : `העסקה עדיין פעילה והנתונים חלקיים. המסקנות לתמחור מחושבות לפי התחזית לסיום (${r.eacBasis}), ולא לפי הביצוע עד היום.`;
+    root.append(el('div', { class: 'datanote' }, [
+      icon('info'),
+      el('span', { text: `נתונים חלקיים · התקדמות מדווחת ${fmtPct(r.progressPct / 100)}` }),
+      infoTip(why, { label: 'על הנתונים' }),
+    ]));
   }
-  root.append(card({ title: 'תכנון מול ביצוע', flush: true, sub: money ? 'בתעריפי התכנון — שעות × תעריף' : 'בשעות' }, summary));
 
   /* ---------- 2. מסקנות לתמחור הבא ---------- */
   const basis = r.inProgress && snap.eac !== null ? snap.eac : r.actualCost;
@@ -83,21 +59,24 @@ export function renderAnalysisTab(root, { snap, unit = 'hours' }) {
       ? `ההערכה נמוכה ב-${fmtPct(r.requiredFactor)} ${r.inProgress ? 'מהתחזית לסיום' : 'מהביצוע'}. בעסקה דומה כדאי מקדם ${fmtPct(r.suggestedFactor)} — או הערכת שעות גבוהה יותר מלכתחילה.`
       : 'התקציב כיסה את הביצוע. אפשר לשקול מקדם נמוך יותר בהצעה הבאה כדי להיות תחרותי יותר.';
   root.append(card({
-    title: 'מסקנות לתמחור הבא',
+    title: 'מסקנות לתמחור הבא', cls: 'concl',
     tools: [
       button('עסקה חדשה לפי הביצוע', { action: 'clone-from-actual', iconName: 'copy', title: 'ההערכות בעסקה החדשה = השעות שבוצעו כאן' }),
       button('ייצוא', { action: 'export-review', iconName: 'download', title: 'ייצוא הניתוח לאקסל' }),
     ],
   }, [
-    el('div', { class: 'facts facts--lg' }, conclusions),
-    el('div', { class: `insight${r.requiredFactor !== null && r.requiredFactor > r.usedFactor ? ' insight--warn' : ''}` }, [icon('trending'), el('span', { text: insight })]),
+    // שני טורים: המדדים (2×2) | התובנה — במקום שורה רחבה של מספרים ומשפט ברוחב מלא
+    el('div', { class: 'concl__grid' }, [
+      el('div', { class: 'facts facts--lg facts--2' }, conclusions),
+      el('div', { class: `insight${r.requiredFactor !== null && r.requiredFactor > r.usedFactor ? ' insight--warn' : ''}` }, [icon('trending'), el('span', { text: insight })]),
+    ]),
   ]));
 
   /* ---------- 3. ₪ בלבד: ממה נובע הפער ---------- */
   if (money) {
     const totalEffect = Math.abs(r.volumeEffect) + Math.abs(r.mixEffect);
     const share = (v) => (totalEffect > 0 ? Math.round((Math.abs(v) / totalEffect) * 100) : 0);
-    root.append(card({ title: 'ממה נובע הפער מהתקציב', flush: true, sub: 'הפער בכסף מפוצל לשניים: כמות השעות, ותמהיל הדרגות (שעות יקרות או זולות מהמתוכנן)' }, [
+    const gapCard = card({ title: 'ממה נובע הפער מהתקציב', flush: true, info: 'הפער בכסף מפוצל לשניים: כמות השעות (עוד או פחות שעות מהתקציב), ותמהיל הדרגות (שעות יקרות או זולות מהמתוכנן).' }, [
       el('div', { class: 'duo' }, [
         el('div', { class: 'duo__cell' }, [
           el('span', { class: 'duo__label', text: `${r.volumeEffect >= 0 ? 'עוד שעות' : 'פחות שעות'} · ${share(r.volumeEffect)}% מהפער` }),
@@ -110,7 +89,15 @@ export function renderAnalysisTab(root, { snap, unit = 'hours' }) {
           el('span', { class: 'duo__note', text: `בלנדד מתוכנן ${fmtMoney(r.blendedPlanned)} · בפועל ${fmtMoney(r.blendedActual)}` }),
         ]),
       ]),
-    ]));
+    ]);
+    // רווחיות — לצד פירוק הפער (במסך רחב)
+    const profit = snap.hasFee ? card({ title: 'רווחיות' }, [el('div', { class: 'facts facts--2' }, [
+      fact(d.feeModel === 'capped' ? 'תקרת שכ"ט' : 'שכ"ט מוסכם', fmtMoney(snap.agreedFee)),
+      fact('רווח גולמי עד היום', fmtMoney(snap.margin), snap.margin < 0 ? 'neg' : ''),
+      fact('שיעור רווח', snap.marginPct === null ? '—' : fmtPct(snap.marginPct, 1), snap.margin < 0 ? 'neg' : ''),
+      snap.eac !== null ? fact('פער צפוי בסיום', fmtDelta(snap.agreedFee - snap.eac, 'money'), snap.agreedFee - snap.eac < 0 ? 'neg' : '') : null,
+    ])]) : null;
+    root.append(el('div', { class: 'pair' }, [gapCard, profit]));
 
     /* ---------- 4. ₪ בלבד: תעריפים ---------- */
     root.append(ratesCard(snap));

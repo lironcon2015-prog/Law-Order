@@ -1,7 +1,9 @@
 // align-audit.mjs — אודיט יישור מספרים (ראה CLAUDE.md, "יישור מספרים ב-RTL").
 // הרצה:  node budget/tools/align-audit.mjs [url]     ברירת מחדל: http://localhost:8765/budget/
 // חייב להחזיר 0. בודק: (א) מחסניות תווית↑/ערך↓  (ב) עמודות טבלה — כותרת מול הערכים
-// (ג) רשימת הצוותים (grid) — כותרת עמודה מול התאים. כל מסך נסרק פעמיים: בשעות וב-₪.
+// (ג) רשימת הצוותים (grid) — כותרת עמודה מול התאים  (ד) אריחי המדדים — תווית מול ערך ושורת הקשר.
+// כל מסך נסרק בשעות וב-₪, ובשני רוחבים: 1600 (טבלת צוותים מלאה, עמודות נפרדות) ו-1366 (תצוגה מפוצלת צרה —
+// בוצע/תקציב בעמודה אחת).
 // נמדד לפי תיבת הגליפים (Range) ולא לפי האלמנט, כי תיבת האלמנט נמתחת על כל התא.
 import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
 
@@ -78,10 +80,31 @@ const scan = () => p.evaluate(() => {
     for (const row of document.querySelectorAll('.trow:not(.trow--head)')) {
       [...row.children].forEach((cell, i) => {
         const h = heads[i];
-        if (!h || !h.textContent.trim() || !cell.classList.contains('trow__num') || !cell.textContent.trim()) return;
+        // עמודה שמוסתרת בפריסה הנוכחית (container query) — לא נמדדת
+        if (!h || h.offsetParent === null || cell.offsetParent === null) return;
+        if (!h.textContent.trim() || !cell.classList.contains('trow__num') || !cell.textContent.trim()) return;
         const hr = box(h), cr = box(cell);
         if (Math.abs(hr.right - cr.right) > 3) out.push(`רשימת צוותים "${h.textContent.trim()}" ↔ "${cell.textContent.trim().slice(0, 16)}" Δ=${Math.round(hr.right - cr.right)}`);
       });
+    }
+  }
+  // (ד) אריחים: התווית, הערך ושורת ההקשר מיושרים לאותו קצה ימני (האריח המודגש — טבעת לצד הטקסט — בנפרד)
+  for (const t of document.querySelectorAll('.tile:not(.tile--lead)')) {
+    if (t.offsetParent === null) continue;
+    const label = t.querySelector('.tile__label');
+    const lr = box(label);
+    for (const part of t.querySelectorAll(':scope > .tile__value, :scope > .tile__sub')) {
+      const pr = box(part);
+      if (pr.width && lr.width && Math.abs(lr.right - pr.right) > 3) {
+        out.push(`אריח "${label.textContent.trim().slice(0, 16)}" ↔ "${part.textContent.trim().slice(0, 16)}" Δ=${Math.round(lr.right - pr.right)}`);
+      }
+    }
+  }
+  for (const t of document.querySelectorAll('.tile--lead .tile__leadtext')) {
+    const parts = [...t.children].filter((c) => c.offsetParent !== null && c.textContent.trim());
+    const r0 = parts.length ? box(parts[0]).right : 0;
+    for (const part of parts.slice(1)) {
+      if (Math.abs(box(part).right - r0) > 3) out.push(`אריח מודגש "${parts[0].textContent.trim().slice(0, 16)}" ↔ "${part.textContent.trim().slice(0, 16)}" Δ=${Math.round(r0 - box(part).right)}`);
     }
   }
   return [...new Set(out)];
@@ -93,12 +116,14 @@ const report = (name, r) => {
   console.log(`### ${name}: ${r.length ? `${r.length} בעיות\n  ` + r.slice(0, 8).join('\n  ') : 'תקין'}`);
 };
 
-for (const unit of ['hours', 'money']) {
+for (const [width, unit] of [[1600, 'hours'], [1600, 'money'], [1366, 'hours'], [1366, 'money']]) {
+  await p.setViewportSize({ width, height: 1000 }); await p.waitForTimeout(300);
   // מתג היחידה נמצא בתיק העסקאות ובכותרת העסקה (לא בהגדרות) — מחליפים מהתיק ונכנסים לעסקה
+  // מטבלת התיק (במסך רחב העסקאות לא בסרגל אלא בטבלה וברשימת התיק)
   await p.locator('.side [data-action="go-overview"]').click(); await p.waitForTimeout(600);
   await p.locator(`[data-action="set-unit"][data-unit="${unit}"]`).first().click();
   await p.waitForTimeout(600);
-  await p.locator('.side__deal').first().click(); await p.waitForTimeout(800);
+  await p.locator('.tbl--deals tbody tr').first().click(); await p.waitForTimeout(800);
   for (const tab of ['budget', 'reports', 'analysis', 'settings']) {
     await p.locator(`.tab[data-tab="${tab}"]`).click();
     await p.waitForTimeout(700);
@@ -111,11 +136,11 @@ for (const unit of ['hours', 'money']) {
       }
     }
     await expandAll(); await p.waitForTimeout(200);
-    report(`${tab} · ${unit === 'money' ? '₪' : 'שעות'}`, await scan());
+    report(`${tab} · ${unit === 'money' ? '₪' : 'שעות'} · ${width}`, await scan());
   }
   await p.locator('.side [data-action="go-overview"]').click(); await p.waitForTimeout(800);
   await expandAll();
-  report(`תיק העסקאות · ${unit === 'money' ? '₪' : 'שעות'}`, await scan());
+  report(`תיק העסקאות · ${unit === 'money' ? '₪' : 'שעות'} · ${width}`, await scan());
 }
 await p.locator('.side [data-action="go-people"]').click(); await p.waitForTimeout(600);
 report('אנשי צוות', await scan());
