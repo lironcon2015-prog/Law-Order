@@ -6,7 +6,7 @@ import * as db from './db.js';
 import {
   computeDeal, dealReview, aggregateByKind, uid, num, round2, fmtPct, fmtHours, roundUpHours, sourceLabel,
   DEFAULT_TEAM_NAMES, DEAL_STATUSES,
-  normalizeSplits, splitsTotal, isOpenDeal, todayISO, monthEndISO, cleanTag, teamTag,
+  normalizeSplits, splitsTotal, isOpenDeal, todayISO, monthEndISO, cleanTag, teamTag, defaultTeamTag,
 } from './model.js';
 import * as ui from './ui.js';
 import * as fileStore from './file-store.js';
@@ -921,6 +921,34 @@ async function onClick(e) {
       await store.saveTeam(team);
       ui.toast(isHours ? 'שעות התקציב חזרו לחישוב אוטומטי' : 'התעריף חזר לתעריפון');
       return render();
+    }
+
+    case 'edit-tag': {
+      // התגית נערכת במקום: אותיות באנגלית, עד 5. Enter/יציאה שומרים, Esc מבטל, ריק = ברירת מחדל לפי השם
+      const team = store.getTeam(target.dataset.teamId);
+      if (!team) return;
+      const original = team.tag;
+      const input = ui.el('input', {
+        class: 'input ttag-input ttag-input--inline', value: teamTag(team), maxlength: '5', dir: 'ltr',
+        'aria-label': 'תגית הצוות באנגלית', placeholder: defaultTeamTag(team.name),
+      });
+      target.replaceWith(input);
+      input.focus();
+      input.select();
+      let cancelled = false;
+      input.addEventListener('click', (ev) => ev.stopPropagation());
+      input.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
+        else if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); cancelled = true; input.blur(); }
+      });
+      input.addEventListener('blur', async () => {
+        const next = cancelled ? original : cleanTag(input.value);
+        // מה שמתאים לברירת המחדל לא נשמר כתגית — כך היא תמשיך להתעדכן עם שם הצוות
+        team.tag = next === defaultTeamTag(team.name) ? '' : next;
+        if (team.tag !== original) { await store.saveTeam(team); ui.toast(`התגית עודכנה: ${teamTag(team)}`); }
+        render();
+      }, { once: true });
+      return;
     }
 
     case 'rename-team': {

@@ -321,6 +321,9 @@ svg { display: block; }
 .ttag[data-slot="3"] { --c: var(--id-3); }
 .ttag[data-slot="4"] { --c: var(--id-4); }
 .ttag[data-slot="5"] { --c: var(--id-5); }
+.ttag-btn { display: inline-flex; padding: 0; border-radius: 7px; cursor: text; }
+.ttag-btn:hover .ttag { background: color-mix(in srgb, var(--c) 16%, transparent); border-style: dashed; }
+.ttag-input--inline { width: 64px; height: 26px; padding: 0 6px; font-size: 11.5px; text-align: center; }
 .ttag-input { width: 84px; text-transform: uppercase; letter-spacing: .08em; font-weight: 600; }
 
 .dring { position: relative; display: inline-grid; place-items: center; flex: none; width: var(--d); height: var(--d); }
@@ -1080,6 +1083,12 @@ li.more-row { list-style: none; text-align: center; padding: 10px; }
 .trow--open .trow__chev { transform: rotate(180deg); }
 
 /* שורות סיכום: בדיקת נאותות / יתר / סה"כ */
+.tlist__split {
+  margin-top: 28px; padding: 12px 20px 8px; border-top: 1px solid var(--line-strong);
+  background: var(--surface-2); font-size: 12px; font-weight: 600; color: var(--text-3); letter-spacing: .02em;
+}
+.tlist__split + .trow--sub { border-top: 0; }
+.trow--total { margin-top: 18px; }
 .trow--sub, .trow--total { cursor: default; min-height: 46px; }
 .trow--sub:hover { background: transparent; }
 .trow--sub .trow__label { font-size: 13.5px; color: var(--text-2); }

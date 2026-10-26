@@ -3,7 +3,7 @@
 // יעדכן אותם בזמן הקלדה בלי רינדור מלא (רינדור מלא היה מאבד את הפוקוס בשדה).
 
 import {
-  DEAL_STATUSES, FEE_MODELS, defaultTeamTag as teamTagDefault, aggregateTeams, aggregateByKind, round2, fmtMoney, fmtPct, progressByPeriod, dealReview,
+  DEAL_STATUSES, FEE_MODELS, defaultTeamTag as teamTagDefault, teamTag, aggregateTeams, aggregateByKind, round2, fmtMoney, fmtPct, progressByPeriod, dealReview,
 } from './model.js';
 import { ring, sparkline } from './charts.js';
 import {
@@ -287,6 +287,7 @@ export function renderBudgetTab(root, { snap, rateCard, unit = 'hours', selected
   // שורות סיכום — הפרדת בדיקת הנאותות (כשיש) ואז סה"כ העסקה
   const kinds = aggregateByKind(snap);
   if (kinds.hasDD && kinds.regular.count) {
+    list.append(el('div', { class: 'tlist__split', text: 'בדיקת נאותות מול יתר הצוותים' }));
     list.append(sumRow('בדיקת נאותות', kinds.dd, unit, snap, 'sum-dd', 'trow--sub'));
     list.append(sumRow('יתר הצוותים', kinds.regular, unit, snap, 'sum-reg', 'trow--sub'));
   }
@@ -329,7 +330,10 @@ function teamRow(team, { snap, unit, selected, expanded }) {
       'aria-label': `שינוי מיקום הצוות ${team.name}`, dataset: { grip: 'team', teamId: team.id },
     }),
     el('div', { class: 'trow__id' }, [
-      teamTagEl(team),
+      el('button', {
+        class: 'ttag-btn', type: 'button', 'aria-label': `תגית ${teamTag(team)} — לחיצה לשינוי`,
+        dataset: { action: 'edit-tag', teamId: team.id, tip: 'לחיצה לשינוי התגית' },
+      }, [teamTagEl(team)]),
       el('div', { class: 'trow__idtext' }, [
         el('button', {
           class: 'trow__name', type: 'button', title: 'לחיצה לשינוי שם הצוות',
