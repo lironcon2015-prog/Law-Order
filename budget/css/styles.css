@@ -7,92 +7,111 @@
    כל צבע עובר דרך טוקן — גם בגרפים — ולכן המצב הכהה הוא סט ערכים אחר לאותם טוקנים.
    ============================================================ */
 
+/* שלוש ערכות, אותם תפקידים בדיוק — רק הערכים משתנים:
+ *   sapphire (ברירת מחדל) — ספיר וזהב: שנהב חם, ספיר עמוק, זהב; סרגל וגיבור בכחול-לילה
+ *   midnight — Midnight Luxe: אותה שפה בלילה (ספיר זוהר וזהב על כחול-שחור)
+ *   charcoal — פחם ושמפניה: מונוכרום חם, שמפניה במקום כחול; צבע רק לסיכון/חריגה
+ * data-theme נקבע ב-<head> לפני הציור הראשון ובמתג שבסרגל (app.js · applyTheme). */
 :root {
   color-scheme: light;
 
   /* קנבס ומשטחים */
-  --bg: #f2f1ed;
-  --bg-glow-1: rgba(214, 170, 64, .13);
-  --bg-glow-2: rgba(42, 120, 214, .09);
+  --bg: #efece5;
+  --bg-glow-1: rgba(201, 162, 75, .12);
+  --bg-glow-2: rgba(29, 59, 143, .08);
   --surface: #ffffff;
-  --surface-2: #f9f8f5;
-  --surface-3: #f0eee8;
-  --line: #e7e4dc;
-  --line-strong: #d4d0c5;
+  --surface-2: #f8f6f1;
+  --surface-3: #f0ece3;
+  --line: #e3ddd0;
+  --line-strong: #cfc7b6;
 
-  /* דיו — כחול-לילה כהה במקום שחור */
-  --text: #131a2a;
-  --text-2: #434b5c;
-  --text-3: #687083;   /* תוויות — ניגודיות ≥4.7:1 על לבן */
-  --text-4: #a0a5b1;   /* placeholder / מושבת בלבד */
+  /* דיו */
+  --text: #0d1424;
+  --text-2: #3a4256;
+  --text-3: #62677a;   /* תוויות — ניגודיות ≥4.7:1 על לבן */
+  --text-4: #9ea2ad;   /* placeholder / מושבת בלבד */
 
-  /* מותג: כחול-לילה + זהב */
-  --brand: #14264a;
-  --brand-2: #1d3970;
-  --gold: #e1b54b;
-  --gold-soft: rgba(225, 181, 75, .16);
+  /* מותג: ספיר + זהב */
+  --brand: #1d3b8f;
+  --brand-2: #2f5bd3;
+  --gold: #c9a24b;
+  --gold-2: #e6c77a;
+  --gold-soft: rgba(201, 162, 75, .15);
 
-  /* הדגשה (קישורים, בחירה, מד ניצול) */
-  --accent: #2a6fd6;
-  --accent-hover: #1f58b0;
-  --accent-soft: #e8f0fc;
-  --accent-line: #b6cdf1;
+  /* הדגשה (קישורים, בחירה) */
+  --accent: #1f43a8;
+  --accent-hover: #162f7a;
+  --accent-soft: #e8edf9;
+  --accent-line: #b3c2e8;
   --on-accent: #ffffff;
 
-  /* מד ניצול — המסלול הוא גוון בהיר של אותו צבע (כחול על כחול), וחומרה צובעת את המילוי */
-  --track: #e3ebf8;
-  --fill: #2a6fd6;
-  --track-risk: #f8e6c6;
-  --track-over: #f6d6d3;
-  --risk-fill: #e2930f;
-  --over-fill: #d8443d;
+  /* מד ניצול — ספיר עמוק, בלי הבהרה; חומרה צובעת את המילוי */
+  --track: #e4e8f2;
+  --fill: #1d3b8f;
+  --fill-2: #2f5bd3;
+  --track-risk: #f6e7cb;
+  --track-over: #f5d7d8;
+  --risk-fill: #c98a1e;
+  --over-fill: #b4232b;
 
   /* סטטוס — שמור לסיכון וחריגה בלבד */
-  --risk: #a65406;
-  --risk-soft: #fdf3e2;
-  --risk-line: #f0d2a3;
-  --over: #b8231c;
-  --over-soft: #fdecea;
-  --over-line: #f2c5c0;
-  --ok: #1d7a49;
-  --ok-soft: #e4f4eb;
-  --info: #3d5a80;
-  --info-soft: #eef2f8;
+  --risk: #9a5d0c;
+  --risk-soft: #fbf2e1;
+  --risk-line: #ecd3a3;
+  --over: #b4232b;
+  --over-soft: #fcebeb;
+  --over-line: #efc4c6;
+  --ok: #16794c;
+  --ok-soft: #e3f3ea;
+  --info: #34508a;
+  --info-soft: #edf1f9;
 
-  /* צבעי זהות לצוותים ועסקאות — נבדקו לעיוורון צבעים בסדר הזה (ראה ui-kit.teamSlot) */
-  --id-0: #2a78d6;
-  --id-1: #e2622d;
-  --id-2: #15996c;
-  --id-3: #6250d6;
-  --id-4: #d1568a;
-  --id-5: #1f8a2a;
+  /* צבעי זהות לתגיות הצוותים — עמוקים, נבדקו לעיוורון צבעים בסדר הזה (ראה ui-kit.teamSlot) */
+  --id-0: #1d3b8f;
+  --id-1: #0e6f8f;
+  --id-2: #0f6b5c;
+  --id-3: #5b3fa3;
+  --id-4: #8a5a12;
+  --id-5: #8f2f5c;
 
-  /* כרטיס הגיבור (כחול-לילה) */
-  --hero-bg: linear-gradient(125deg, #13233f 0%, #1a3364 55%, #23447e 100%);
+  /* כרטיס הגיבור (כחול-לילה, טבעת זהב) */
+  --hero-bg: linear-gradient(135deg, #0a1430 0%, #13265c 60%, #1b3577 100%);
   --hero-text: #ffffff;
   --hero-muted: rgba(226, 233, 245, .72);
   --hero-line: rgba(255, 255, 255, .13);
   --hero-chip: rgba(255, 255, 255, .1);
-  --hero-ok: #7fc0ff;
+  --hero-ok: #e6c77a;
   --hero-risk: #ffc56b;
   --hero-over: #ff8f84;
   --hero-track: rgba(255, 255, 255, .13);
 
-  /* סרגל הצד (כחול-לילה בשתי הערכות) */
-  --side-bg: linear-gradient(180deg, #14254a 0%, #101d3a 100%);
-  --side-text: #c6d0e2;
-  --side-muted: #8592ab;
+  /* סרגל הצד */
+  --side-bg: linear-gradient(180deg, #0e1c42 0%, #0a1430 100%);
+  --side-text: #c8d0e4;
+  --side-muted: #7d89a8;
   --side-hover: rgba(255, 255, 255, .06);
-  --side-active: rgba(255, 255, 255, .11);
+  --side-active: rgba(255, 255, 255, .1);
   --side-line: rgba(255, 255, 255, .09);
+  --side-track: rgba(255, 255, 255, .14);
+  --side-ring: #e6c77a;
 
-  --shadow-1: 0 1px 2px rgba(19, 26, 42, .05);
-  --shadow-2: 0 1px 2px rgba(19, 26, 42, .04), 0 10px 26px -14px rgba(19, 26, 42, .2);
-  --shadow-hero: 0 18px 40px -20px rgba(19, 35, 63, .65);
-  --shadow-pop: 0 2px 6px rgba(19, 26, 42, .06), 0 18px 44px rgba(19, 26, 42, .18);
-  --focus-ring: 0 0 0 3px rgba(42, 111, 214, .24);
-  --scrim: rgba(12, 20, 36, .45);
-  --toast-bg: #14264a;
+  /* כפתור ראשי ולוגו */
+  --btn-bg: linear-gradient(180deg, #2a4fae, #1d3b8f);
+  --btn-bg-hover: linear-gradient(180deg, #3159c0, #22449e);
+  --btn-border: #1d3b8f;
+  --btn-text: #ffffff;
+  --btn-ic: #e6c77a;
+  --logo-bg: linear-gradient(140deg, #f0d68c, #b8892e);
+  --logo-text: #241a04;
+
+  --shadow-1: 0 1px 2px rgba(13, 20, 36, .05);
+  --shadow-2: 0 1px 2px rgba(13, 20, 36, .04), 0 10px 26px -14px rgba(13, 20, 36, .22);
+  --shadow-hero: 0 18px 40px -20px rgba(10, 20, 48, .7);
+  --shadow-pop: 0 2px 6px rgba(13, 20, 36, .06), 0 18px 44px rgba(13, 20, 36, .18);
+  --shadow-btn: 0 1px 0 rgba(255, 255, 255, .12) inset, 0 6px 16px -8px rgba(13, 28, 70, .75);
+  --focus-ring: 0 0 0 3px rgba(47, 91, 211, .24);
+  --scrim: rgba(8, 14, 30, .5);
+  --toast-bg: #0e1c42;
   --toast-text: #f4f6fb;
 
   --radius-sm: 7px;
@@ -100,66 +119,146 @@
   --radius-lg: 16px;
   --side-w: 256px;
   --font: 'Heebo', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
-  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23687083' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2362677a' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
 
-/* מצב כהה — כחול-לילה עמוק, אותם תפקידים */
-:root[data-theme="dark"] {
+/* Midnight Luxe — ספיר זוהר וזהב על כחול-שחור. בסיס משותף לשתי הערכות הכהות */
+:root[data-theme="midnight"], :root[data-theme="charcoal"] {
   color-scheme: dark;
-  --bg: #0e131c;
-  --bg-glow-1: rgba(225, 181, 75, .07);
-  --bg-glow-2: rgba(90, 150, 240, .08);
-  --surface: #151c28;
-  --surface-2: #1a2230;
-  --surface-3: #212b3b;
-  --line: #263145;
-  --line-strong: #34415a;
-  --text: #edf1f7;
-  --text-2: #c2cad8;
-  --text-3: #8d98ad;
-  --text-4: #5f6a80;
-  --brand: #2c56a3;
-  --brand-2: #3a68bd;
-  --gold: #e6bf5c;
-  --gold-soft: rgba(230, 191, 92, .14);
-  --accent: #6aa5f5;
-  --accent-hover: #8dbaf8;
-  --accent-soft: rgba(106, 165, 245, .14);
-  --accent-line: rgba(106, 165, 245, .4);
-  --on-accent: #0b1424;
-  --track: rgba(106, 165, 245, .16);
-  --fill: #5b9cf0;
-  --track-risk: rgba(240, 165, 74, .18);
-  --track-over: rgba(244, 127, 117, .18);
-  --risk-fill: #f0a54a;
-  --over-fill: #f47f75;
-  --risk: #f0a54a;
-  --risk-soft: rgba(240, 165, 74, .11);
-  --risk-line: rgba(240, 165, 74, .34);
-  --over: #f47f75;
-  --over-soft: rgba(244, 127, 117, .11);
-  --over-line: rgba(244, 127, 117, .34);
-  --ok: #5fcb92;
-  --ok-soft: rgba(95, 203, 146, .11);
-  --info: #9fb4d4;
-  --info-soft: rgba(159, 180, 212, .1);
-  --id-0: #3987e5;
-  --id-1: #d95926;
-  --id-2: #199e70;
-  --id-3: #9085e9;
-  --id-4: #d55181;
-  --id-5: #2a9b37;
-  --hero-bg: linear-gradient(125deg, #172b52 0%, #1f3d78 55%, #284f95 100%);
-  --side-bg: linear-gradient(180deg, #0b1528 0%, #09111f 100%);
+  --bg: #080b14;
+  --bg-glow-1: rgba(214, 178, 94, .06);
+  --bg-glow-2: rgba(79, 124, 255, .08);
+  --surface: #10162a;
+  --surface-2: #141b32;
+  --surface-3: #1a2240;
+  --line: #222b47;
+  --line-strong: #313c60;
+  --text: #eef1f8;
+  --text-2: #c2c9db;
+  --text-3: #8b94ad;
+  --text-4: #5a6380;
+  --brand: #2f5bd3;
+  --brand-2: #4f7cff;
+  --gold: #d6b25e;
+  --gold-2: #ecd08a;
+  --gold-soft: rgba(214, 178, 94, .12);
+  --accent: #7aa0ff;
+  --accent-hover: #9db9ff;
+  --accent-soft: rgba(79, 124, 255, .14);
+  --accent-line: rgba(79, 124, 255, .42);
+  --on-accent: #070b16;
+  --track: #1c2440;
+  --fill: #4f7cff;
+  --fill-2: #7aa0ff;
+  --track-risk: rgba(240, 177, 74, .17);
+  --track-over: rgba(255, 107, 107, .17);
+  --risk-fill: #f0b14a;
+  --over-fill: #ff6b6b;
+  --risk: #f0b14a;
+  --risk-soft: rgba(240, 177, 74, .1);
+  --risk-line: rgba(240, 177, 74, .34);
+  --over: #ff7b7b;
+  --over-soft: rgba(255, 107, 107, .1);
+  --over-line: rgba(255, 107, 107, .34);
+  --ok: #3ecf8e;
+  --ok-soft: rgba(62, 207, 142, .1);
+  --info: #a3b6dc;
+  --info-soft: rgba(163, 182, 220, .1);
+  --id-0: #5b86ff;
+  --id-1: #38bdf8;
+  --id-2: #2fc0a3;
+  --id-3: #a487ff;
+  --id-4: #e3a64b;
+  --id-5: #f07aae;
+  --hero-bg: linear-gradient(135deg, #121c3c 0%, #1a2b5e 60%, #22397a 100%);
+  --hero-ok: #e2c071;
+  --side-bg: linear-gradient(180deg, #0a0f1f 0%, #05070e 100%);
+  --side-text: #c8d0e4;
+  --side-muted: #737e9c;
+  --side-ring: #e2c071;
+  --btn-bg: linear-gradient(180deg, #5b86ff, #3a64e0);
+  --btn-bg-hover: linear-gradient(180deg, #7096ff, #4a72ea);
+  --btn-border: #3a64e0;
+  --btn-text: #ffffff;
+  --btn-ic: #f3dc98;
   --shadow-1: none;
-  --shadow-2: 0 10px 26px -14px rgba(0, 0, 0, .6);
-  --shadow-hero: 0 18px 40px -18px rgba(0, 0, 0, .7);
-  --shadow-pop: 0 18px 44px rgba(0, 0, 0, .55);
-  --focus-ring: 0 0 0 3px rgba(106, 165, 245, .3);
-  --scrim: rgba(0, 0, 0, .6);
-  --toast-bg: #edf1f7;
-  --toast-text: #121a2a;
-  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238d98ad' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --shadow-2: 0 10px 26px -14px rgba(0, 0, 0, .65);
+  --shadow-hero: 0 18px 40px -18px rgba(0, 0, 0, .75);
+  --shadow-pop: 0 18px 44px rgba(0, 0, 0, .6);
+  --shadow-btn: 0 1px 0 rgba(255, 255, 255, .14) inset, 0 8px 20px -10px rgba(79, 124, 255, .6);
+  --focus-ring: 0 0 0 3px rgba(79, 124, 255, .32);
+  --scrim: rgba(0, 0, 0, .62);
+  --toast-bg: #eef1f8;
+  --toast-text: #0d1424;
+  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238b94ad' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+
+/* פחם ושמפניה — מונוכרום חם; השמפניה מחליפה את הכחול בכל תפקיד, צבע נשאר רק לסיכון/חריגה */
+:root[data-theme="charcoal"] {
+  --bg: #121212;
+  --bg-glow-1: rgba(216, 192, 138, .05);
+  --bg-glow-2: rgba(216, 192, 138, .03);
+  --surface: #1a1a1a;
+  --surface-2: #202020;
+  --surface-3: #272624;
+  --line: #2c2c2c;
+  --line-strong: #3b3a37;
+  --text: #f2efe9;
+  --text-2: #cfcac0;
+  --text-3: #938d82;
+  --text-4: #5f5b55;
+  --brand: #b99b5f;
+  --brand-2: #cbb27a;
+  --gold: #d8c08a;
+  --gold-2: #efdcae;
+  --gold-soft: rgba(216, 192, 138, .1);
+  --accent: #e2cb98;
+  --accent-hover: #efdcae;
+  --accent-soft: rgba(216, 192, 138, .12);
+  --accent-line: rgba(216, 192, 138, .38);
+  --on-accent: #141414;
+  --track: #2a2a2a;
+  --fill: #cbb27a;
+  --fill-2: #e9d6a6;
+  --risk-fill: #f0b14a;
+  --over-fill: #ff6b5e;
+  --risk: #f0b14a;
+  --over: #ff7a6e;
+  --over-line: rgba(255, 107, 94, .34);
+  --ok: #9fd3a7;
+  --ok-soft: rgba(159, 211, 167, .1);
+  --info: #bdb5a6;
+  --info-soft: rgba(189, 181, 166, .1);
+  --id-0: #e9d6a6;
+  --id-1: #b8c4cf;
+  --id-2: #c9bfa9;
+  --id-3: #d0b3a4;
+  --id-4: #a8b89c;
+  --id-5: #b9aed0;
+  --hero-bg: linear-gradient(135deg, #1c1c1c 0%, #252321 60%, #2f2b25 100%);
+  --hero-muted: rgba(242, 239, 233, .66);
+  --hero-ok: #efdcae;
+  --hero-line: rgba(239, 220, 174, .14);
+  --side-bg: linear-gradient(180deg, #111111 0%, #0a0a0a 100%);
+  --side-text: #d8d3c8;
+  --side-muted: #7f7a70;
+  --side-hover: rgba(239, 220, 174, .05);
+  --side-active: rgba(239, 220, 174, .09);
+  --side-line: rgba(239, 220, 174, .08);
+  --side-track: rgba(239, 220, 174, .14);
+  --side-ring: #e9d6a6;
+  --btn-bg: linear-gradient(180deg, #efdcae, #cbb27a);
+  --btn-bg-hover: linear-gradient(180deg, #f6e6c0, #d6bf8a);
+  --btn-border: #cbb27a;
+  --btn-text: #141414;
+  --btn-ic: #3a2e14;
+  --logo-bg: linear-gradient(140deg, #efdcae, #b99b5f);
+  --logo-text: #1c1608;
+  --shadow-btn: 0 1px 0 rgba(255, 255, 255, .3) inset, 0 8px 20px -12px rgba(216, 192, 138, .5);
+  --focus-ring: 0 0 0 3px rgba(216, 192, 138, .3);
+  --toast-bg: #efdcae;
+  --toast-text: #141414;
+  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23938d82' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
 
 /* ============================================================
@@ -209,30 +308,36 @@ svg { display: block; }
 .ic { display: inline-flex; width: 18px; height: 18px; flex: none; }
 .ic svg, .iconbtn svg, .btn svg { width: 100%; height: 100%; }
 
-/* ---------- סמלי זהות (צוות / עסקה) ---------- */
-.av {
-  display: inline-grid; place-items: center; flex: none;
-  width: 36px; height: 36px; border-radius: 11px;
-  font-size: 13.5px; font-weight: 700; line-height: 1; color: #fff; letter-spacing: 0;
-  background: var(--id-0); position: relative;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .14), 0 2px 6px -2px rgba(19, 26, 42, .35);
+/* ---------- זהות: תגית צוות (אנגלית, מסגרת דקה) · טבעת ניצול לעסקה ---------- */
+.ttag {
+  --c: var(--id-0);
+  display: inline-grid; place-items: center; flex: none; min-width: 46px; height: 24px; padding: 0 7px;
+  border: 1px solid color-mix(in srgb, var(--c) 55%, transparent); border-radius: 6px;
+  background: color-mix(in srgb, var(--c) 8%, transparent); color: var(--c);
+  font-size: 11px; font-weight: 700; letter-spacing: .08em; line-height: 1; direction: ltr; white-space: nowrap;
 }
-.av[data-slot="1"] { background: var(--id-1); }
-.av[data-slot="2"] { background: var(--id-2); }
-.av[data-slot="3"] { background: var(--id-3); }
-.av[data-slot="4"] { background: var(--id-4); }
-.av[data-slot="5"] { background: var(--id-5); }
-.av--lg { width: 48px; height: 48px; border-radius: 14px; font-size: 17px; }
-.av--sm { width: 32px; height: 32px; border-radius: 10px; font-size: 12.5px; }
-.av--xs { width: 24px; height: 24px; border-radius: 7px; font-size: 10.5px; box-shadow: none; }
+.ttag[data-slot="1"] { --c: var(--id-1); }
+.ttag[data-slot="2"] { --c: var(--id-2); }
+.ttag[data-slot="3"] { --c: var(--id-3); }
+.ttag[data-slot="4"] { --c: var(--id-4); }
+.ttag[data-slot="5"] { --c: var(--id-5); }
+.ttag-input { width: 84px; text-transform: uppercase; letter-spacing: .08em; font-weight: 600; }
+
+.dring { position: relative; display: inline-grid; place-items: center; flex: none; width: var(--d); height: var(--d); }
+.dring > svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.dring .ring__track { stroke: var(--track); }
+.dring .ring--ok .ring__fill { stroke: var(--fill); }
+.dring .ring--risk .ring__fill { stroke: var(--risk-fill); }
+.dring .ring--over .ring__fill { stroke: var(--over-fill); }
+.dring > b { position: relative; font-size: 10.5px; font-weight: 700; color: var(--text-2); letter-spacing: -.02em; }
+.dring--over > b { color: var(--over); }
+.dring--risk > b { color: var(--risk); }
+.dhead .dring > b { font-size: 13.5px; }
+.side .dring .ring__track { stroke: var(--side-track); }
+.side .dring .ring--ok .ring__fill { stroke: var(--side-ring); }
+.combo { display: contents; }
 .pname { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .pname__text { flex: 1 1 auto; min-width: 0; }
-/* נקודת התרעה על הסמל (סרגל הצד): סיכון / חריגה */
-.av[data-alert]::after {
-  content: ''; position: absolute; top: -3px; inset-inline-start: -3px; width: 9px; height: 9px; border-radius: 50%;
-  border: 2px solid #12223f; background: var(--risk-fill);
-}
-.av[data-alert="over"]::after { background: var(--over-fill); }
 
 /* ============================================================
    מעטפת: סרגל צד + תוכן
@@ -273,8 +378,8 @@ svg { display: block; }
 .side__logo {
   width: 34px; height: 34px; border-radius: 10px; flex: none;
   display: grid; place-items: center;
-  background: linear-gradient(140deg, #f3d27a, #d9a73a); color: #2a1f05;
-  box-shadow: 0 4px 14px -4px rgba(225, 181, 75, .55);
+  background: var(--logo-bg); color: var(--logo-text);
+  box-shadow: 0 4px 14px -4px color-mix(in srgb, var(--gold) 55%, transparent);
 }
 .side__logo svg { width: 19px; height: 19px; }
 .side__name { font-size: 17px; font-weight: 800; letter-spacing: -.01em; color: #fff; }
@@ -321,9 +426,16 @@ svg { display: block; }
 
 .side__foot { margin-top: auto; padding-top: 14px; border-top: 1px solid var(--side-line); display: flex; flex-direction: column; gap: 2px; }
 .side__meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 11px 0; font-size: 12.5px; color: var(--side-muted); }
-.side__theme { display: inline-flex; align-items: center; gap: 6px; color: var(--side-muted); font-size: 12.5px; padding: 4px 7px; border-radius: var(--radius-sm); }
-.side__theme:hover { color: #fff; background: var(--side-hover); }
-.side__theme .ic { width: 15px; height: 15px; }
+.side__themes { display: flex; align-items: center; gap: 7px; }
+.side__swatch {
+  width: 20px; height: 20px; border-radius: 50%; padding: 0; flex: none;
+  border: 1px solid rgba(255, 255, 255, .22); box-shadow: 0 0 0 2px transparent; transition: box-shadow .12s, transform .12s;
+}
+.side__swatch:hover { transform: scale(1.08); }
+.side__swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--side-ring); }
+.side__swatch--sapphire { background: linear-gradient(135deg, #efece5 0 50%, #1d3b8f 50% 100%); }
+.side__swatch--midnight { background: linear-gradient(135deg, #10162a 0 50%, #4f7cff 50% 100%); }
+.side__swatch--charcoal { background: linear-gradient(135deg, #1a1a1a 0 50%, #cbb27a 50% 100%); }
 .save-state { opacity: 0; transition: opacity .3s; color: #7fd6a6; }
 .save-state.saved { opacity: 1; }
 
@@ -340,7 +452,7 @@ svg { display: block; }
 .dlist__items { flex: 1; min-height: 0; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 2px; }
 .dlist__empty { padding: 18px; font-size: 13.5px; color: var(--text-3); text-align: center; }
 .ditem {
-  position: relative; display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 10px; align-items: start;
+  position: relative; display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 12px; align-items: center;
   width: 100%; padding: 10px; border-radius: var(--radius); text-align: start; color: var(--text); transition: background .1s;
 }
 .ditem:hover { background: var(--surface-2); }
@@ -396,7 +508,7 @@ svg { display: block; }
   .app--rail .side__deal { grid-template-columns: 24px; justify-content: center; width: 44px; padding: 6px 0; }
   .app--rail .side__foot { width: 100%; align-items: center; }
   .app--rail .side__meta { justify-content: center; padding: 10px 0 0; }
-  .app--rail .side__theme { padding: 8px; }
+  .app--rail .side__themes { flex-direction: column; gap: 8px; }
 }
 
 /* פס עליון למובייל בלבד */
@@ -469,11 +581,11 @@ svg { display: block; }
 .btn:hover { background: var(--surface-2); border-color: var(--text-4); }
 .btn .ic, .btn > svg { width: 16px; height: 16px; }
 .btn--primary {
-  background: linear-gradient(180deg, var(--brand-2), var(--brand)); border-color: var(--brand); color: #fff;
-  box-shadow: 0 1px 0 rgba(255, 255, 255, .12) inset, 0 6px 16px -8px rgba(20, 38, 74, .7);
+  background: var(--btn-bg); border-color: var(--btn-border); color: var(--btn-text); font-weight: 600;
+  box-shadow: var(--shadow-btn);
 }
-.btn--primary:hover { background: linear-gradient(180deg, #2a4c8c, var(--brand-2)); border-color: var(--brand-2); }
-.btn--primary .ic { color: var(--gold); }
+.btn--primary:hover { background: var(--btn-bg-hover); border-color: var(--btn-border); }
+.btn--primary .ic { color: var(--btn-ic); }
 .btn--ghost { background: transparent; border-color: transparent; box-shadow: none; color: var(--text-2); }
 .btn--ghost:hover { background: var(--surface-3); border-color: transparent; color: var(--text); }
 .btn--danger { color: var(--over); border-color: var(--over-line); background: var(--surface); }
@@ -629,7 +741,7 @@ input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var
 }
 .meter__fill {
   position: absolute; inset-block: 0; inset-inline-start: 0; border-radius: 999px;
-  background: linear-gradient(270deg, var(--fill), color-mix(in srgb, var(--fill) 72%, #7fc0ff));
+  background: linear-gradient(270deg, var(--fill), var(--fill-2));
   transition: width .35s ease;
 }
 .meter__mark { position: absolute; inset-block: -1px; width: 2px; background: var(--surface); }
@@ -704,8 +816,8 @@ input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var
 /* דופק השריפה השבועית — רצועה בתחתית האריח; ריחוף מציג את הערך בכל שבוע */
 .tile__pulse { position: absolute; inset-inline: 0; bottom: 0; height: 44px; }
 .tile__pulse .spark { width: 100%; height: 100%; }
-.spark--hero .spark__line { stroke: rgba(127, 192, 255, .75); stroke-width: 2; }
-.spark--hero .spark__area { fill: rgba(127, 192, 255, .12); }
+.spark--hero .spark__line { stroke: color-mix(in srgb, var(--hero-ok) 75%, transparent); stroke-width: 2; }
+.spark--hero .spark__area { fill: color-mix(in srgb, var(--hero-ok) 12%, transparent); }
 .ring__track { stroke: var(--hero-track); }
 .ring--ok .ring__fill { stroke: var(--hero-ok); }
 .ring--risk .ring__fill { stroke: var(--hero-risk); }
@@ -777,7 +889,7 @@ input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var
   border: 1px solid var(--line); background: var(--surface); font-size: 13px; color: var(--text-2); white-space: nowrap;
 }
 .chip:hover:not(:disabled) { border-color: var(--line-strong); color: var(--text); }
-.chip.is-on { background: var(--brand); border-color: var(--brand); color: #fff; }
+.chip.is-on { background: var(--brand); border-color: var(--brand); color: var(--btn-text); }
 .chip:disabled { opacity: .45; cursor: default; }
 .chip__n { font-size: 12px; opacity: .75; }
 

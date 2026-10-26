@@ -1,12 +1,12 @@
 // ui-admin.js — מסכי ניהול: הגדרות עסקה, ספריית אנשי הצוות, תעריפונים, וטפסי המודאלים
 // (עסקה חדשה, בורר אנשים, אנשי קשר, ייבוא תקציב).
 
-import { DEAL_STATUSES, FEE_MODELS, fmtMoney, fmtHours, fmtPct } from './model.js';
+import { DEAL_STATUSES, FEE_MODELS, DEAL_TYPES, dealTypeOf, fmtMoney, fmtHours, fmtPct } from './model.js';
 import { BUILD } from './version.js';
 import { personKey } from './importer.js';
 import {
   el, icon, field, fact, button, iconButton, menu, card, table, limitItems, emptyState, fmtDate, fmtDelta,
-  avatar, personSlot, infoTip,
+  infoTip,
 } from './ui-kit.js';
 
 /* ============================================================
@@ -33,6 +33,7 @@ export function renderDealSettings(root, { snap, rateCards }) {
       field('שם העסקה', el('input', { class: 'input', name: 'name', value: d.name, required: 'required' })),
       field('לקוח', el('input', { class: 'input', name: 'client', value: d.client, placeholder: 'שם הלקוח' })),
       field('מספר עסקה / תיק', el('input', { class: 'input', name: 'code', value: d.code, placeholder: 'לדוגמה: M&A-2026-04' })),
+      dealTypeField(d),
       field('סטטוס', el('select', { class: 'select', name: 'status' }, DEAL_STATUSES.map((s) => el('option', { value: s.id, text: s.label, selected: s.id === d.status ? 'selected' : null }))),
         'עסקה שנסגרה או בארכיון יוצאת מהסרגל ומתיק העסקאות הפתוחות.'),
       field('תאריך פתיחה', el('input', { class: 'input num', type: 'date', name: 'startDate', value: d.startDate })),
@@ -173,7 +174,6 @@ export function renderPeopleView(root, { people, usageOf, dupes = [] }) {
     return el('tr', { class: person.active ? '' : 'is-inactive', dataset: { personId: person.id, search: [person.key, ...(person.aliases || []).map(personKey)].join(' ') } }, [
       el('td', { class: 'c-pick' }, [el('input', { type: 'checkbox', dataset: { pick: 'person', personId: person.id }, 'aria-label': `סימון ${person.name}` })]),
       el('td', {}, [el('div', { class: 'pname' }, [
-        avatar(person.name, personSlot(person), { size: 'sm' }),
         el('div', { class: 'pname__text' }, [
           el('input', { class: 'qinput strong', value: person.name, dataset: { pfield: 'name', personId: person.id }, 'aria-label': 'שם' }),
           person.aliases.length ? el('span', { class: 'sub', text: `ידוע גם כ: ${person.aliases.join(' · ')}` }) : null,
@@ -393,6 +393,15 @@ export function renderRatesView(root, { rateCards, deals }) {
    טפסים במודאל
    ============================================================ */
 
+/** סוג העסקה — מוצג מתחת לשם העסקה ברשימות. ריק = נגזר מקידומת מספר התיק (M&A-…, VC-…) */
+function dealTypeField(d) {
+  const derived = dealTypeOf({ code: d.code });
+  return field('סוג עסקה', el('span', { class: 'combo' }, [
+    el('input', { class: 'input', name: 'dealType', value: d.dealType || '', list: 'deal-types', placeholder: derived || 'M&A, גיוס הון…', autocomplete: 'off' }),
+    el('datalist', { id: 'deal-types' }, DEAL_TYPES.map((t) => el('option', { value: t }))),
+  ]), 'מופיע מתחת לשם העסקה, יחד עם תאריך הפתיחה. ריק — לפי קידומת מספר התיק.');
+}
+
 export function renderDealForm(deal, rateCards) {
   const d = deal || {};
   return el('form', { class: 'modal-form', id: 'deal-modal-form' }, [
@@ -400,6 +409,8 @@ export function renderDealForm(deal, rateCards) {
     el('div', { class: 'grid-2' }, [
       field('לקוח', el('input', { class: 'input', name: 'client', value: d.client || '' })),
       field('מספר תיק', el('input', { class: 'input', name: 'code', value: d.code || '' })),
+      dealTypeField(d),
+      field('תאריך פתיחה', el('input', { class: 'input num', type: 'date', name: 'startDate', value: d.startDate || new Date().toISOString().slice(0, 10) })),
       field('מודל שכר טרחה', el('select', { class: 'select', name: 'feeModel' }, FEE_MODELS.map((f) => el('option', { value: f.id, text: f.label })))),
       field('שכ"ט מוסכם / תקרה (₪)', el('input', { class: 'input num', type: 'number', step: '1000', min: '0', name: 'agreedFee', value: '0' })),
       field('מקדם חריגה', el('input', { class: 'input num', type: 'number', step: '0.05', min: '0', max: '2', name: 'overrunFactor', value: '0.2' }), '0.2 = תוספת של 20% לשעות המוערכות'),

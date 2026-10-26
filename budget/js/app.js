@@ -6,7 +6,7 @@ import * as db from './db.js';
 import {
   computeDeal, dealReview, aggregateByKind, uid, num, round2, fmtPct, fmtHours, roundUpHours, sourceLabel,
   DEFAULT_TEAM_NAMES, DEAL_STATUSES,
-  normalizeSplits, splitsTotal, isOpenDeal, todayISO, monthEndISO,
+  normalizeSplits, splitsTotal, isOpenDeal, todayISO, monthEndISO, cleanTag, teamTag,
 } from './model.js';
 import * as ui from './ui.js';
 import * as fileStore from './file-store.js';
@@ -52,7 +52,7 @@ const state = {
   tab: 'budget',           // 'budget' | 'reports' | 'analysis' | 'settings'
   // יחידת התצוגה: כל מספר על המסך בשעות או ב-₪ — לא שניהם יחד
   unit: localStorage.getItem('lb_unit') === 'money' ? 'money' : 'hours',
-  theme: document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light',
+  theme: ['midnight', 'charcoal'].includes(document.documentElement.dataset.theme) ? document.documentElement.dataset.theme : 'sapphire',
   snapshots: new Map(),
   selectedTeams: new Set(),   // צוותים מסומנים לחישוב מצרפי (בעסקה הפעילה)
   expandedTeams: new Set(),   // צוותים שהגיליון שלהם פתוח
@@ -645,9 +645,10 @@ function focusTeam(id) {
 }
 
 /** ערכת הנושא — על <html>, כדי שגם הרקע מחוץ לאפליקציה יתחלף */
+const THEME_COLOR = { sapphire: '#0a1430', midnight: '#05070e', charcoal: '#0a0a0a' };
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#141517' : '#f5f5f2');
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', THEME_COLOR[theme] || THEME_COLOR.sapphire);
 }
 
 /** אחרי render() ה-DOM מוחלף — מחזירים את הפוקוס לאותו פריט כדי להמשיך להזיז */
@@ -707,7 +708,7 @@ async function onClick(e) {
   if (!target) return;
   const { action } = target.dataset;
   // ניווט מתוך מגירת המובייל סוגר אותה
-  if (els.app.classList.contains('nav-open') && target.closest('.side') && action !== 'toggle-theme') setNav(false);
+  if (els.app.classList.contains('nav-open') && target.closest('.side') && action !== 'set-theme') setNav(false);
 
   switch (action) {
     case 'toggle-menu':
@@ -727,8 +728,8 @@ async function onClick(e) {
       return render();
     }
 
-    case 'toggle-theme': {
-      state.theme = state.theme === 'dark' ? 'light' : 'dark';
+    case 'set-theme': {
+      state.theme = THEME_COLOR[target.dataset.themeId] ? target.dataset.themeId : 'sapphire';
       applyTheme(state.theme);
       try { localStorage.setItem(LS.theme, state.theme); } catch { /* העדפה בלבד */ }
       return renderSide();
@@ -1261,6 +1262,7 @@ function applyTeamField(node) {
     }
   } else if (field === 'name') team.name = node.value;
   else if (field === 'lead') team.lead = node.value;
+  else if (field === 'tag') team.tag = cleanTag(node.value);
   else if (field === 'kind') team.kind = node.checked ? 'dd' : 'regular';
   else if (field === 'overrunFactor') team.overrunFactor = node.value === '' ? null : num(node.value);
 
@@ -1339,6 +1341,12 @@ async function onChange(e) {
     await store.saveTeam(team);
     // סיווג הצוות משנה מבנה (צ'יפ, פאנל ההפרדה, הייצואים) — ולכן רינדור מלא
     if (node.dataset.field === 'kind') { ui.toast(team.kind === 'dd' ? 'הצוות סומן כבדיקת נאותות' : 'הסימון הוסר'); render(); }
+    // התגית מוצגת בשורת הצוות — מחליפים אותה במקום, בלי לסגור את הגיליון
+    else if (node.dataset.field === 'tag') {
+      node.value = team.tag;
+      for (const t of document.querySelectorAll(`[data-team-row="${team.id}"] .ttag, .trow[data-team-id="${team.id}"] .ttag`)) t.textContent = teamTag(team);
+      refreshLive();
+    }
     else refreshLive();
     return;
   }
@@ -1364,7 +1372,7 @@ async function saveDealForm(form, { silent = false } = {}) {
   const before = store.getDeal(state.dealId);
   await store.saveDeal({
     id: state.dealId,
-    name: f.name, client: f.client, code: f.code, status: f.status,
+    name: f.name, client: f.client, code: f.code, dealType: f.dealType, status: f.status,
     startDate: f.startDate, targetDate: f.targetDate, notes: f.notes,
     feeModel: f.feeModel, agreedFee: num(f.agreedFee), overrunFactor: num(f.overrunFactor),
     rateCardId: f.rateCardId, progressPct: num(f.progressPct),
@@ -1405,7 +1413,7 @@ function openDealModal() {
     if (!String(f.name || '').trim()) return ui.toast('שם עסקה הוא שדה חובה', 'error');
     const teamNames = [...presets.querySelectorAll('input:checked')].map((i) => i.value);
     const deal = await store.createDeal({
-      name: f.name, client: f.client, code: f.code,
+      name: f.name, client: f.client, code: f.code, dealType: f.dealType, startDate: f.startDate,
       feeModel: f.feeModel, agreedFee: num(f.agreedFee),
       overrunFactor: num(f.overrunFactor), rateCardId: f.rateCardId,
     }, teamNames);

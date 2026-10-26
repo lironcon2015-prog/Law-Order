@@ -2,7 +2,8 @@
 // ורכיבים קטנים שכל המסכים חולקים. כל קלט משתמש נכנס כ-textContent/value בלבד (מניעת XSS);
 // אייקונים הם SVG סטטי ולכן מותר להם innerHTML.
 
-import { fmtMoney, fmtHours, fmtPct, STATUS_LABEL, TEAM_COLORS } from './model.js';
+import { fmtMoney, fmtHours, fmtPct, STATUS_LABEL, TEAM_COLORS, teamTag, dealTypeOf } from './model.js';
+import { ring } from './charts.js';
 
 /* ---------- אייקונים (Lucide-style, סטטי) ---------- */
 export const ICONS = {
@@ -74,10 +75,10 @@ export function icon(name, cls) {
   return el('span', { class: cls || 'ic', html: ICONS[name] || '', 'aria-hidden': 'true' });
 }
 
-/* ---------- צבעי זהות: צוותים ועסקאות ----------
- * שישה גוונים (‎--id-0..5 ב-CSS), בסדר שנבדק לעיוורון צבעים בשתי הערכות. הצבע הולך עם הישות
- * ולא עם המיקום שלה ברשימה: צוות — לפי הצבע ששמור עליו מאז שנוצר, עסקה — לפי המזהה שלה.
- * הגוונים לא כוללים אדום/ענבר — אלה שמורים לחריגה ולסיכון.
+/* ---------- זהות: צוותים ועסקאות ----------
+ * צוות — תגית באנגלית (DD, M&A, CORP…) במסגרת דקה בצבע הצוות; המשתמש כותב אותה בגיליון הצוות.
+ * עסקה — טבעת ניצול: הסמל עצמו הוא מידע, וחריגה נראית מיד בצבע.
+ * שישה גווני זהות (‎--id-0..5 ב-CSS) בסדר שנבדק לעיוורון צבעים; הצבע הולך עם הצוות ולא עם מיקומו.
  */
 export const ID_SLOTS = 6;
 const hashId = (s) => { let h = 7; for (const ch of String(s || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; };
@@ -85,21 +86,25 @@ export const teamSlot = (team) => {
   const i = TEAM_COLORS.indexOf(team?.color);
   return (i >= 0 ? i : hashId(team?.id)) % ID_SLOTS;
 };
-export const dealSlot = (deal) => hashId(deal?.id) % ID_SLOTS;
-export const personSlot = (person) => hashId(person?.id) % ID_SLOTS;
 
-/** ראשי תיבות לסמל: שתי המילים הראשונות ("רכישת אלפא טכנולוגיות" → "רא") */
-export function initials(name, n = 2) {
-  const words = String(name || '').replace(/["'׳״—–\-·]/g, ' ').split(/\s+/).filter(Boolean);
-  return words.slice(0, n).map((w) => w[0]).join('') || '·';
+/** תגית הצוות */
+export function teamTagEl(team) {
+  return el('span', { class: 'ttag', dataset: { slot: String(teamSlot(team)) }, 'aria-hidden': 'true', text: teamTag(team) });
 }
 
-/** סמל זהות: ריבוע מעוגל בצבע הישות עם ראשי התיבות שלה */
-export function avatar(name, slot, { size = '', alert = '' } = {}) {
-  return el('span', {
-    class: `av${size ? ` av--${size}` : ''}`, 'aria-hidden': 'true',
-    dataset: alert ? { slot: String(slot), alert } : { slot: String(slot) }, text: initials(name),
-  });
+/** טבעת ניצול קטנה לעסקה. withPct — האחוז בתוך הטבעת */
+export function dealRing(util, status, { size = 40, withPct = true } = {}) {
+  const tone = status === 'over' ? 'over' : status === 'risk' ? 'risk' : 'ok';
+  return el('span', { class: `dring dring--${tone}`, style: `--d:${size}px`, 'aria-hidden': 'true', html: ring(util, status, { size, stroke: Math.max(3, Math.round(size / 11)) }) },
+    withPct ? [el('b', { class: 'num', text: Number.isFinite(util) ? `${Math.round(util * 100)}%` : '—' })] : []);
+}
+
+/** שורת המשנה של עסקה: סוג · תאריך פתיחה (ובהיעדרם — הלקוח) */
+export function dealSubline(deal, extra = '') {
+  const parts = [dealTypeOf(deal), deal.startDate ? `נפתחה ${fmtDate(deal.startDate)}` : ''].filter(Boolean);
+  if (!parts.length && deal.client) parts.push(deal.client);
+  if (extra) parts.push(extra);
+  return parts.join(' · ') || '—';
 }
 
 /* ---------- יחידה: שעות או ₪ ----------

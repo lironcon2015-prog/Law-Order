@@ -6,7 +6,7 @@ import { computePortfolio, isOpenDeal, DEAL_STATUSES, progressByPeriod, round2 }
 import { ring, sparkline } from './charts.js';
 import {
   el, icon, ICONS, measure, fmtU, pctText, toneOf, meterCell, unitSwitch, seg, button, iconButton, emptyState,
-  limitItems, valueNodes, card, table, avatar, dealSlot, tile, monthLabel,
+  limitItems, valueNodes, card, table, dealRing, dealSubline, tile, monthLabel,
 } from './ui-kit.js';
 
 /* ============================================================
@@ -45,6 +45,13 @@ export function sortDeals(list, sort, unit) {
    סרגל צד — פתוח, או "פס אייקונים" (rail) עם טולטיפ לכל פריט
    ============================================================ */
 
+/** ערכות הצבע — מזהה = data-theme על <html> */
+export const THEMES = [
+  { id: 'sapphire', label: 'ספיר וזהב' },
+  { id: 'midnight', label: 'Midnight Luxe' },
+  { id: 'charcoal', label: 'פחם ושמפניה' },
+];
+
 export function renderSidebar(root, { deals, snapshots, view, activeId, unit, theme, rail = false }) {
   const tip = (label) => (rail ? { tip: label } : {});
   const link = (action, iconName, label, active = false, extra = {}) => el('button', {
@@ -66,14 +73,13 @@ export function renderSidebar(root, { deals, snapshots, view, activeId, unit, th
       title: rail ? null : `${deal.name}${deal.client ? ` · ${deal.client}` : ''} — גרירה או Alt+↑/↓ לשינוי הסדר`,
       'aria-current': deal.id === activeId ? 'page' : null,
     }, [
-      avatar(deal.name, dealSlot(deal), { size: 'xs', alert: m && (m.status === 'over' || m.status === 'risk') ? m.status : '' }),
+      m ? dealRing(m.budget > 0 ? m.util : NaN, m.status, { size: 24, withPct: false }) : el('span'),
       el('span', { class: 'side__deal-name', text: deal.name }),
       pct ? el('span', { class: `side__deal-val num ${m ? toneOf(m.status) : ''}`.trim(), text: pct }) : null,
     ]));
   }
   if (!open.length) list.append(el('p', { class: 'side__empty', text: deals.length ? 'אין עסקאות פתוחות' : 'עוד אין עסקאות' }));
 
-  const themeLabel = theme === 'dark' ? 'מצב בהיר' : 'מצב כהה';
   root.replaceChildren(
     el('div', { class: 'side__brand' }, [
       el('span', { class: 'side__logo', html: ICONS.wallet, 'aria-hidden': 'true' }),
@@ -96,10 +102,10 @@ export function renderSidebar(root, { deals, snapshots, view, activeId, unit, th
       link('go-rates', 'coins', 'תעריפונים', view === 'rates'),
       link('backup', 'database', 'גיבוי ושחזור'),
       el('div', { class: 'side__meta' }, [
-        el('button', {
-          class: 'side__theme', type: 'button', title: rail ? null : 'מעבר בין מצב בהיר לכהה', 'aria-label': rail ? themeLabel : null,
-          dataset: { action: 'toggle-theme', ...tip(themeLabel) },
-        }, [icon(theme === 'dark' ? 'sun' : 'moon'), el('span', { class: 'side__text', text: themeLabel })]),
+        el('div', { class: 'side__themes', role: 'group', 'aria-label': 'ערכת צבעים' }, THEMES.map((t) => el('button', {
+          class: `side__swatch side__swatch--${t.id}`, type: 'button', 'aria-label': t.label, 'aria-pressed': String(t.id === theme),
+          dataset: { action: 'set-theme', themeId: t.id, ...tip(t.label) },
+        }))),
         el('span', { class: 'save-state', id: 'save-state', 'aria-live': 'polite', text: 'נשמר' }),
       ]),
     ]),
@@ -132,14 +138,14 @@ export function renderDealList(root, { snapshots, scope = 'open', unit = 'hours'
       'aria-current': active ? 'page' : null,
       title: sort ? null : 'גרירה או Alt+↑/↓ לשינוי הסדר',
     }, [
-      avatar(s.deal.name, dealSlot(s.deal), { size: 'sm' }),
+      dealRing(m.budget > 0 ? m.util : NaN, m.status, { size: 44 }),
       el('span', { class: 'ditem__body' }, [
         el('span', { class: 'ditem__top' }, [
           el('span', { class: 'ditem__name', text: s.deal.name }),
           worst ? el('span', { class: `flag flag--${worst}`, dataset: { tip: al.map((a) => a.text).join(' · ') } }, [icon('alert'), el('span', { class: 'num', text: String(al.length) })]) : null,
         ]),
-        el('span', { class: 'ditem__sub', text: [s.deal.client, isOpenDeal(s.deal) ? '' : status?.label].filter(Boolean).join(' · ') || '—' }),
-        m.budget > 0 ? meterCell(m.util, m.status, { calc: `dl-${s.deal.id}` }) : el('span', { class: 'ditem__none', text: 'אין תקציב' }),
+        el('span', { class: 'ditem__sub', title: s.deal.client || null, text: dealSubline(s.deal, isOpenDeal(s.deal) ? '' : status?.label) }),
+        m.budget > 0 ? null : el('span', { class: 'ditem__none', text: 'אין תקציב' }),
       ]),
     ]);
   });
@@ -302,10 +308,10 @@ export function renderOverview(root, { snapshots, scope = 'open', unit = 'hours'
       'aria-label': `פתח את ${s.deal.name}`,
     }, [
       el('td', {}, [el('div', { class: 'dealcell' }, [
-        avatar(s.deal.name, dealSlot(s.deal), { size: 'sm' }),
+        dealRing(m.budget > 0 ? m.util : NaN, m.status, { size: 40 }),
         el('div', { class: 'cellname' }, [
           el('span', { class: 'cellname__main', text: s.deal.name }),
-          el('span', { class: 'cellname__sub', text: [s.deal.client, isOpenDeal(s.deal) ? '' : dealStatus?.label].filter(Boolean).join(' · ') || '—' }),
+          el('span', { class: 'cellname__sub', title: s.deal.client || null, text: dealSubline(s.deal, isOpenDeal(s.deal) ? '' : dealStatus?.label) }),
         ]),
       ])]),
       el('td', {}, [m.budget > 0 ? meterCell(m.util, m.status) : el('span', { class: 'muted', text: 'אין תקציב' })]),

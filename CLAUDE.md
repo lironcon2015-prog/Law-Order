@@ -97,7 +97,7 @@
 | `sw.js` | Service Worker | `manifest.json` | PWA |
 | `cloudflare/crm-proxy.worker.js` | Worker שמ-proxy את `lironcon.com/crm` ל-Pages |
 | `v2/` | **המערכת המאוחדת** (CRM + חיוב) — מבנה מקביל: `v2/index.html`, `v2/css/`, `v2/js/`, `v2/sw.js` |
-| `budget/` | **LexBudget** — מערכת תקציב עסקה נפרדת (DB/SW/manifest משלה): `budget/index.html`, `budget/css/`, `budget/js/`. שפה עיצובית משלה — **"Midnight & Gold"** (בהיר + סרגל כחול-לילה, מצב כהה, Heebo, מתג יחידה `שעות / ₪`; בדסקטופ: תצוגה מפוצלת, סרגל מתכווץ, אריחי מדדים, טבלאות ממוינות, טולטיפים); ראה `budget/README.md` §5 |
+| `budget/` | **LexBudget** — מערכת תקציב עסקה נפרדת (DB/SW/manifest משלה): `budget/index.html`, `budget/css/`, `budget/js/`. שפה עיצובית משלה — **שלוש ערכות צבע** (ספיר וזהב · Midnight Luxe · פחם ושמפניה; `data-theme`), תגית אנגלית לצוות (ניתנת לעריכה), טבעת ניצול לעסקה, Heebo, מתג יחידה `שעות / ₪`; בדסקטופ: תצוגה מפוצלת, סרגל מתכווץ, אריחי מדדים, טבלאות ממוינות, טולטיפים); ראה `budget/README.md` §5 |
 | `LexLedger-Offline.html` | **קובץ האופליין של v2** — ארוז לקובץ HTML יחיד (file://, בלי שרת). בשורש ה-repo ב-**main** |
 | `LexBudget-Offline.html` | **קובץ האופליין של LexBudget** — אותו רעיון, נבנה מ-`budget/` |
 | `v2/build-offline.mjs` · `budget/build-offline.mjs` | סקריפטי הבנייה: `node v2/build-offline.mjs` · `node budget/build-offline.mjs` |

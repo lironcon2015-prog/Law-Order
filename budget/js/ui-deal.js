@@ -3,12 +3,12 @@
 // יעדכן אותם בזמן הקלדה בלי רינדור מלא (רינדור מלא היה מאבד את הפוקוס בשדה).
 
 import {
-  DEAL_STATUSES, FEE_MODELS, aggregateTeams, aggregateByKind, round2, fmtMoney, fmtPct, progressByPeriod, dealReview,
+  DEAL_STATUSES, FEE_MODELS, defaultTeamTag as teamTagDefault, aggregateTeams, aggregateByKind, round2, fmtMoney, fmtPct, progressByPeriod, dealReview,
 } from './model.js';
 import { ring, sparkline } from './charts.js';
 import {
   el, icon, ICONS, measure, fmtU, fmtDelta, valueNodes, pctText, toneOf, meterCell, paintMeter,
-  unitSwitch, seg, menu, button, iconButton, emptyState, fmtDate, isFoldOpen, setFold, avatar, teamSlot, dealSlot,
+  unitSwitch, seg, menu, button, iconButton, emptyState, fmtDate, isFoldOpen, setFold, teamSlot, teamTagEl, dealRing, dealSubline,
   tile, tileBar, infoTip, chips, sortButton,
 } from './ui-kit.js';
 
@@ -57,7 +57,7 @@ export function renderDealHeader(root, { snap, tab, unit }) {
   root.append(el('header', { class: 'dhead' }, [
     el('div', { class: 'dhead__row' }, [
       el('div', { class: 'dhead__id' }, [
-        avatar(d.name, dealSlot(d), { size: 'lg' }),
+        dealRing(measure(snap, unit).budget > 0 ? measure(snap, unit).util : NaN, measure(snap, unit).status, { size: 56 }),
         el('div', { class: 'dhead__text' }, [
           el('h1', { class: 'dhead__title' }, [
             el('span', { text: d.name }),
@@ -329,7 +329,7 @@ function teamRow(team, { snap, unit, selected, expanded }) {
       'aria-label': `שינוי מיקום הצוות ${team.name}`, dataset: { grip: 'team', teamId: team.id },
     }),
     el('div', { class: 'trow__id' }, [
-      avatar(team.name, teamSlot(team), { size: 'sm' }),
+      teamTagEl(team),
       el('div', { class: 'trow__idtext' }, [
         el('button', {
           class: 'trow__name', type: 'button', title: 'לחיצה לשינוי שם הצוות',
@@ -551,6 +551,12 @@ function teamSheet(team, { snap, rateCard, unit }) {
           dataset: { field: 'overrunFactor', teamId: team.id },
         }),
       ]),
+      el('label', { class: 'inline-field' }, ['תגית',
+        el('input', {
+          class: 'input ttag-input', value: team.tag, placeholder: teamTagDefault(team.name), maxlength: '5', dir: 'ltr',
+          'aria-label': 'תגית הצוות באנגלית', title: 'אותיות באנגלית, עד 5. ריק = ברירת מחדל לפי שם הצוות',
+          dataset: { field: 'tag', teamId: team.id },
+        })]),
       el('label', { class: 'inline-field' }, ['אחראי',
         el('input', { class: 'input', value: team.lead, placeholder: 'שם', dataset: { field: 'lead', teamId: team.id } })]),
       el('label', { class: 'inline-check', title: 'הצוות יופרד בסיכומים, בניתוח ובייצואים לאקסל' }, [

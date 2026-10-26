@@ -161,6 +161,36 @@ export function normalizeLine(l) {
   };
 }
 
+/* ---------- תגית צוות (באנגלית) ----------
+ * תגית קצרה באותיות לטיניות שמזהה את הצוות בטבלאות (DD, M&A, CORP…). המשתמש כותב אותה בגיליון
+ * הצוות; כשהשדה ריק — ברירת מחדל לפי שם הצוות (ולכן שינוי שם מעדכן גם את ברירת המחדל).
+ */
+const TEAM_TAG_RULES = [
+  [/נאותות|due/i, 'DD'], [/עסקה|עסקאות|m&a|מיזוג|רכישה/i, 'M&A'], [/קורפורייט|תאגיד|חברות|corp/i, 'CORP'],
+  [/עבודה|labou?r|employ/i, 'LAB'], [/מיסוי|מיסים|מסים|tax/i, 'TAX'], [/הגבלים|תחרות|antitrust|competition/i, 'ANTI'],
+  [/קניין|ip\b|פטנט/i, 'IP'], [/נדל|real ?estate/i, 'RE'], [/מימון|בנקאות|finance|bank/i, 'FIN'],
+  [/ליטיגציה|ליטיג|litig|בורר/i, 'LIT'], [/רגולציה|regul/i, 'REG'], [/פרטיות|privacy|סייבר|data/i, 'PRIV'],
+  [/הון סיכון|venture|vc/i, 'VC'], [/ניירות ערך|שוק ההון|securities|capital/i, 'SEC'],
+];
+/** מנקה תגית: אותיות לטיניות גדולות, ספרות ו-&, עד 5 תווים */
+export const cleanTag = (s) => String(s ?? '').toUpperCase().replace(/[^A-Z0-9&]/g, '').slice(0, 5);
+export function defaultTeamTag(name) {
+  const hit = TEAM_TAG_RULES.find(([re]) => re.test(String(name || '')));
+  return hit ? hit[1] : 'TEAM';
+}
+export const teamTag = (team) => team?.tag || defaultTeamTag(team?.name);
+
+/* ---------- סוג עסקה ----------
+ * כשלא הוזן — נגזר מתחילית מספר התיק (M&A-2026-07 → M&A).
+ */
+const DEAL_TYPE_BY_PREFIX = { 'M&A': 'M&A', VC: 'גיוס הון', SHA: 'הסכם בעלי מניות', IPO: 'הנפקה', JV: 'מיזם משותף', FIN: 'מימון' };
+export const DEAL_TYPES = ['M&A', 'גיוס הון', 'הסכם בעלי מניות', 'הנפקה', 'מיזם משותף', 'מימון', 'ארגון מחדש'];
+export function dealTypeOf(deal) {
+  if (deal?.dealType) return deal.dealType;
+  const prefix = String(deal?.code || '').split(/[-\s/]/)[0].toUpperCase();
+  return DEAL_TYPE_BY_PREFIX[prefix] || '';
+}
+
 export function normalizeTeam(t, i = 0) {
   return {
     id: t?.id || uid('team'),
@@ -168,6 +198,7 @@ export function normalizeTeam(t, i = 0) {
     name: String(t?.name ?? `צוות ${i + 1}`),
     lead: String(t?.lead ?? ''),
     color: t?.color || TEAM_COLORS[i % TEAM_COLORS.length],
+    tag: cleanTag(t?.tag),               // ריק = ברירת מחדל לפי השם (teamTag)
     order: Number.isFinite(t?.order) ? t.order : i,
     // סיווג הצוות — 'dd' = בדיקת נאותות. שדה קבוע, לא התאמה לפי שם הצוות.
     kind: t?.kind === 'dd' ? 'dd' : 'regular',
@@ -207,6 +238,7 @@ export function normalizeDeal(d, i = 0) {
     name: String(d?.name ?? 'עסקה חדשה'),
     client: String(d?.client ?? ''),
     code: String(d?.code ?? ''),
+    dealType: String(d?.dealType ?? '').trim(),   // ריק = לפי תחילית מספר התיק (dealTypeOf)
     status: DEAL_STATUSES.some((s) => s.id === d?.status) ? d.status : 'active',
     currency: d?.currency || '₪',
     feeModel: FEE_MODELS.some((f) => f.id === d?.feeModel) ? d.feeModel : 'hourly',
