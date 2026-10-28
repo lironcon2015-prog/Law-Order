@@ -1078,6 +1078,48 @@ export function aggregateTeams(snapshot, teamIds) {
 }
 
 /**
+ * פילוח קבוצת צוותים לפי דרג (מתמחה / עו"ד / שותף…), בסדר הדרגות בתעריפון.
+ * שורה שהדרגה שלה כבר לא קיימת בתעריפון נאספת ל"ללא דרג" — כך סכום השורות שווה תמיד לסיכום הקבוצה.
+ * שעות שדווחו לצוות בלי שיוך לשורה אינן מתומחרות ואינן בסיכום; הן מוחזרות בנפרד (teamOnlyHours) להערה.
+ */
+export const NO_ROLE = '__none';
+export function aggregateByRole(snapshot, teamIds) {
+  const ids = new Set(teamIds || []);
+  const teams = snapshot.teams.filter((t) => ids.has(t.id));
+  const order = (snapshot.rateCard?.roles || []).map((r) => r.id);
+  const rows = new Map();
+  const row = (id, name) => {
+    if (!rows.has(id)) rows.set(id, { roleId: id, name, estHours: 0, estCost: 0, budgetHours: 0, budgetCost: 0, actualHours: 0, actualCost: 0 });
+    return rows.get(id);
+  };
+  let teamOnlyHours = 0;
+  for (const team of teams) {
+    teamOnlyHours += team.unassignedTeamHours || 0;
+    for (const l of team.lines) {
+      const r = l.orphanRole || !l.roleId ? row(NO_ROLE, 'ללא דרג') : row(l.roleId, l.roleName);
+      r.estHours += num(l.estHours); r.estCost += num(l.estHours) * l.rate;
+      r.budgetHours += l.budgetHours; r.budgetCost += l.budgetCost;
+      r.actualHours += l.actualHours; r.actualCost += l.actualCost;
+    }
+  }
+  const rank = (id) => (id === NO_ROLE ? Infinity : (order.indexOf(id) + 1 || order.length + 1));
+  const out = [...rows.values()]
+    .filter((r) => r.budgetHours > 0 || r.actualHours > 0 || r.budgetCost > 0 || r.actualCost > 0)
+    .sort((a, b) => rank(a.roleId) - rank(b.roleId))
+    .map((r) => {
+      for (const k of ['estHours', 'estCost', 'budgetHours', 'budgetCost', 'actualHours', 'actualCost']) r[k] = round2(r[k]);
+      r.remainingHours = round2(r.budgetHours - r.actualHours);
+      r.remainingCost = round2(r.budgetCost - r.actualCost);
+      r.util = r.budgetHours > 0 ? r.actualHours / r.budgetHours : (r.actualHours > 0 ? Infinity : 0);
+      r.status = statusOf(r.util);
+      r.costUtil = ratioOf(r.actualCost, r.budgetCost);
+      r.costStatus = statusOf(r.costUtil);
+      return r;
+    });
+  return { rows: out, teamOnlyHours: round2(teamOnlyHours) };
+}
+
+/**
  * פילוח בדיקת נאותות מול יתר הצוותים.
  * הסיווג הוא שדה על הצוות (`kind`), ולא התאמה לפי שם — "בדיקת נאותות" הוא שם
  * צוות אפשרי בכל עסקה, ושם אינו סיווג.
@@ -1089,6 +1131,8 @@ export function aggregateByKind(snapshot) {
     hasDD: dd.length > 0,
     dd: aggregateTeams(snapshot, dd.map((t) => t.id)),
     regular: aggregateTeams(snapshot, rest.map((t) => t.id)),
+    ddIds: dd.map((t) => t.id),
+    regularIds: rest.map((t) => t.id),
   };
 }
 

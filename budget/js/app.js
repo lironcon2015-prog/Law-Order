@@ -25,7 +25,7 @@ import {
 
 const LS = {
   deal: 'lb_dealId', tab: 'lb_tab', view: 'lb_view', scope: 'lb_ovScope', teamSort: 'lb_teamSort', teamFilter: 'lb_teamFilter',
-  dealSort: 'lb_dealSort', expanded: 'lb_open_', unit: 'lb_unit', theme: 'lb_theme', rail: 'lb_side',
+  dealSort: 'lb_dealSort', expanded: 'lb_open_', unit: 'lb_unit', theme: 'lb_theme', rail: 'lb_side', kinds: 'lb_kinds',
 };
 
 /** מיון שנשמר כ"מפתח:כיוון" (למשל "util:desc") — או null לסדר הידני */
@@ -46,6 +46,10 @@ const LEGACY_TAB = { actuals: 'reports', progress: 'reports', control: 'analysis
 const TABS = ['budget', 'reports', 'analysis', 'settings'];
 const normTab = (t) => { const v = LEGACY_TAB[t] || t; return TABS.includes(v) ? v : 'budget'; };
 
+function readKindsOpen() {
+  try { return new Set((JSON.parse(localStorage.getItem('lb_kinds')) || []).filter((k) => k === 'dd' || k === 'regular')); } catch { return new Set(); }
+}
+
 const state = {
   view: 'overview',        // 'overview' | 'deal' | 'rates' | 'people'
   dealId: null,
@@ -56,6 +60,7 @@ const state = {
   snapshots: new Map(),
   selectedTeams: new Set(),   // צוותים מסומנים לחישוב מצרפי (בעסקה הפעילה)
   expandedTeams: new Set(),   // צוותים שהגיליון שלהם פתוח
+  kindsOpen: readKindsOpen(), // פילוח לפי דרג פתוח: 'dd' / 'regular'
   expandedFor: null,          // העסקה שעבורה נקבע הפתיחה האוטומטית
   progressPeriod: 'week',     // תקופת הסיכום במסך המעקב: day | week | month
   // מסך הסקירה: 'open' = פעילות + בהמתנה (ברירת מחדל) · 'all' = כולל שנסגרו ובארכיון
@@ -185,7 +190,7 @@ function render() {
       }
       ui.renderBudgetTab(page, {
         snap, rateCard: store.rateCardFor(snap.deal), unit: state.unit,
-        selected: state.selectedTeams, expanded: state.expandedTeams, sort: state.teamSort, filter: state.teamFilter,
+        selected: state.selectedTeams, expanded: state.expandedTeams, kindsOpen: state.kindsOpen, sort: state.teamSort, filter: state.teamFilter,
       });
     } else if (state.tab === 'reports') {
       ui.renderReportsTab(page, {
@@ -977,6 +982,14 @@ async function onClick(e) {
         render();
       }, { once: true });
       return;
+    }
+
+    case 'toggle-kind': {
+      const k = target.dataset.kind;
+      if (state.kindsOpen.has(k)) state.kindsOpen.delete(k);
+      else state.kindsOpen.add(k);
+      try { localStorage.setItem(LS.kinds, JSON.stringify([...state.kindsOpen])); } catch { /* העדפה בלבד */ }
+      return render();
     }
 
     case 'toggle-team': {

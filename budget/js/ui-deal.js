@@ -3,7 +3,7 @@
 // יעדכן אותם בזמן הקלדה בלי רינדור מלא (רינדור מלא היה מאבד את הפוקוס בשדה).
 
 import {
-  DEAL_STATUSES, FEE_MODELS, defaultTeamTag as teamTagDefault, teamTag, aggregateTeams, aggregateByKind, round2, fmtMoney, fmtPct, progressByPeriod, dealReview,
+  DEAL_STATUSES, FEE_MODELS, defaultTeamTag as teamTagDefault, teamTag, aggregateByRole, NO_ROLE, aggregateTeams, aggregateByKind, round2, fmtMoney, fmtPct, progressByPeriod, dealReview,
 } from './model.js';
 import { ring, sparkline } from './charts.js';
 import {
@@ -242,7 +242,7 @@ export function sortTeams(teams, sort, unit) {
   });
 }
 
-export function renderBudgetTab(root, { snap, rateCard, unit = 'hours', selected = new Set(), expanded = new Set(), sort = 'priority', filter = 'all' }) {
+export function renderBudgetTab(root, { snap, rateCard, unit = 'hours', selected = new Set(), expanded = new Set(), kindsOpen = new Set(), sort = 'priority', filter = 'all' }) {
   if (!snap.teams.length) {
     root.append(el('section', { class: 'card' }, [emptyState('עוד אין צוותים בעסקה',
       'כל צוות בנוי באותה מתודולוגיה: שורה לכל דרגה, שעות מוערכות, מקדם חריגה ותעריף מהתעריפון.',
@@ -288,8 +288,7 @@ export function renderBudgetTab(root, { snap, rateCard, unit = 'hours', selected
   const kinds = aggregateByKind(snap);
   if (kinds.hasDD && kinds.regular.count) {
     list.append(el('div', { class: 'tlist__split', text: 'בדיקת נאותות מול יתר הצוותים' }));
-    list.append(sumRow('בדיקת נאותות', kinds.dd, unit, snap, 'sum-dd', 'trow--sub'));
-    list.append(sumRow('יתר הצוותים', kinds.regular, unit, snap, 'sum-reg', 'trow--sub'));
+    list.append(...kindRows(snap, kinds, unit, (k) => kindsOpen.has(k)));
   }
   list.append(sumRow('סה"כ העסקה', snap, unit, snap, 'sum-all', 'trow--total'));
 
@@ -384,11 +383,45 @@ function distribution(snap, unit) {
   ]);
 }
 
-/** שורת סיכום (בדיקת נאותות / יתר / סה"כ) — בלי שדות, ולכן נבנית מחדש בכל רענון */
-function sumRow(label, agg, unit, snap, key, cls) {
+/**
+ * שורות הפילוח: בדיקת נאותות / יתר הצוותים, וכל אחת נפתחת לפילוח לפי דרג.
+ * withEmpty — להחזיר גם null במקום קבוצה סגורה (לרענון במקום, שיודע להסיר)
+ */
+function kindRows(snap, kinds, unit, isOpen, withEmpty = false) {
+  const out = [];
+  for (const [kind, label, agg, ids, key] of [
+    ['dd', 'בדיקת נאותות', kinds.dd, kinds.ddIds, 'sum-dd'],
+    ['regular', 'יתר הצוותים', kinds.regular, kinds.regularIds, 'sum-reg'],
+  ]) {
+    const open = isOpen(kind);
+    out.push(sumRow(label, agg, unit, snap, key, 'trow--sub', { kind, open }));
+    if (open) out.push(roleGroup(snap, ids, unit, kind));
+    else if (withEmpty) out.push(null);
+  }
+  return out;
+}
+
+/** פילוח קבוצה לפי דרג — שורות מוזחות מתחת לשורת הקבוצה */
+function roleGroup(snap, ids, unit, kind) {
+  const { rows, teamOnlyHours } = aggregateByRole(snap, ids);
+  const d = snap.deal;
+  return el('div', { class: 'trole', dataset: { region: `roles-${kind}` }, role: 'group', 'aria-label': 'פילוח לפי דרג' }, [
+    ...rows.map((r) => sumRow(r.name, r, unit, snap, null, `trow--role${r.roleId === NO_ROLE ? ' trow--norole' : ''}`)),
+    rows.length ? null : el('p', { class: 'trole__empty', text: 'אין עדיין שורות עם תקציב או ביצוע' }),
+    teamOnlyHours > 0 ? el('p', { class: 'trole__note', text: `ועוד ${fmtU(teamOnlyHours, 'hours', d)} שעות שדווחו לצוות בלי שיוך לשורה — אינן מתומחרות ואינן בסיכום` }) : null,
+  ]);
+}
+
+/** שורת סיכום (בדיקת נאותות / יתר / סה"כ / דרג) — בלי שדות, ולכן נבנית מחדש בכל רענון */
+function sumRow(label, agg, unit, snap, key, cls, toggle = null) {
   const m = measure(agg, unit);
   const d = snap.deal;
-  return el('div', { class: `trow ${cls}`, dataset: { region: key } }, [
+  const props = { class: `trow ${cls}${toggle ? ' trow--toggle' : ''}${toggle?.open ? ' trow--open' : ''}`, dataset: key ? { region: key } : {} };
+  if (toggle) {
+    Object.assign(props.dataset, { action: 'toggle-kind', kind: toggle.kind });
+    props.title = toggle.open ? 'סגירת הפילוח לפי דרג' : 'פילוח לפי דרג';
+  }
+  return el('div', props, [
     el('span'), el('span'),
     el('span', { class: 'trow__label', text: label }),
     el('span', { class: 'trow__num num c-est', text: fmtU(m.est, unit, d) }),
@@ -397,7 +430,9 @@ function sumRow(label, agg, unit, snap, key, cls) {
     el('span', { class: 'trow__num trow__num--main num c-used', text: `${fmtU(m.actual, unit, d)} / ${fmtU(m.budget, unit, d)}` }),
     el('span', { class: `trow__num num c-rem ${m.remaining < 0 ? 'neg' : ''}`.trim(), text: fmtU(m.remaining, unit, d) }),
     el('div', { class: 'trow__meter c-util' }, [meterCell(m.util, m.status)]),
-    el('span'),
+    toggle
+      ? el('div', { class: 'trow__tools' }, [el('button', { class: 'trow__chev', type: 'button', html: ICONS.chevronDown, 'aria-expanded': String(toggle.open), 'aria-label': props.title })])
+      : el('span'),
   ]);
 }
 
@@ -661,8 +696,10 @@ export function refreshComputed(snap, { unit = 'hours', selected = new Set() } =
 
   const kinds = aggregateByKind(snap);
   if (kinds.hasDD && kinds.regular.count) {
-    swap('sum-dd', sumRow('בדיקת נאותות', kinds.dd, unit, snap, 'sum-dd', 'trow--sub'));
-    swap('sum-reg', sumRow('יתר הצוותים', kinds.regular, unit, snap, 'sum-reg', 'trow--sub'));
+    // מצב הפתיחה נקרא מהמסך עצמו — הרענון לא משנה מה פתוח
+    const [dd, ddRoles, reg, regRoles] = kindRows(snap, kinds, unit, (k) => !!document.querySelector(`[data-region="roles-${k}"]`), true);
+    swap('sum-dd', dd); swap('roles-dd', ddRoles);
+    swap('sum-reg', reg); swap('roles-regular', regRoles);
   }
   swap('sum-all', sumRow('סה"כ העסקה', snap, unit, snap, 'sum-all', 'trow--total'));
   swap('dist', distribution(snap, unit));

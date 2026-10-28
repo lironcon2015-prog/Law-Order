@@ -1090,6 +1090,18 @@ li.more-row { list-style: none; text-align: center; padding: 10px; }
 .tlist__split + .trow--sub { border-top: 0; }
 .trow--total { margin-top: 18px; }
 .trow--sub, .trow--total { cursor: default; min-height: 46px; }
+/* פילוח לפי דרג מתחת לשורת הקבוצה — מוזח ובכתב קטן, כדי שיהיה ברור שהוא חלק ממנה */
+.trow--toggle { cursor: pointer; }
+.trow--toggle:hover { background: var(--surface-2); }
+.trow--sub.trow--open { background: var(--surface-2); }
+.trole { background: var(--surface-2); border-bottom: 1px solid var(--line); }
+.trow--role { min-height: 38px; cursor: default; border-top: 1px dashed var(--line); }
+.trow--role:hover { background: transparent; }
+.trow--role .trow__label { padding-right: 22px; font-size: 13px; color: var(--text-2); }
+.trow--role .trow__label::before { content: '┘'; margin-left: 8px; color: var(--text-4); }
+.trow--role .trow__num { font-size: 13px; color: var(--text-2); }
+.trow--norole .trow__label { color: var(--text-3); font-style: italic; }
+.trole__note, .trole__empty { margin: 0; padding: 8px 22px 10px; font-size: 12px; color: var(--text-3); }
 .trow--sub:hover { background: transparent; }
 .trow--sub .trow__label { font-size: 13.5px; color: var(--text-2); }
 .trow--total { background: var(--surface-2); border-top: 1px solid var(--line-strong); border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
