@@ -16,7 +16,7 @@ import {
    כותרת העסקה + טאבים
    ============================================================ */
 
-const TABS = [['budget', 'תקציב', 'target'], ['reports', 'דיווחים', 'list'], ['analysis', 'ניתוח', 'chart'], ['settings', 'הגדרות', 'settings']];
+const TABS = [['budget', 'תקציב', 'target'], ['reports', 'דיווחים', 'list'], ['analysis', 'ניתוח', 'chart'], ['profit', 'רווחיות', 'coins'], ['settings', 'הגדרות', 'settings']];
 
 export function renderDealHeader(root, { snap, tab, unit }) {
   const d = snap.deal;
@@ -67,7 +67,7 @@ export function renderDealHeader(root, { snap, tab, unit }) {
         ]),
       ]),
       el('div', { class: 'dhead__actions' }, [
-        tab === 'settings' ? null : unitSwitch(unit),
+        tab === 'settings' || tab === 'profit' ? null : unitSwitch(unit),
         exportMenu,
         moreMenu,
         button('ייבוא דוח שעות', { action: 'import-progress', iconName: 'upload', kind: 'primary', title: 'דוח שעות או חשבון — XLSX, CSV או PDF. אפשר גם לגרור קובץ לכל מקום במסך' }),
@@ -161,7 +161,7 @@ export function kpiTiles(snap, unit) {
     const gap = round2(snap.agreedFee - ref);
     tiles.push(tile({
       label: d.feeModel === 'capped' ? 'תקרת שכ"ט' : 'שכ"ט מוסכם',
-      tip: `רווח גולמי עד היום: ${fmtMoney(snap.margin)}${snap.marginPct === null ? '' : ` (${fmtPct(snap.marginPct, 1)})`}.`,
+      tip: `שכ"ט פחות שווי השעות עד היום: ${fmtMoney(snap.margin)}${snap.marginPct === null ? '' : ` (${fmtPct(snap.marginPct, 1)})`}. הרווחיות מול העלות הפנימית — בטאב "רווחיות".`,
       value: el('span', { class: 'tile__value num', text: fmtU(snap.agreedFee, 'money', d) }),
       sub: [hasEac ? 'מול התחזית: ' : 'מול הביצוע: ', el('span', { class: `num ${gap < 0 ? 'is-over' : ''}`.trim(), text: fmtDelta(gap, 'money', d) })],
       extra: tileBar(snap.agreedFee, top, 'fee'),

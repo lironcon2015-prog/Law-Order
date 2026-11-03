@@ -48,7 +48,7 @@
 - **טבלאות:** `th`/`td` עם `text-align: right` (לא `start`).
 - **מחסנית תווית↑/ערך↓** (`.total`, `.fact`, `.strip__item`, `.kpi__body`, `.team__stat`,
   `.dcard__nums > div`; ב-LexBudget: `.tile`, `.tile__leadtext`, `.fact`, `.duo__cell`, `.selbar__stat`,
-  `.trow__h`/`.trow__num`): `text-align: right` על **המכל**, לא על הערך.
+  `.trow__h`/`.trow__num`, `.pf-lever__res`, `.pf-sl__h`): `text-align: right` על **המכל**, לא על הערך.
 - כל דפוס חדש כזה — להוסיף לרשימה ב-`css/styles.css` באותה שורה.
 - **ריפוד ושוליים של תאי מספרים — פיזיים** (`padding-right/left`), לא `padding-inline-*`: בגלל ה-`direction: ltr`
   של התא, `inline-start` שלו הוא בצד שמאל — והמספר זז מהכותרת (קרה ב-LexBudget, נתפס באודיט).

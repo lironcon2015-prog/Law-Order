@@ -16,6 +16,14 @@ p.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); });
 
 await p.goto(URL_); await p.waitForTimeout(1600);
 await p.evaluate(() => window.lexBudget.seedDemo()); await p.waitForTimeout(2400);
+// עלויות — כדי שטאב הרווחיות ייבדק מלא (ולא במצב הריק)
+await p.evaluate(async () => {
+  const { store, render } = window.lexBudget;
+  await store.setSetting('costs', { byRole: { 'שותף': 620, 'עו"ד': 330, 'מתמחה': 140 }, defaultTarget: 0.4 });
+  const p0 = store.cache.people[0];
+  if (p0) await store.savePerson({ ...p0, cost: 450 });
+  render();
+}); await p.waitForTimeout(600);
 // תקרה נמוכה מהביצוע כדי שכרטיסי התקרה והתעריפים האפקטיביים יוצגו
 await p.evaluate(async () => { const s = window.lexBudget.store; const d = s.cache.deals[0]; d.feeModel = 'capped'; d.agreedFee = 50000; await s.saveDeal(d); });
 await p.waitForTimeout(1200);
@@ -124,7 +132,7 @@ for (const [width, unit] of [[1600, 'hours'], [1600, 'money'], [1366, 'hours'], 
   await p.locator(`[data-action="set-unit"][data-unit="${unit}"]`).first().click();
   await p.waitForTimeout(600);
   await p.locator('.tbl--deals tbody tr').first().click(); await p.waitForTimeout(800);
-  for (const tab of ['budget', 'reports', 'analysis', 'settings']) {
+  for (const tab of ['budget', 'reports', 'analysis', 'profit', 'settings']) {
     await p.locator(`.tab[data-tab="${tab}"]`).click();
     await p.waitForTimeout(700);
     if (tab === 'budget') {

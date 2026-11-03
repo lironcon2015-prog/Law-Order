@@ -227,6 +227,8 @@ export function normalizePerson(p) {
     aliases: Array.isArray(p?.aliases) ? [...new Set(p.aliases.filter(Boolean).map(String))] : [],
     active: p?.active === false ? false : true,
     notes: String(p?.notes ?? ''),
+    // עלות פנימית אישית לשעה (עלות מלאה) — null = לפי הדרגה. גוברת על עלות הדרגה בכל העסקאות
+    cost: p?.cost === null || p?.cost === undefined || p?.cost === '' || !(num(p.cost) > 0) ? null : num(p.cost),
     createdAt: p?.createdAt || new Date().toISOString(),
     updatedAt: p?.updatedAt || new Date().toISOString(),
   };
@@ -251,6 +253,9 @@ export function normalizeDeal(d, i = 0) {
     progressPct: Math.max(0, Math.min(100, num(d?.progressPct))),
     notes: String(d?.notes ?? ''),
     baseline: d?.baseline || null,       // תמונת מצב מאושרת של התקציב
+    // יעד שיעור רווחיות לעסקה — null = ברירת המחדל של המשרד (settings.costs.defaultTarget)
+    targetMargin: d?.targetMargin === null || d?.targetMargin === undefined || d?.targetMargin === '' ? null : Math.max(0, Math.min(0.95, num(d.targetMargin))),
+    profitScenarios: Array.isArray(d?.profitScenarios) ? d.profitScenarios.map(normalizeScenario) : [],
     order: Number.isFinite(d?.order) ? d.order : i,
     createdAt: d?.createdAt || new Date().toISOString(),
     updatedAt: d?.updatedAt || new Date().toISOString(),
@@ -1204,4 +1209,220 @@ export function progressByPeriod(snapshot, period = 'week') {
     acc += r.hours; accCost += r.cost;
     return { ...r, hours: round2(r.hours), cost: round2(r.cost), cumulativeHours: round2(acc), cumulativeCost: round2(accCost) };
   });
+}
+
+/* ============================================================
+ * רווחיות — הכנסה מול עלות פנימית
+ * ------------------------------------------------------------
+ * עלות פנימית לשעה (עלות מלאה, כולל תקורה): לפי הדרגה, אלא אם לאיש הצוות יש עלות אישית בספרייה.
+ * הכנסה = שווי השעות (שעות × תעריף), עד התקרה / השכ"ט המוסכם: מרגע שהשווי עובר אותה ההכנסה נעצרת
+ * והעלויות ממשיכות להצטבר. בשעתי — אין תקרה וההכנסה היא השווי.
+ * שעות "ללא שיוך" אינן מתומחרות (אין להן דרגה) — לא נכנסות לא להכנסה ולא לעלות, כמו בשאר המערכת.
+ * ============================================================ */
+
+/** הגדרות העלות — נשמרות ב-settings('costs'). byRole לפי שם דרגה מנורמל: עלות של המשרד, לא של תעריפון */
+export function normalizeCosts(c) {
+  const byRole = {};
+  for (const [k, v] of Object.entries(c?.byRole || {})) {
+    const n = num(v);
+    if (n > 0) byRole[normRoleName(k)] = n;
+  }
+  const t = c?.defaultTarget === undefined || c?.defaultTarget === null ? 0.4 : num(c.defaultTarget);
+  const w = c?.warnPts === undefined || c?.warnPts === null ? 0.07 : num(c.warnPts);
+  return { byRole, defaultTarget: Math.max(0, Math.min(0.95, t)), warnPts: Math.max(0, Math.min(0.5, w)) };
+}
+
+/** יעד הרווחיות של העסקה — דריסה בעסקה, אחרת ברירת המחדל של המשרד */
+export const dealTarget = (deal, costs) => (deal?.targetMargin === null || deal?.targetMargin === undefined ? costs.defaultTarget : deal.targetMargin);
+
+/** מצב מול היעד: ok / risk (עד warnPts מתחת) / over */
+export const marginTone = (m, target, warnPts = 0.07) => (m === null || m === undefined ? '' : m >= target ? 'ok' : m >= target - warnPts ? 'risk' : 'over');
+
+/** עלות לשעה של שורה: עלות אישית גוברת על עלות הדרגה */
+export function lineCostRate(line, costs, peopleById) {
+  const p = line.personId ? peopleById.get(line.personId) : null;
+  if (p && p.cost !== null && p.cost !== undefined && p.cost > 0) return { rate: p.cost, source: 'person' };
+  const r = costs.byRole[normRoleName(line.roleName)];
+  return r ? { rate: r, source: 'role' } : { rate: null, source: 'none' };
+}
+
+/** הדרגות מהבכירה לזוטרה (לפי תעריף) — בסיס לתרחישי מינוף, בלי להניח שמות */
+export function roleLadder(rateCard) {
+  return [...(rateCard?.roles || [])].sort((a, b) => num(b.rate) - num(a.rate) || Number(a.junior) - Number(b.junior));
+}
+
+/** שורות הרווחיות: לכל שורת תקציב — שעות בשלושת הבסיסים, תעריף ועלות לשעה */
+export function profitLines(snap, { costs, people }) {
+  const peopleById = new Map((people || []).map((p) => [p.id, p]));
+  const k = snap.eacHours !== null && snap.eacHours !== undefined && snap.actualHours > 0 ? snap.eacHours / snap.actualHours : null;
+  return snap.teams.flatMap((t) => t.lines.map((l) => {
+    const c = lineCostRate(l, costs, peopleById);
+    return {
+      lineId: l.id, teamId: t.id, teamName: t.name, color: t.color, kind: t.kind,
+      roleId: l.roleId, roleName: l.roleName, junior: l.junior, personId: l.personId, personName: l.personName,
+      rate: l.rate, costRate: c.rate, costSource: c.source,
+      plan: l.budgetHours, actual: l.actualHours, eac: k === null ? null : round2(l.actualHours * k),
+    };
+  }));
+}
+
+/** סיכום בסיס אחד (plan / actual / eac / sim) */
+export function profitTotals(lines, key, { cap = Infinity, writeOff = 0, target = 0.4 } = {}) {
+  let hours = 0, value = 0, cost = 0;
+  for (const l of lines) {
+    const h = num(l[key]);
+    hours += h; value += h * l.rate; cost += h * (l.costRate || 0);
+  }
+  const gross = Math.min(value, cap);
+  const revenue = gross * (1 - writeOff);
+  const profit = revenue - cost;
+  return {
+    hours: round2(hours), value: round2(value), cost: round2(cost), revenue: round2(revenue), profit: round2(profit),
+    margin: revenue > 0 ? profit / revenue : null,
+    capped: Number.isFinite(cap) && value > cap,
+    // ההכנסה הנדרשת כדי שהרווחיות תעמוד ביעד (לפני הנחה/מחיקה — מתוקן אליה)
+    required: target < 1 ? round2(cost / (1 - target) / (1 - writeOff || 1)) : null,
+    avgCost: hours > 0 ? cost / hours : 0,
+    avgRate: hours > 0 ? revenue / hours : 0,
+  };
+}
+
+/**
+ * תרחיש: משנה רק את **השעות שנותרו** (מהבסיס — תחזית לסיום, ואם אין — התקציב); הביצוע עד היום קבוע.
+ * sc = { remainingFactor, shifts: [{ from, to, pct }], fee, writeOff }. הזזה בין דרגות (מזהה דרגה):
+ * השעות שהועברו מתחלקות בין שורות דרגת היעד לפי משקל השעות שנותרו להן (ואם אין — שווה בשווה).
+ */
+export function applyScenario(lines, sc = {}, baseKey = 'eac') {
+  const f = sc.remainingFactor === undefined || sc.remainingFactor === null ? 1 : Math.max(0, num(sc.remainingFactor));
+  const out = lines.map((l) => {
+    const base = num(l[baseKey] ?? l.plan);
+    const rem = Math.max(0, base - l.actual) * f;
+    return { ...l, rem };
+  });
+  for (const s of sc.shifts || []) {
+    const pct = Math.max(0, Math.min(1, num(s.pct)));
+    if (!pct || !s.from || !s.to || s.from === s.to) continue;
+    const to = out.filter((l) => l.roleId === s.to);
+    if (!to.length) continue;
+    let moved = 0;
+    for (const l of out) if (l.roleId === s.from) { const m = l.rem * pct; l.rem -= m; moved += m; }
+    const w = to.reduce((a, l) => a + l.rem, 0);
+    for (const l of to) l.rem += moved * (w > 0 ? l.rem / w : 1 / to.length);
+  }
+  return out.map(({ rem, ...l }) => ({ ...l, sim: round2(l.actual + rem) }));
+}
+
+/** פילוח לפי צוות / דרגה / אדם. ההכנסה מתחלקת לפי שווי השעות של הקבוצה מתוך השווי הכולל */
+export function profitBreakdown(lines, key, by, total) {
+  const keyOf = { team: (l) => l.teamId, role: (l) => normRoleName(l.roleName), person: (l) => l.personId || `${l.teamId}|${l.lineId}` }[by];
+  const map = new Map();
+  for (const l of lines) {
+    const id = keyOf(l);
+    const g = map.get(id) || {
+      id, name: by === 'team' ? l.teamName : by === 'role' ? l.roleName : (l.personName || `${l.roleName} · ${l.teamName}`),
+      color: l.color, sub: by === 'person' ? l.roleName : '', hours: 0, value: 0, cost: 0, missing: false, costRates: new Set(),
+    };
+    const h = num(l[key]);
+    g.hours += h; g.value += h * l.rate; g.cost += h * (l.costRate || 0);
+    if (l.costRate === null && h > 0) g.missing = true;
+    if (l.costRate) g.costRates.add(l.costRate);
+    map.set(id, g);
+  }
+  const share = total.value > 0 ? total.revenue / total.value : 0;
+  return [...map.values()].filter((g) => g.hours > 0).map((g) => {
+    const revenue = g.value * share;
+    const profit = revenue - g.cost;
+    return {
+      ...g, costRates: [...g.costRates],
+      hours: round2(g.hours), value: round2(g.value), cost: round2(g.cost), revenue: round2(revenue), profit: round2(profit),
+      margin: revenue > 0 ? profit / revenue : null,
+      profitShare: total.profit ? profit / total.profit : null,
+    };
+  }).sort((a, b) => b.revenue - a.revenue);
+}
+
+/** הכל לטאב הרווחיות */
+export function computeProfit(snap, { costs: rawCosts, people, target: targetOverride = null, scenarios = [] } = {}) {
+  const costs = normalizeCosts(rawCosts);
+  const deal = snap.deal;
+  const target = targetOverride ?? dealTarget(deal, costs);
+  const hasCap = deal.feeModel !== 'hourly' && snap.agreedFee > 0;
+  const cap = hasCap ? snap.agreedFee : Infinity;
+  const lines = profitLines(snap, { costs, people });
+  const opt = { cap, target };
+
+  const relevant = lines.filter((l) => l.plan > 0 || l.actual > 0);
+  const missing = relevant.filter((l) => l.costRate === null);
+  const configured = relevant.length > 0 && missing.length < relevant.length;
+
+  const bases = {
+    plan: profitTotals(lines, 'plan', opt),
+    actual: profitTotals(lines, 'actual', opt),
+    eac: lines.some((l) => l.eac !== null) ? profitTotals(lines, 'eac', opt) : null,
+  };
+  const mainKey = bases.eac ? 'eac' : 'plan';
+  const main = bases[mainKey];
+
+  // תרחישים מוכנים — לפי סולם הדרגות של התעריפון (בכירה → אמצעית → זוטרה)
+  const ladder = roleLadder(snap.rateCard).filter((r) => lines.some((l) => l.roleId === r.id));
+  const top = ladder[0], mid = ladder.length > 2 ? ladder[1] : ladder[ladder.length - 1], low = ladder[ladder.length - 1];
+  const presets = [{ id: 'base', name: mainKey === 'eac' ? 'תחזית לסיום' : 'התקציב', desc: 'המגמה הנוכחית', sc: {} },
+    { id: 'over10', name: 'חריגה נוספת 10%', desc: 'השעות שנותרו × 1.1', sc: { remainingFactor: 1.1 } }];
+  if (top && mid && top.id !== mid.id) presets.push({ id: 'lev1', name: `מינוף — 40% משעות ${top.name} ל${mid.name}`, desc: 'בשעות שנותרו', sc: { shifts: [{ from: top.id, to: mid.id, pct: 0.4 }] } });
+  if (ladder.length > 2 && mid.id !== low.id) presets.push({ id: 'lev2', name: `מינוף — 30% משעות ${mid.name} ל${low.name}`, desc: 'בשעות שנותרו', sc: { shifts: [{ from: mid.id, to: low.id, pct: 0.3 }] } });
+  if (hasCap && main.required && main.required > cap) presets.push({ id: 'fee', name: `הגדלת התקרה ל-${fmtMoney(main.required)}`, desc: main.required > main.value ? 'לבדה — ההכנסה נעצרת בשווי השעות' : 'השכ"ט הנדרש ליעד', sc: { fee: main.required } });
+
+  const runScenario = (sc) => {
+    const simLines = applyScenario(lines, sc, mainKey);
+    const fee = sc.fee ? num(sc.fee) : null;
+    return { lines: simLines, totals: profitTotals(simLines, 'sim', { cap: fee ? fee : cap, writeOff: num(sc.writeOff), target }) };
+  };
+  const scenarioRows = [...presets.map((p) => ({ ...p, preset: true })), ...(scenarios || []).map((s) => ({ id: s.id, name: s.name, desc: describeScenario(s, snap.rateCard), sc: s, preset: false }))]
+    .map((s) => ({ ...s, ...runScenario(s.sc), fee: s.sc.fee ? num(s.sc.fee) : cap }));
+
+  // מנופים — מהבסיס הראשי (תחזית לסיום, ואם אין — תקציב)
+  const lev = scenarioRows.find((s) => s.id === 'lev1');
+  const levers = {
+    fee: { required: main.required, delta: main.required === null ? null : round2(main.required - main.revenue) },
+    rate: main.hours > 0 && main.required ? { current: main.revenue / main.hours, required: main.required / main.hours } : null,
+    hoursCap: hasCap && main.avgCost > 0 ? (() => {
+      const maxHours = (cap * (1 - target)) / main.avgCost;
+      return { maxHours: round2(maxHours), remainingAllowed: round2(maxHours - bases.actual.hours), remainingPlanned: round2(main.hours - bases.actual.hours) };
+    })() : null,
+    leverage: lev ? { name: lev.name, margin: lev.totals.margin, delta: lev.totals.margin === null || main.margin === null ? null : lev.totals.margin - main.margin } : null,
+    breakEven: hasCap && main.avgCost > 0 ? { hours: round2(cap / main.avgCost), cushion: round2(cap / main.avgCost - main.hours) } : null,
+  };
+
+  return {
+    deal, costs, target, warnPts: costs.warnPts, hasCap, cap, feeModel: deal.feeModel,
+    configured, missing, lines, bases, mainKey, main, ladder, scenarios: scenarioRows, levers, runScenario,
+    breakdown: (k, by) => profitBreakdown(lines, k, by, bases[k] || main),
+    unassignedHours: snap.unassignedHours || 0,
+  };
+}
+
+/** תיאור קצר של תרחיש שמור */
+export function describeScenario(s, rateCard) {
+  const name = (id) => (rateCard?.roles || []).find((r) => r.id === id)?.name || '—';
+  const parts = [];
+  if (s.remainingFactor !== undefined && s.remainingFactor !== null && num(s.remainingFactor) !== 1) {
+    const d = num(s.remainingFactor) - 1;
+    parts.push(`שעות שנותרו ${d > 0 ? '+' : '−'}${Math.round(Math.abs(d) * 100)}%`);
+  }
+  for (const sh of s.shifts || []) if (num(sh.pct) > 0) parts.push(`${Math.round(num(sh.pct) * 100)}% ${name(sh.from)} → ${name(sh.to)}`);
+  if (s.fee) parts.push(`שכ"ט ${fmtMoney(s.fee)}`);
+  if (num(s.writeOff) > 0) parts.push(`מחיקה ${Math.round(num(s.writeOff) * 100)}%`);
+  return parts.join(' · ') || 'ללא שינוי';
+}
+
+/** תרחיש שמור על העסקה */
+export function normalizeScenario(s) {
+  return {
+    id: s?.id || uid('sc'),
+    name: String(s?.name ?? 'תרחיש'),
+    remainingFactor: s?.remainingFactor === undefined || s?.remainingFactor === null ? 1 : num(s.remainingFactor),
+    shifts: Array.isArray(s?.shifts) ? s.shifts.filter((x) => x && x.from && x.to).map((x) => ({ from: String(x.from), to: String(x.to), pct: num(x.pct) })) : [],
+    fee: s?.fee ? num(s.fee) : null,
+    writeOff: num(s?.writeOff),
+  };
 }

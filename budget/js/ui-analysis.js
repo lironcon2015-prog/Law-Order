@@ -90,11 +90,11 @@ export function renderAnalysisTab(root, { snap, unit = 'hours' }) {
         ]),
       ]),
     ]);
-    // רווחיות — לצד פירוק הפער (במסך רחב)
-    const profit = snap.hasFee ? card({ title: 'רווחיות' }, [el('div', { class: 'facts facts--2' }, [
+    // מימוש שכ"ט — השכ"ט מול שווי השעות לפי תעריף (לא רווחיות: אין כאן עלות פנימית — היא בטאב הרווחיות)
+    const profit = snap.hasFee ? card({ title: 'מימוש שכ"ט', info: 'השכ"ט המוסכם מול שווי השעות לפי תעריף. זה לא רווח — הרווחיות מול העלות הפנימית נמצאת בטאב "רווחיות".' }, [el('div', { class: 'facts facts--2' }, [
       fact(d.feeModel === 'capped' ? 'תקרת שכ"ט' : 'שכ"ט מוסכם', fmtMoney(snap.agreedFee)),
-      fact('רווח גולמי עד היום', fmtMoney(snap.margin), snap.margin < 0 ? 'neg' : ''),
-      fact('שיעור רווח', snap.marginPct === null ? '—' : fmtPct(snap.marginPct, 1), snap.margin < 0 ? 'neg' : ''),
+      fact('שכ"ט פחות שווי השעות עד היום', fmtMoney(snap.margin), snap.margin < 0 ? 'neg' : ''),
+      fact('יתרה מהשכ"ט', snap.marginPct === null ? '—' : fmtPct(snap.marginPct, 1), snap.margin < 0 ? 'neg' : ''),
       snap.eac !== null ? fact('פער צפוי בסיום', fmtDelta(snap.agreedFee - snap.eac, 'money'), snap.agreedFee - snap.eac < 0 ? 'neg' : '') : null,
     ])]) : null;
     root.append(el('div', { class: 'pair' }, [gapCard, profit]));

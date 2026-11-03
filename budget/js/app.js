@@ -6,6 +6,7 @@ import * as db from './db.js';
 import {
   computeDeal, dealReview, aggregateByKind, uid, num, round2, fmtPct, fmtHours, roundUpHours, sourceLabel,
   DEFAULT_TEAM_NAMES, DEAL_STATUSES,
+  computeProfit, normalizeCosts, normalizeScenario, describeScenario, normRoleName, fmtMoney,
   normalizeSplits, splitsTotal, isOpenDeal, todayISO, monthEndISO, cleanTag, teamTag, defaultTeamTag,
 } from './model.js';
 import * as ui from './ui.js';
@@ -43,7 +44,7 @@ function nextSort(current, key, defaults) {
 
 /** טאבים שבוטלו באיחוד המסכים → הטאב שקלט את התוכן שלהם */
 const LEGACY_TAB = { actuals: 'reports', progress: 'reports', control: 'analysis', review: 'analysis' };
-const TABS = ['budget', 'reports', 'analysis', 'settings'];
+const TABS = ['budget', 'reports', 'analysis', 'profit', 'settings'];
 const normTab = (t) => { const v = LEGACY_TAB[t] || t; return TABS.includes(v) ? v : 'budget'; };
 
 function readKindsOpen() {
@@ -53,7 +54,7 @@ function readKindsOpen() {
 const state = {
   view: 'overview',        // 'overview' | 'deal' | 'rates' | 'people'
   dealId: null,
-  tab: 'budget',           // 'budget' | 'reports' | 'analysis' | 'settings'
+  tab: 'budget',           // 'budget' | 'reports' | 'analysis' | 'profit' | 'settings'
   // יחידת התצוגה: כל מספר על המסך בשעות או ב-₪ — לא שניהם יחד
   unit: localStorage.getItem('lb_unit') === 'money' ? 'money' : 'hours',
   theme: ['midnight', 'charcoal'].includes(document.documentElement.dataset.theme) ? document.documentElement.dataset.theme : 'sapphire',
@@ -71,7 +72,22 @@ const state = {
   dealSort: readSort(localStorage.getItem('lb_dealSort')),   // null = הסדר הידני
   dealQuery: '',                                             // חיפוש ברשימת התיק — לא נשמר
   sideRail: localStorage.getItem('lb_side') === 'rail',     // סרגל מכווץ לאייקונים
+  // טאב הרווחיות: בסיס החישוב, הפילוח, ומצב הסימולטור (לעסקה הפעילה בלבד — לא נשמר)
+  profitBasis: ['plan', 'actual', 'eac'].includes(localStorage.getItem('lb_pfBasis')) ? localStorage.getItem('lb_pfBasis') : 'eac',
+  profitBy: ['team', 'role', 'person'].includes(localStorage.getItem('lb_pfBy')) ? localStorage.getItem('lb_pfBy') : 'team',
+  profitSim: { dealId: null },
 };
+
+/** חישוב הרווחיות לעסקה — רק כשהטאב פתוח (העלויות לא נכנסות לשום מסך אחר) */
+function profitOf(snap) {
+  return computeProfit(snap, {
+    costs: store.getSetting('costs', {}), people: store.cache.people, scenarios: snap.deal.profitScenarios || [],
+  });
+}
+function simState(dealId) {
+  if (state.profitSim.dealId !== dealId) state.profitSim = { dealId, remaining: 0, shift1: 0, shift2: 0, writeOff: 0, fee: '' };
+  return state.profitSim;
+}
 
 let els = {};
 let importCtx = null;
@@ -160,7 +176,7 @@ function render() {
   els.main.replaceChildren();
 
   if (state.view === 'rates') {
-    ui.renderRatesView(els.main, { rateCards: store.cache.rateCards, deals: store.cache.deals });
+    ui.renderRatesView(els.main, { rateCards: store.cache.rateCards, deals: store.cache.deals, costs: normalizeCosts(store.getSetting('costs', {})) });
     return setMobileTitle('תעריפונים');
   }
 
@@ -200,6 +216,8 @@ function render() {
       });
     } else if (state.tab === 'analysis') {
       ui.renderAnalysisTab(page, { snap, unit: state.unit });
+    } else if (state.tab === 'profit') {
+      ui.renderProfitTab(page, { snap, P: profitOf(snap), basis: state.profitBasis, by: state.profitBy, sim: simState(snap.deal.id) });
     } else {
       ui.renderDealSettings(page, { snap, rateCards: store.cache.rateCards });
       refreshFolderState();
@@ -1088,6 +1106,50 @@ async function onClick(e) {
     case 'export-review':
       return exportReviewCSV();
 
+    case 'export-profit':
+      return exportProfit();
+
+    case 'set-profit-basis':
+      state.profitBasis = target.dataset.basis;
+      localStorage.setItem('lb_pfBasis', state.profitBasis);
+      return render();
+
+    case 'set-profit-by':
+      state.profitBy = target.dataset.by;
+      localStorage.setItem('lb_pfBy', state.profitBy);
+      return render();
+
+    case 'reset-profit-target':
+      await store.saveDeal({ id: state.dealId, targetMargin: null });
+      markDirty();
+      return render();
+
+    case 'reset-sim':
+      state.profitSim = { dealId: null };
+      return render();
+
+    case 'save-scenario': {
+      const deal = store.getDeal(state.dealId);
+      const snap = currentSnapshot();
+      if (!deal || !snap) return;
+      const sc = ui.simToScenario(simState(deal.id), profitOf(snap));
+      if (sc.remainingFactor === 1 && !sc.shifts.length && !sc.fee && !sc.writeOff) return ui.toast('הסימולטור במצב הבסיס — אין מה לשמור');
+      const list = deal.profitScenarios || [];
+      const saved = normalizeScenario({ ...sc, name: `תרחיש ${list.length + 1}` });
+      await store.saveDeal({ id: deal.id, profitScenarios: [...list, saved] });
+      markDirty();
+      ui.toast(`נשמר: ${describeScenario(saved, snap.rateCard)}`);
+      return render();
+    }
+
+    case 'delete-scenario': {
+      const deal = store.getDeal(state.dealId);
+      if (!deal) return;
+      await store.saveDeal({ id: deal.id, profitScenarios: (deal.profitScenarios || []).filter((s) => s.id !== target.dataset.id) });
+      markDirty();
+      return render();
+    }
+
     case 'clone-from-actual': {
       const deal = store.getDeal(state.dealId);
       return confirmModal('עסקה חדשה לפי הביצוע', `תיווצר עסקה חדשה עם אותם צוותים ושורות, כשהשעות המוערכות בה הן השעות שבוצעו בפועל ב"${deal.name}". הדיווחים לא מועתקים.`, async () => {
@@ -1270,6 +1332,16 @@ function onInput(e) {
   if (e.target.dataset?.peopleSearch !== undefined) return ui.filterPeople(e.target.value);
   const node = e.target;
 
+  // סימולטור הרווחיות — עדכון חי של התוצאה בלבד, בלי רינדור מלא
+  if (node.dataset.sim && state.dealId) {
+    const sim = simState(state.dealId);
+    sim[node.dataset.sim] = node.dataset.sim === 'fee' ? node.value : num(node.value);
+    ui.refreshSimLabels(sim);
+    const out = document.getElementById('pf-sim-out');
+    const snap = currentSnapshot();
+    if (out && snap) ui.fillSimOut(out, profitOf(snap), sim);
+    return;
+  }
 
   const field = node.dataset.field;
   if (!field) return;
@@ -1360,6 +1432,28 @@ async function onChange(e) {
     return;
   }
 
+  // יעד הרווחיות לעסקה (באחוזים)
+  if (node.dataset.profit === 'target' && state.dealId) {
+    const v = node.value === '' ? null : Math.max(0, Math.min(95, num(node.value))) / 100;
+    await store.saveDeal({ id: state.dealId, targetMargin: v });
+    markDirty();
+    return render();
+  }
+
+  // עלויות — לפי שם דרגה, ויעד ברירת המחדל (מסך התעריפונים)
+  if (node.dataset.costRole !== undefined || node.dataset.costSetting) {
+    const costs = normalizeCosts(store.getSetting('costs', {}));
+    if (node.dataset.costRole !== undefined) {
+      const k = normRoleName(node.dataset.costRole);
+      if (num(node.value) > 0) costs.byRole[k] = num(node.value); else delete costs.byRole[k];
+    } else if (node.dataset.costSetting === 'defaultTarget') costs.defaultTarget = Math.max(0, Math.min(95, num(node.value))) / 100;
+    else if (node.dataset.costSetting === 'warnPts') costs.warnPts = Math.max(0, Math.min(50, num(node.value))) / 100;
+    await store.setSetting('costs', costs);
+    markDirty();
+    ui.toast('העלויות עודכנו');
+    return render();
+  }
+
   // עריכה בשורה במסך אנשי הצוות
   if (node.dataset.pfield && node.dataset.personId) {
     const person = store.personById(node.dataset.personId);
@@ -1397,7 +1491,18 @@ async function onChange(e) {
     if (!card) return;
     const role = node.dataset.roleId ? card.roles.find((r) => r.id === node.dataset.roleId) : null;
     if (node.dataset.field === 'name') card.name = node.value;
-    else if (role && node.dataset.field === 'roleName') role.name = node.value;
+    else if (role && node.dataset.field === 'roleName') {
+      // העלות שמורה לפי שם הדרגה — שינוי שם מעביר אותה (אם אין דרגה אחרת בשם הישן)
+      const from = normRoleName(role.name), to = normRoleName(node.value);
+      const costs = normalizeCosts(store.getSetting('costs', {}));
+      const stillUsed = store.cache.rateCards.some((c) => c.roles.some((r) => r !== role && normRoleName(r.name) === from));
+      if (costs.byRole[from] && !costs.byRole[to] && from !== to) {
+        costs.byRole[to] = costs.byRole[from];
+        if (!stillUsed) delete costs.byRole[from];
+        await store.setSetting('costs', costs);
+      }
+      role.name = node.value;
+    }
     else if (role && node.dataset.field === 'roleRate') role.rate = num(node.value);
     else if (role && node.dataset.field === 'roleJunior') role.junior = node.checked;
     await store.saveRateCard(card);
@@ -2220,6 +2325,57 @@ function downloadFile(name, content, type = 'text/csv;charset=utf-8') {
 }
 
 function stamp() { return todayISO(); }
+
+/** ייצוא הרווחיות — רק בבחירה מפורשת (נתוני עלות פנימיים) */
+function exportProfit() {
+  const snap = currentSnapshot();
+  if (!snap) return;
+  const P = profitOf(snap);
+  if (!P.configured) return ui.toast('לא הוגדרו עלויות — אין מה לייצא', 'error');
+  const key = state.profitBasis === 'eac' && !P.bases.eac ? P.mainKey : state.profitBasis;
+  const label = { plan: 'תקציב', actual: 'עד היום', eac: 'תחזית לסיום' };
+  const row = (k) => { const x = P.bases[k]; return x ? [label[k], x.hours, x.revenue, x.cost, x.profit, x.margin ?? '', x.margin === null ? '' : x.margin - P.target, x.required ?? ''] : null; };
+  const brk = (by, title) => ({
+    name: title,
+    blocks: [
+      { t: 'title', text: `רווחיות לפי ${title.replace('לפי ', '')} — ${snap.deal.name}` },
+      { t: 'sub', text: `${label[key]} · יעד ${fmtPct(P.target)} · הופק ב-${stamp()}` },
+      { t: 'gap' },
+      { t: 'table',
+        head: [title.replace('לפי ', ''), 'שעות', 'הכנסה', 'עלות', 'רווח', 'רווחיות', 'חלק מהרווח'],
+        fmt: ['text', 'hours', 'money', 'money', 'money', 'pct', 'pct'],
+        rows: P.breakdown(key, by).map((g) => [g.sub ? `${g.name} · ${g.sub}` : g.name, g.hours, g.revenue, g.cost, g.profit, g.margin ?? '', g.profitShare ?? '']),
+        total: ['סה"כ', P.bases[key].hours, P.bases[key].revenue, P.bases[key].cost, P.bases[key].profit, P.bases[key].margin ?? '', 1] },
+    ],
+  });
+  downloadWorkbook(`רווחיות — ${snap.deal.name} — ${stamp()}`, [{
+    name: 'סיכום',
+    blocks: [
+      { t: 'title', text: `רווחיות — ${snap.deal.name}` },
+      { t: 'sub', text: `${snap.deal.client || ''} · פנימי בלבד · הופק ב-${stamp()}` },
+      { t: 'gap' },
+      { t: 'kv', rows: [
+        ['יעד רווחיות', P.target, 'pct'],
+        [P.hasCap ? 'שכ"ט מוסכם / תקרה' : 'מודל שכ"ט', P.hasCap ? P.cap : 'שעתי', P.hasCap ? 'money' : 'text'],
+      ] },
+      { t: 'gap' },
+      { t: 'table',
+        head: ['בסיס', 'שעות', 'הכנסה', 'עלות', 'רווח', 'רווחיות', 'מול היעד', 'שכ"ט נדרש ליעד'],
+        fmt: ['text', 'hours', 'money', 'money', 'money', 'pct', 'pct', 'money'],
+        rows: ['plan', 'actual', 'eac'].map(row).filter(Boolean) },
+    ],
+  }, brk('team', 'לפי צוות'), brk('role', 'לפי דרגה'), brk('person', 'לפי אדם'), {
+    name: 'תרחישים',
+    blocks: [
+      { t: 'title', text: `תרחישים — ${snap.deal.name}` },
+      { t: 'gap' },
+      { t: 'table',
+        head: ['תרחיש', 'פירוט', 'שעות', 'הכנסה', 'עלות', 'רווח', 'רווחיות', 'שכ"ט נדרש ליעד'],
+        fmt: ['text', 'text', 'hours', 'money', 'money', 'money', 'pct', 'money'],
+        rows: P.scenarios.map((x) => [x.name, x.desc, x.totals.hours, x.totals.revenue, x.totals.cost, x.totals.profit, x.totals.margin ?? '', x.totals.required ?? '']) },
+    ],
+  }]);
+}
 
 function exportDealCSV() {
   const snap = currentSnapshot();

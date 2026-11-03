@@ -2,7 +2,7 @@
 // app-shell = network-first (פרסומים נכנסים לתוקף מיד), פונטים/אייקונים = cache-first.
 // offline עובד מלא: כל הנתונים ב-IndexedDB, ה-shell במטמון.
 
-const CACHE = 'lexbudget-v36';
+const CACHE = 'lexbudget-v37';
 
 const ASSETS = [
   './',
@@ -20,6 +20,7 @@ const ASSETS = [
   './js/ui-deal.js',
   './js/ui-reports.js',
   './js/ui-analysis.js',
+  './js/ui-profit.js',
   './js/ui-admin.js',
   './js/charts.js',
   './js/importer.js',

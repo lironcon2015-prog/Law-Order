@@ -1,7 +1,7 @@
 // ui-admin.js — מסכי ניהול: הגדרות עסקה, ספריית אנשי הצוות, תעריפונים, וטפסי המודאלים
 // (עסקה חדשה, בורר אנשים, אנשי קשר, ייבוא תקציב).
 
-import { DEAL_STATUSES, FEE_MODELS, DEAL_TYPES, dealTypeOf, fmtMoney, fmtHours, fmtPct } from './model.js';
+import { DEAL_STATUSES, FEE_MODELS, DEAL_TYPES, dealTypeOf, fmtMoney, fmtHours, fmtPct, normRoleName } from './model.js';
 import { BUILD } from './version.js';
 import { personKey } from './importer.js';
 import {
@@ -180,6 +180,7 @@ export function renderPeopleView(root, { people, usageOf, dupes = [] }) {
         ]),
       ])]),
       el('td', {}, [el('input', { class: 'qinput', value: person.title, placeholder: 'שותף / עו״ד', dataset: { pfield: 'title', personId: person.id }, 'aria-label': 'תפקיד' })]),
+      el('td', { class: 'c-cost' }, [el('input', { class: 'qinput num', type: 'number', min: '0', step: '10', value: person.cost === null || person.cost === undefined ? '' : String(person.cost), placeholder: 'לפי הדרגה', title: 'עלות פנימית אישית לשעה — גוברת על עלות הדרגה בכל העסקאות. ריק = לפי הדרגה', dataset: { pfield: 'cost', personId: person.id }, 'aria-label': 'עלות אישית לשעה' })]),
       el('td', {}, [el('input', { class: 'qinput', value: person.defaultTeamName, placeholder: 'צוות ברירת מחדל', dataset: { pfield: 'defaultTeamName', personId: person.id }, 'aria-label': 'צוות' })]),
       el('td', {}, [el('input', { class: 'qinput ltr', type: 'email', value: person.email, placeholder: 'name@firm.co.il', dataset: { pfield: 'email', personId: person.id }, 'aria-label': 'דוא״ל' })]),
       el('td', {}, [el('input', { class: 'qinput ltr', value: person.phone, placeholder: '050-0000000', dataset: { pfield: 'phone', personId: person.id }, 'aria-label': 'טלפון' })]),
@@ -202,11 +203,11 @@ export function renderPeopleView(root, { people, usageOf, dupes = [] }) {
     el('div', { class: 'tbl-wrap' }, el('table', { class: 'tbl tbl--people' }, [
       el('thead', {}, el('tr', {}, [
         el('th', { class: 'c-pick' }, [el('input', { type: 'checkbox', dataset: { pick: 'people-all' }, 'aria-label': 'סימון הכל' })]),
-        el('th', { text: 'שם' }), el('th', { text: 'תפקיד' }), el('th', { text: 'צוות' }),
+        el('th', { text: 'שם' }), el('th', { text: 'תפקיד' }), el('th', { class: 'c-cost', text: 'עלות אישית ₪/ש׳', title: 'עלות פנימית לשעה — ריק = לפי הדרגה' }), el('th', { text: 'צוות' }),
         el('th', { text: 'דוא"ל' }), el('th', { text: 'טלפון' }), el('th', { text: 'עסקאות', title: 'בכמה עסקאות משויך לשורת תקציב' }),
         el('th', { text: 'פעיל' }), el('th', { class: 'c-tools' }),
       ])),
-      el('tbody', { class: 'has-more' }, limitItems(rows, 40, { colspan: 9, noun: 'אנשים' })),
+      el('tbody', { class: 'has-more' }, limitItems(rows, 40, { colspan: 10, noun: 'אנשים' })),
     ])),
   ]));
 }
@@ -235,6 +236,7 @@ export function renderPersonForm(person = {}) {
     field('שם מלא', el('input', { class: 'input', name: 'name', value: person.name || '', required: 'required', placeholder: 'לדוגמה: דנה כהן' })),
     el('div', { class: 'grid-2' }, [
       field('תפקיד', el('input', { class: 'input', name: 'title', value: person.title || '', placeholder: 'שותף / עו״ד / מתמחה' })),
+      field('עלות אישית לשעה (₪)', el('input', { class: 'input num', type: 'number', min: '0', step: '10', name: 'cost', value: person.cost === null || person.cost === undefined ? '' : String(person.cost), placeholder: 'לפי הדרגה' }), 'עלות פנימית מלאה (כולל תקורה). גוברת על עלות הדרגה בכל העסקאות; ריק = לפי הדרגה.'),
       field('צוות ברירת מחדל', el('input', { class: 'input', name: 'defaultTeamName', value: person.defaultTeamName || '', placeholder: 'לדוגמה: קורפורייט' })),
       field('דוא"ל', el('input', { class: 'input ltr', type: 'email', name: 'email', value: person.email || '', placeholder: 'name@firm.co.il' })),
       field('טלפון', el('input', { class: 'input ltr', name: 'phone', value: person.phone || '', placeholder: '050-0000000' })),
@@ -347,7 +349,7 @@ export function renderContactsImportPreview({ rows, header, mapping, fileName, s
    תעריפונים — משותפים לכל העסקאות
    ============================================================ */
 
-export function renderRatesView(root, { rateCards, deals }) {
+export function renderRatesView(root, { rateCards, deals, costs = null }) {
   root.replaceChildren();
   const page = el('div', { class: 'page' });
   root.append(page);
@@ -357,6 +359,7 @@ export function renderRatesView(root, { rateCards, deals }) {
     ]),
     el('div', { class: 'phead__actions' }, [button('תעריפון חדש', { action: 'new-ratecard', iconName: 'plus', kind: 'primary' })]),
   ]));
+  if (costs) page.append(costsCard(rateCards, costs));
 
   for (const rc of rateCards) {
     const used = deals.filter((d) => d.rateCardId === rc.id).length;
@@ -388,6 +391,49 @@ export function renderRatesView(root, { rateCards, deals }) {
     ]));
   }
 }
+
+/**
+ * עלויות פנימיות — לפי **שם** דרגה (איחוד הדרגות מכל התעריפונים), כי עלות שותף היא עלות של המשרד
+ * ולא של תעריפון לקוח. עלות מלאה, כולל תקורה. עלות אישית — בספריית אנשי הצוות.
+ */
+function costsCard(rateCards, costs) {
+  const main = rateCards.find((c) => c.isDefault) || rateCards[0];
+  const seen = new Map();
+  for (const rc of [main, ...rateCards].filter(Boolean)) for (const r of rc.roles) {
+    const k = normRoleName(r.name);
+    if (!seen.has(k)) seen.set(k, { name: r.name, rate: num0(r.rate), junior: r.junior });
+  }
+  const roles = [...seen.entries()].sort((a, b) => b[1].rate - a[1].rate);
+  const pct = (v) => String(Math.round(v * 100));
+  return el('section', { class: 'card costs-card' }, [
+    el('header', { class: 'card__head' }, [el('div', {}, [
+      el('h2', { class: 'card__title' }, ['עלות פנימית לשעה', infoTip('עלות מלאה לשעה — שכר, הטבות ותקורה. משמשת את טאב הרווחיות בכל העסקאות. לפי שם הדרגה (בכל התעריפונים); איש צוות עם עלות שונה — עלות אישית בספריית אנשי הצוות, והיא גוברת.')]),
+      el('p', { class: 'card__sub', text: `לפי דרגה · מרווח מול "${main?.name || 'התעריפון'}" · נתון פנימי` }),
+    ])]),
+    el('div', { class: 'costs-grid' }, [
+      el('div', { class: 'tbl-wrap' }, el('table', { class: 'tbl tbl--costs' }, [
+        el('thead', {}, el('tr', {}, ['דרגה', 'תעריף', 'עלות לשעה (₪)', 'מרווח לשעה', 'מרווח %'].map((t) => el('th', { text: t })))),
+        el('tbody', {}, roles.map(([k, r]) => {
+          const c = costs.byRole[k] || 0;
+          const m = r.rate > 0 && c > 0 ? (r.rate - c) / r.rate : null;
+          const tone = m === null ? '' : m >= costs.defaultTarget ? 'is-ok' : m >= costs.defaultTarget - costs.warnPts ? 'is-risk' : 'is-over';
+          return el('tr', {}, [
+            el('td', { class: 'strong', text: r.name }),
+            el('td', {}, el('span', { class: 'num', text: fmtMoney(r.rate) })),
+            el('td', {}, [el('input', { class: 'qinput num', type: 'number', min: '0', step: '10', value: c ? String(c) : '', placeholder: 'לא הוגדר', dataset: { costRole: r.name }, 'aria-label': `עלות לשעה — ${r.name}` })]),
+            el('td', {}, el('span', { class: 'num', text: c ? fmtMoney(r.rate - c) : '—' })),
+            el('td', {}, el('span', { class: `num ${tone}`.trim(), text: m === null ? '—' : fmtPct(m, 1) })),
+          ]);
+        })),
+      ])),
+      el('div', { class: 'costs-side' }, [
+        field('יעד רווחיות ברירת מחדל (%)', el('input', { class: 'input num', type: 'number', min: '0', max: '95', step: '1', value: pct(costs.defaultTarget), dataset: { costSetting: 'defaultTarget' } }), 'לכל עסקה; אפשר לקבוע יעד אחר בטאב הרווחיות של העסקה.'),
+        field('סף אזהרה (נקודות מתחת ליעד)', el('input', { class: 'input num', type: 'number', min: '0', max: '50', step: '1', value: pct(costs.warnPts), dataset: { costSetting: 'warnPts' } }), 'עד כמה מתחת ליעד הרווחיות מסומנת בכתום; מתחת לזה — באדום.'),
+      ]),
+    ]),
+  ]);
+}
+const num0 = (v) => Number(v) || 0;
 
 /* ============================================================
    טפסים במודאל

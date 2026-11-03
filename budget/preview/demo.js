@@ -70,6 +70,21 @@ const DEALS = [
   },
 ];
 
+/* עלויות פנימיות לדמו (עלות מלאה לשעה) — לפי דרגה, ועלות אישית לשניים */
+const DEMO_COSTS = { byRole: { 'שותף': 620, 'עו"ד': 330, 'מתמחה': 140 }, defaultTarget: 0.4, warnPts: 0.07 };
+const DEMO_PERSON_COST = { 'דנה כהן': 700, 'יואב ברק': 400 };
+
+/** עלויות לדמו — גם למסד דמו שנבנה לפני שהיה טאב רווחיות (פעם אחת, רק אם עוד לא הוגדרו) */
+async function seedCosts(app) {
+  const { store } = app;
+  if (store.getSetting('costs', null)) return false;
+  await store.setSetting('costs', DEMO_COSTS);
+  for (const p of store.cache.people) if (DEMO_PERSON_COST[p.name] && !p.cost) await store.savePerson({ ...p, cost: DEMO_PERSON_COST[p.name] });
+  const first = store.cache.deals.find((d) => d.name === 'רכישת אלפא טכנולוגיות');
+  if (first && (first.targetMargin === null || first.targetMargin === undefined)) await store.saveDeal({ id: first.id, targetMargin: 0.45 });
+  return true;
+}
+
 async function seed(app) {
   const { store } = app;
   const card = store.defaultRateCard();
@@ -129,8 +144,10 @@ async function waitForApp() {
 
 export async function ensureDemo() {
   const app = await waitForApp();
-  if (!app || app.store.cache.deals.length) return;
+  if (!app) return;
+  if (app.store.cache.deals.length) { if (await seedCosts(app)) app.render(); return; }
   await seed(app);
+  await seedCosts(app);
   app.state.view = 'overview';
   app.render();
 }

@@ -936,7 +936,7 @@ button.callout__item:hover { background: rgba(127, 127, 127, .08); }
 /* יישור מספרים ב-RTL — הוראת קבע: לכל מספר יש direction: ltr, ולכן start/ברירת מחדל מיישרים אותו
    לשמאל מתחת לכותרת עברית מימין. כל תא מספר וכל מכל תווית↑/ערך↓ מיושר פיזית לימין.
    הרשימה המלאה — כל דפוס חדש כזה נכנס לשורה הזו: */
-.tbl th, .tbl td, .tile, .tile__leadtext, .fact, .duo__cell, .selbar__stat, .trow__h, .trow__num { text-align: right; }
+.tbl th, .tbl td, .tile, .tile__leadtext, .fact, .duo__cell, .selbar__stat, .trow__h, .trow__num, .pf-lever__res, .pf-sl__h { text-align: right; }
 /* ומאותה סיבה: ריפוד/שוליים של תאי מספרים — פיזיים (padding-right/left), לא inline-start/end */
 .tbl-wrap { overflow-x: auto; }
 .tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
@@ -1529,4 +1529,98 @@ details.istep[open] > .istep__head { border-bottom-color: var(--line); border-ra
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
+}
+
+/* ============================================================
+   טאב הרווחיות (ui-profit.js) — הכל ב-₪; צבע רק מול היעד: ירוק עומד, כתום קרוב, אדום רחוק
+   ============================================================ */
+.pf-target {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px 20px; flex-wrap: wrap;
+  padding: 12px 18px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-1);
+}
+.pf-target__side { display: flex; align-items: center; gap: 10px 12px; flex-wrap: wrap; }
+.pf-target__side > .ic { color: var(--gold); }
+.pf-target__label { font-weight: 700; }
+.pf-small { font-size: 13px; }
+.pf-pct { display: inline-flex; align-items: center; height: 36px; padding-right: 4px; padding-left: 10px; border: 1px solid var(--accent-line); border-radius: 8px; background: var(--accent-soft); }
+.pf-pct__input { width: 52px; height: 30px; border: 0; background: transparent; font-weight: 800; font-size: 17px; text-align: right; direction: ltr; -moz-appearance: textfield; }
+.pf-pct__input::-webkit-inner-spin-button, .pf-pct__input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.pf-pct__input:focus { outline: none; }
+.pf-pct:focus-within { border-color: var(--accent); box-shadow: var(--focus-ring); }
+.pf-pct__sym { color: var(--text-3); font-weight: 600; }
+.pf-lock { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 12.5px; background: var(--gold-soft); color: var(--text-2); }
+.pf-lock .ic { width: 14px; height: 14px; }
+.datanote--warn { background: var(--risk-soft); }
+.datanote--warn > .ic { color: var(--risk); }
+.pf-pts { white-space: nowrap; }
+.pf-neg { color: var(--over); }
+.pf-pos { color: var(--ok); }
+.tile--lead .pf-neg { color: var(--hero-over); }
+.tile--lead .pf-pos { color: var(--hero-ok); }
+.pf-t { font-weight: 700; }
+.pf-t--ok { color: var(--ok); }
+.pf-t--risk { color: var(--risk); }
+.pf-t--over { color: var(--over); }
+.tbl--pf tr.is-current td { background: var(--accent-soft); }
+.tbl--pf td:first-child { white-space: nowrap; }
+.tbl--pf td:first-child .sub { white-space: normal; }
+.tbl--pf tfoot td { font-weight: 700; background: var(--surface-2); }
+
+.pf-levers { display: grid; grid-template-columns: repeat(var(--n, 4), minmax(0, 1fr)); gap: 12px; }
+.pf-lever { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 8px 12px; align-content: start; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.pf-lever__ic { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 9px; background: var(--accent-soft); color: var(--accent); }
+.pf-lever__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 13px; }
+.pf-lever__text b { font-size: 14px; color: var(--text); }
+.pf-lever__res { grid-column: 1 / -1; padding-top: 8px; border-top: 1px dashed var(--line); font-weight: 700; color: var(--brand); font-size: 14px; }
+
+.pf-name { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
+.pf-dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.pf-bar { display: flex; align-items: center; gap: 10px; }
+.pf-bar__track { position: relative; flex: 1; min-width: 80px; max-width: 200px; height: 8px; border-radius: 999px; background: var(--track); }
+.pf-bar__track i { position: absolute; top: 0; bottom: 0; right: 0; border-radius: 999px; background: var(--fill); }
+.pf-bar__track b { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--text); opacity: .5; }
+.pf-bar--ok i { background: var(--ok); }
+.pf-bar--risk i { background: var(--risk-fill); }
+.pf-bar--over i { background: var(--over-fill); }
+.pf-bar > .num { min-width: 52px; font-weight: 700; }
+.pf-bar--ok > .num { color: var(--ok); }
+.pf-bar--risk > .num { color: var(--risk); }
+.pf-bar--over > .num { color: var(--over); }
+
+.pf-sims { display: flex; flex-direction: column; gap: 18px; }
+.pf-sl { display: flex; flex-direction: column; gap: 6px; }
+.pf-sl__h { display: flex; justify-content: space-between; gap: 12px; font-weight: 600; font-size: 14px; }
+.pf-sl__v { color: var(--brand); font-weight: 800; }
+.pf-range {
+  /* מחוון RTL: המינימום מימין, המילוי מימין עד הידית (--p מתעדכן ב-JS) — המילוי המובנה של הדפדפן מצויר הפוך ב-RTL */
+  -webkit-appearance: none; appearance: none; width: 100%; height: 6px; margin: 8px 0; direction: rtl; border-radius: 999px; cursor: pointer;
+  background: linear-gradient(to left, var(--fill) 0 var(--p, 0%), var(--track) var(--p, 0%) 100%);
+}
+.pf-range::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; background: var(--surface); border: 3px solid var(--fill); box-shadow: var(--shadow-1); }
+.pf-range::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--surface); border: 3px solid var(--fill); }
+.pf-range:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.pf-sl .input.num { max-width: 220px; }
+.pf-wf { margin: 18px 0 0; }
+.pf-wf svg { display: block; }
+.wf--base { fill: var(--brand); }
+.wf--neg { fill: var(--over-fill); opacity: .72; }
+.wf--end { fill: var(--risk-fill); }
+.wf--ok { fill: var(--ok); }
+.wf__v { font: 700 12px var(--font, Heebo, sans-serif); fill: var(--text); text-anchor: middle; }
+.wf__l { font: 500 12px var(--font, Heebo, sans-serif); fill: var(--text-3); text-anchor: middle; }
+.wf__tgt { stroke: var(--ok); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.wf__tl { font: 700 11.5px var(--font, Heebo, sans-serif); fill: var(--ok); }
+
+/* עלויות במסך התעריפונים + עלות אישית בספרייה */
+.costs-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 0; }
+.costs-side { display: flex; flex-direction: column; gap: 16px; padding: 16px 20px; border-right: 1px solid var(--line); }
+.tbl--costs .qinput.num, .tbl--people .c-cost .qinput { width: 120px; text-align: right; direction: ltr; }
+
+@container page (max-width: 980px) {
+  .pf-levers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .costs-grid { grid-template-columns: minmax(0, 1fr); }
+  .costs-side { border-right: 0; border-top: 1px solid var(--line); }
+}
+@container page (max-width: 560px) {
+  .pf-levers { grid-template-columns: minmax(0, 1fr); }
 }

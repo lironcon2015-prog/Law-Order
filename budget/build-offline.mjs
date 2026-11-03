@@ -20,7 +20,7 @@ const BUILD = stamp({ channel: 'web' });   // version.js לאתר החי
 const ORDER = [
   'version.js', 'model.js', 'db.js', 'xlsx.js', 'xlsx-write.js', 'pdf-table.js', 'charts.js', 'importer.js', 'store.js', 'file-store.js',
   // שכבת התצוגה: היסודות קודם, אחריהם המסכים, ו-ui.js (שמייצא את כולם) אחרון
-  'ui-kit.js', 'ui-overview.js', 'ui-deal.js', 'ui-reports.js', 'ui-analysis.js', 'ui-admin.js', 'ui.js',
+  'ui-kit.js', 'ui-overview.js', 'ui-deal.js', 'ui-reports.js', 'ui-analysis.js', 'ui-profit.js', 'ui-admin.js', 'ui.js',
   'app.js',
 ];
 const SRC = {};
