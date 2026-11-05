@@ -282,7 +282,8 @@ IndexedDB בשם `lexBudgetDB` (גרסה 4):
 
 ```bash
 python3 -m http.server 8765     # ואז http://localhost:8765/budget/
-node budget/build-offline.mjs   # בונה מחדש את LexBudget-Offline.html בשורש
+node budget/build-offline.mjs          # בונה מחדש את LexBudget-Offline.html בשורש
+node budget/build-offline.mjs --lite   # LexBudget-Offline-Lite.html — גרסה מופחתת להעברה, בלי טאב הרווחיות והעלויות
 ```
 
 בקונסול: `window.lexBudget.seedDemo()` — עסקת דמו עם 5 צוותים ודיווחי ביצוע.

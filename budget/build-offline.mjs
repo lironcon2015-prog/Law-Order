@@ -1,13 +1,16 @@
 // build-offline.mjs — בונה קובץ HTML יחיד עצמאי (offline, file://) מכל LexBudget.
 // מטמיע: מודולי ES כ-base64 → blob URLs עם rewrite של import specifiers,
 // CSS מוטבע, פונטים כ-data URIs. מסיר manifest/אייקונים (אין נתיבים יחסיים ב-file://).
-// שימוש: node budget/build-offline.mjs  →  יוצר LexBudget-Offline.html בשורש.
+// שימוש: node budget/build-offline.mjs         →  LexBudget-Offline.html בשורש.
+//        node budget/build-offline.mjs --lite  →  LexBudget-Offline-Lite.html — גרסה מופחתת להעברה:
+//        בלי טאב הרווחיות ובלי הגדרת עלויות (הקוד של הטאב לא נארז; model.FEATURES.profit = false).
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { stamp } from './tools/stamp.mjs';
 
+const LITE = process.argv.includes('--lite');
 const BUDGET = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(BUDGET, '..');
 const rd = (p) => readFileSync(join(BUDGET, p), 'utf8');
@@ -26,7 +29,9 @@ const ORDER = [
 const SRC = {};
 for (const name of ORDER) {
   // בקובץ האופליין הערוץ הוא 'offline' — כך רואים במסך ההגדרות מאיזה מקור הגרסה
-  const src = name === 'version.js' ? rd('js/' + name).replace("channel: 'web'", "channel: 'offline'") : rd('js/' + name);
+  let src = name === 'version.js' ? rd('js/' + name).replace("channel: 'web'", `channel: '${LITE ? 'offline-lite' : 'offline'}'`) : rd('js/' + name);
+  // גרסה מופחתת: מודול הרווחיות מוחלף בשלד ריק — הקוד שלו לא נמצא בקובץ בכלל
+  if (LITE && name === 'ui-profit.js') src = 'export function renderProfitTab() {}\nexport function simToScenario() { return {}; }\nexport function fillSimOut() {}\nexport function refreshSimLabels() {}\n';
   SRC[name] = Buffer.from(src, 'utf8').toString('base64');
 }
 
@@ -82,8 +87,9 @@ html = html
   .replace(/\s*<link rel="stylesheet" href="\.\/css\/styles\.css"[^>]*>/, `\n  <style>\n${css}\n  </style>`)
   .replace(/\s*<script type="module" src="\.\/js\/app\.js"><\/script>/, '');
 html = html.replace('</body>', `  ${bootstrap}\n</body>`);
+if (LITE) html = html.replace('</head>', '  <script>window.LB_FEATURES = { profit: false };</script>\n</head>');
 
-const out = join(ROOT, 'LexBudget-Offline.html');
+const out = join(ROOT, LITE ? 'LexBudget-Offline-Lite.html' : 'LexBudget-Offline.html');
 writeFileSync(out, html, 'utf8');
 const kb = (Buffer.byteLength(html, 'utf8') / 1024).toFixed(0);
 console.log(`✓ ${out}  (${kb} KB)  ·  ${BUILD.builtAt.slice(0, 16).replace('T', ' ')} · ${BUILD.commit} · ${BUILD.cache}`);

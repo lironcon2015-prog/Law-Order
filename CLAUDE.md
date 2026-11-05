@@ -100,12 +100,13 @@
 | `budget/` | **LexBudget** — מערכת תקציב עסקה נפרדת (DB/SW/manifest משלה): `budget/index.html`, `budget/css/`, `budget/js/`. שפה עיצובית משלה — **שלוש ערכות צבע** (ספיר וזהב · Midnight Luxe · פחם ושמפניה; `data-theme`), תגית אנגלית לצוות (ניתנת לעריכה), טבעת ניצול לעסקה, Heebo, מתג יחידה `שעות / ₪`; בדסקטופ: תצוגה מפוצלת, סרגל מתכווץ, אריחי מדדים, טבלאות ממוינות, טולטיפים); ראה `budget/README.md` §5 |
 | `LexLedger-Offline.html` | **קובץ האופליין של v2** — ארוז לקובץ HTML יחיד (file://, בלי שרת). בשורש ה-repo ב-**main** |
 | `LexBudget-Offline.html` | **קובץ האופליין של LexBudget** — אותו רעיון, נבנה מ-`budget/` |
+| `LexBudget-Offline-Lite.html` | **גרסה מופחתת להעברה** — בלי טאב הרווחיות והעלויות: `node budget/build-offline.mjs --lite` (`FEATURES.profit=false`, מודול הטאב לא נארז) |
 | `v2/build-offline.mjs` · `budget/build-offline.mjs` | סקריפטי הבנייה: `node v2/build-offline.mjs` · `node budget/build-offline.mjs` |
 
 ### ⚠️ קבצי האופליין — זיהוי ועדכון (לכל סשן)
 - **מיקום:** `LexLedger-Offline.html` + `LexBudget-Offline.html` בשורש ה-repo, בענף `main` **בלבד**.
   סשנים משוכפלים לרוב בלי `main` — אם קובץ לא נראה: `git fetch origin main` ואז `git show origin/main:<file>`.
-- **אחרי כל שינוי ב-`v2/`** → `node v2/build-offline.mjs`; **אחרי כל שינוי ב-`budget/`** → `node budget/build-offline.mjs`.
+- **אחרי כל שינוי ב-`v2/`** → `node v2/build-offline.mjs`; **אחרי כל שינוי ב-`budget/`** → `node budget/build-offline.mjs` **וגם** `node budget/build-offline.mjs --lite`.
   לוודא 0 שגיאות קונסול ולכלול את הקובץ הבנוי ב-commit, אחרת קובץ האופליין של המשתמש מתיישן.
 - כל מודול JS חדש חייב להיכנס למערך `ORDER` בסקריפט הבנייה המתאים (סדר תלויות) — אחרת לא ייארז.
 - **חותמת גרסה (LexBudget):** `node budget/build-offline.mjs` כותב אוטומטית את `budget/js/version.js`

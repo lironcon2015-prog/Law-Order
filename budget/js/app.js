@@ -6,7 +6,7 @@ import * as db from './db.js';
 import {
   computeDeal, dealReview, aggregateByKind, uid, num, round2, fmtPct, fmtHours, roundUpHours, sourceLabel,
   DEFAULT_TEAM_NAMES, DEAL_STATUSES,
-  computeProfit, normalizeCosts, normalizeScenario, describeScenario, normRoleName, fmtMoney,
+  FEATURES, computeProfit, normalizeCosts, normalizeScenario, describeScenario, normRoleName, fmtMoney,
   normalizeSplits, splitsTotal, isOpenDeal, todayISO, monthEndISO, cleanTag, teamTag, defaultTeamTag,
 } from './model.js';
 import * as ui from './ui.js';
@@ -44,7 +44,7 @@ function nextSort(current, key, defaults) {
 
 /** טאבים שבוטלו באיחוד המסכים → הטאב שקלט את התוכן שלהם */
 const LEGACY_TAB = { actuals: 'reports', progress: 'reports', control: 'analysis', review: 'analysis' };
-const TABS = ['budget', 'reports', 'analysis', 'profit', 'settings'];
+const TABS = ['budget', 'reports', 'analysis', 'profit', 'settings'].filter((t) => t !== 'profit' || FEATURES.profit);
 const normTab = (t) => { const v = LEGACY_TAB[t] || t; return TABS.includes(v) ? v : 'budget'; };
 
 function readKindsOpen() {

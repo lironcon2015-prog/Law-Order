@@ -10,6 +10,12 @@
    ============================================================ */
 
 /** דרגות ברירת מחדל — כמו בגיליון (מתמחה/עו"ד/שותף). `junior` יוצא מחישוב הבלנדד. */
+/**
+ * יכולות שאפשר לכבות בבנייה — גרסה מופחתת להעברה (`node budget/build-offline.mjs --lite`)
+ * מגדירה `window.LB_FEATURES = { profit: false }` לפני טעינת המודולים. בלי הגדרה — הכל פעיל.
+ */
+export const FEATURES = { profit: globalThis.LB_FEATURES?.profit !== false };
+
 export const DEFAULT_ROLES = [
   { id: 'intern',  name: 'מתמחה', rate: 250, junior: true },
   { id: 'lawyer',  name: 'עו"ד',  rate: 650, junior: false },

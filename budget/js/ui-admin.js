@@ -1,7 +1,7 @@
 // ui-admin.js — מסכי ניהול: הגדרות עסקה, ספריית אנשי הצוות, תעריפונים, וטפסי המודאלים
 // (עסקה חדשה, בורר אנשים, אנשי קשר, ייבוא תקציב).
 
-import { DEAL_STATUSES, FEE_MODELS, DEAL_TYPES, dealTypeOf, fmtMoney, fmtHours, fmtPct, normRoleName } from './model.js';
+import { DEAL_STATUSES, FEE_MODELS, DEAL_TYPES, dealTypeOf, fmtMoney, fmtHours, fmtPct, normRoleName, FEATURES } from './model.js';
 import { BUILD } from './version.js';
 import { personKey } from './importer.js';
 import {
@@ -104,7 +104,7 @@ function renderBuildRow() {
   return srow('גרסה', 'נכתבת אוטומטית בכל בנייה. השוו בין הקובץ שבידכם לאתר החי — המאוחר יותר הוא המעודכן.', [
     el('div', { class: 'buildinfo' }, [
       fact('נבנה בתאריך', when),
-      fact('מקור', BUILD.channel === 'offline' ? 'קובץ אופליין' : 'אתר / PWA'),
+      fact('מקור', BUILD.channel === 'offline-lite' ? 'קובץ אופליין · גרסה מופחתת' : BUILD.channel === 'offline' ? 'קובץ אופליין' : 'אתר / PWA'),
       fact('commit', BUILD.commit || '—'),
       fact('גרסת cache', BUILD.cache || '—'),
     ]),
@@ -180,7 +180,7 @@ export function renderPeopleView(root, { people, usageOf, dupes = [] }) {
         ]),
       ])]),
       el('td', {}, [el('input', { class: 'qinput', value: person.title, placeholder: 'שותף / עו״ד', dataset: { pfield: 'title', personId: person.id }, 'aria-label': 'תפקיד' })]),
-      el('td', { class: 'c-cost' }, [el('input', { class: 'qinput num', type: 'number', min: '0', step: '10', value: person.cost === null || person.cost === undefined ? '' : String(person.cost), placeholder: 'לפי הדרגה', title: 'עלות פנימית אישית לשעה — גוברת על עלות הדרגה בכל העסקאות. ריק = לפי הדרגה', dataset: { pfield: 'cost', personId: person.id }, 'aria-label': 'עלות אישית לשעה' })]),
+      !FEATURES.profit ? null : el('td', { class: 'c-cost' }, [el('input', { class: 'qinput num', type: 'number', min: '0', step: '10', value: person.cost === null || person.cost === undefined ? '' : String(person.cost), placeholder: 'לפי הדרגה', title: 'עלות פנימית אישית לשעה — גוברת על עלות הדרגה בכל העסקאות. ריק = לפי הדרגה', dataset: { pfield: 'cost', personId: person.id }, 'aria-label': 'עלות אישית לשעה' })]),
       el('td', {}, [el('input', { class: 'qinput', value: person.defaultTeamName, placeholder: 'צוות ברירת מחדל', dataset: { pfield: 'defaultTeamName', personId: person.id }, 'aria-label': 'צוות' })]),
       el('td', {}, [el('input', { class: 'qinput ltr', type: 'email', value: person.email, placeholder: 'name@firm.co.il', dataset: { pfield: 'email', personId: person.id }, 'aria-label': 'דוא״ל' })]),
       el('td', {}, [el('input', { class: 'qinput ltr', value: person.phone, placeholder: '050-0000000', dataset: { pfield: 'phone', personId: person.id }, 'aria-label': 'טלפון' })]),
@@ -203,11 +203,11 @@ export function renderPeopleView(root, { people, usageOf, dupes = [] }) {
     el('div', { class: 'tbl-wrap' }, el('table', { class: 'tbl tbl--people' }, [
       el('thead', {}, el('tr', {}, [
         el('th', { class: 'c-pick' }, [el('input', { type: 'checkbox', dataset: { pick: 'people-all' }, 'aria-label': 'סימון הכל' })]),
-        el('th', { text: 'שם' }), el('th', { text: 'תפקיד' }), el('th', { class: 'c-cost', text: 'עלות אישית ₪/ש׳', title: 'עלות פנימית לשעה — ריק = לפי הדרגה' }), el('th', { text: 'צוות' }),
+        el('th', { text: 'שם' }), el('th', { text: 'תפקיד' }), FEATURES.profit ? el('th', { class: 'c-cost', text: 'עלות אישית ₪/ש׳', title: 'עלות פנימית לשעה — ריק = לפי הדרגה' }) : null, el('th', { text: 'צוות' }),
         el('th', { text: 'דוא"ל' }), el('th', { text: 'טלפון' }), el('th', { text: 'עסקאות', title: 'בכמה עסקאות משויך לשורת תקציב' }),
         el('th', { text: 'פעיל' }), el('th', { class: 'c-tools' }),
       ])),
-      el('tbody', { class: 'has-more' }, limitItems(rows, 40, { colspan: 10, noun: 'אנשים' })),
+      el('tbody', { class: 'has-more' }, limitItems(rows, 40, { colspan: FEATURES.profit ? 10 : 9, noun: 'אנשים' })),
     ])),
   ]));
 }
@@ -236,7 +236,7 @@ export function renderPersonForm(person = {}) {
     field('שם מלא', el('input', { class: 'input', name: 'name', value: person.name || '', required: 'required', placeholder: 'לדוגמה: דנה כהן' })),
     el('div', { class: 'grid-2' }, [
       field('תפקיד', el('input', { class: 'input', name: 'title', value: person.title || '', placeholder: 'שותף / עו״ד / מתמחה' })),
-      field('עלות אישית לשעה (₪)', el('input', { class: 'input num', type: 'number', min: '0', step: '10', name: 'cost', value: person.cost === null || person.cost === undefined ? '' : String(person.cost), placeholder: 'לפי הדרגה' }), 'עלות פנימית מלאה (כולל תקורה). גוברת על עלות הדרגה בכל העסקאות; ריק = לפי הדרגה.'),
+      !FEATURES.profit ? null : field('עלות אישית לשעה (₪)', el('input', { class: 'input num', type: 'number', min: '0', step: '10', name: 'cost', value: person.cost === null || person.cost === undefined ? '' : String(person.cost), placeholder: 'לפי הדרגה' }), 'עלות פנימית מלאה (כולל תקורה). גוברת על עלות הדרגה בכל העסקאות; ריק = לפי הדרגה.'),
       field('צוות ברירת מחדל', el('input', { class: 'input', name: 'defaultTeamName', value: person.defaultTeamName || '', placeholder: 'לדוגמה: קורפורייט' })),
       field('דוא"ל', el('input', { class: 'input ltr', type: 'email', name: 'email', value: person.email || '', placeholder: 'name@firm.co.il' })),
       field('טלפון', el('input', { class: 'input ltr', name: 'phone', value: person.phone || '', placeholder: '050-0000000' })),
@@ -359,7 +359,7 @@ export function renderRatesView(root, { rateCards, deals, costs = null }) {
     ]),
     el('div', { class: 'phead__actions' }, [button('תעריפון חדש', { action: 'new-ratecard', iconName: 'plus', kind: 'primary' })]),
   ]));
-  if (costs) page.append(costsCard(rateCards, costs));
+  if (costs && FEATURES.profit) page.append(costsCard(rateCards, costs));
 
   for (const rc of rateCards) {
     const used = deals.filter((d) => d.rateCardId === rc.id).length;

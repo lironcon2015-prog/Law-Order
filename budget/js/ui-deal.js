@@ -4,7 +4,7 @@
 
 import {
   DEAL_STATUSES, FEE_MODELS, defaultTeamTag as teamTagDefault, teamTag, aggregateByRole, NO_ROLE, aggregateTeams, aggregateByKind, round2, fmtMoney, fmtPct, progressByPeriod, dealReview,
-} from './model.js';
+ FEATURES } from './model.js';
 import { ring, sparkline } from './charts.js';
 import {
   el, icon, ICONS, measure, fmtU, fmtDelta, valueNodes, pctText, toneOf, meterCell, paintMeter,
@@ -16,7 +16,7 @@ import {
    כותרת העסקה + טאבים
    ============================================================ */
 
-const TABS = [['budget', 'תקציב', 'target'], ['reports', 'דיווחים', 'list'], ['analysis', 'ניתוח', 'chart'], ['profit', 'רווחיות', 'coins'], ['settings', 'הגדרות', 'settings']];
+const TABS = [['budget', 'תקציב', 'target'], ['reports', 'דיווחים', 'list'], ['analysis', 'ניתוח', 'chart'], ['profit', 'רווחיות', 'coins'], ['settings', 'הגדרות', 'settings']].filter(([id]) => id !== 'profit' || FEATURES.profit);
 
 export function renderDealHeader(root, { snap, tab, unit }) {
   const d = snap.deal;
@@ -161,7 +161,7 @@ export function kpiTiles(snap, unit) {
     const gap = round2(snap.agreedFee - ref);
     tiles.push(tile({
       label: d.feeModel === 'capped' ? 'תקרת שכ"ט' : 'שכ"ט מוסכם',
-      tip: `שכ"ט פחות שווי השעות עד היום: ${fmtMoney(snap.margin)}${snap.marginPct === null ? '' : ` (${fmtPct(snap.marginPct, 1)})`}. הרווחיות מול העלות הפנימית — בטאב "רווחיות".`,
+      tip: `שכ"ט פחות שווי השעות עד היום: ${fmtMoney(snap.margin)}${snap.marginPct === null ? '' : ` (${fmtPct(snap.marginPct, 1)})`}.${FEATURES.profit ? ' הרווחיות מול העלות הפנימית — בטאב "רווחיות".' : ''}`,
       value: el('span', { class: 'tile__value num', text: fmtU(snap.agreedFee, 'money', d) }),
       sub: [hasEac ? 'מול התחזית: ' : 'מול הביצוע: ', el('span', { class: `num ${gap < 0 ? 'is-over' : ''}`.trim(), text: fmtDelta(gap, 'money', d) })],
       extra: tileBar(snap.agreedFee, top, 'fee'),

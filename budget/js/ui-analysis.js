@@ -2,7 +2,7 @@
 // ופילוח לפי צוות / דרגה / אדם / שורה. כל טבלה ביחידה שנבחרה; פירוק הפער והתעריפים — רק ב-₪.
 // במסך רחב הכרטיסים הקטנים יושבים בזוגות (שני טורים) והטבלאות ברוחב מלא.
 
-import { dealReview, aggregateByKind, fmtMoney, fmtPct, statusOf } from './model.js';
+import { dealReview, aggregateByKind, fmtMoney, fmtPct, statusOf, FEATURES } from './model.js';
 import {
   el, icon, measure, fmtU, fmtDelta, pctText, meterCell, card, table, foldPanel, fact, emptyState, button, fmtDate, infoTip,
 } from './ui-kit.js';
@@ -91,7 +91,7 @@ export function renderAnalysisTab(root, { snap, unit = 'hours' }) {
       ]),
     ]);
     // מימוש שכ"ט — השכ"ט מול שווי השעות לפי תעריף (לא רווחיות: אין כאן עלות פנימית — היא בטאב הרווחיות)
-    const profit = snap.hasFee ? card({ title: 'מימוש שכ"ט', info: 'השכ"ט המוסכם מול שווי השעות לפי תעריף. זה לא רווח — הרווחיות מול העלות הפנימית נמצאת בטאב "רווחיות".' }, [el('div', { class: 'facts facts--2' }, [
+    const profit = snap.hasFee ? card({ title: 'מימוש שכ"ט', info: `השכ"ט המוסכם מול שווי השעות לפי תעריף. זה לא רווח${FEATURES.profit ? ' — הרווחיות מול העלות הפנימית נמצאת בטאב "רווחיות"' : ''}.` }, [el('div', { class: 'facts facts--2' }, [
       fact(d.feeModel === 'capped' ? 'תקרת שכ"ט' : 'שכ"ט מוסכם', fmtMoney(snap.agreedFee)),
       fact('שכ"ט פחות שווי השעות עד היום', fmtMoney(snap.margin), snap.margin < 0 ? 'neg' : ''),
       fact('יתרה מהשכ"ט', snap.marginPct === null ? '—' : fmtPct(snap.marginPct, 1), snap.margin < 0 ? 'neg' : ''),
