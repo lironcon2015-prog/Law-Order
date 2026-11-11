@@ -285,7 +285,7 @@ export function renderPersonPickerList(list, { people, query = '', currentId = '
 }
 
 /** בחירת אנשי הקשר לייצוא מתוך העסקה — עם מקור השיוך לכל אחד */
-export function renderDealContactsForm({ rows, dealName }) {
+export function renderDealContactsForm({ rows, dealName, cols = [] }) {
   const form = el('form', { class: 'modal-form', id: 'deal-contacts-form' }, [
     el('p', { class: 'modal-text', text: `האנשים שהמערכת מזהה כמשויכים ל"${dealName}". בטל סימון למי שלא צריך להיכנס לרשימה.` }),
   ]);
@@ -298,6 +298,23 @@ export function renderDealContactsForm({ rows, dealName }) {
     el('td', { class: 'num', text: r.hours ? fmtHours(r.hours) : '—' }),
     el('td', { class: 'ltr muted', text: r.person.email || '—' }),
   ])), { cls: 'tbl--compact' }));
+  if (cols.length) {
+    const check = (c) => el('label', { class: 'inline-check' }, [
+      el('input', { type: 'checkbox', checked: c.on ? 'checked' : null, dataset: { contactCol: c.id } }),
+      el('span', { text: c.label }),
+    ]);
+    // div ולא field(): field הוא <label>, ותווית שעוטפת כמה תיבות מסמנת רק את הראשונה
+    const group = (label, list, hint) => el('div', { class: 'field' }, [
+      el('span', { class: 'field__label', text: label }),
+      el('div', { class: 'check-row' }, list.map(check)),
+      hint ? el('span', { class: 'field__hint', text: hint }) : null,
+    ]);
+    form.append(
+      group('עמודות בקובץ — פרטי קשר', cols.filter((c) => !c.budget)),
+      group('נתוני תקציב (פנימי)', cols.filter((c) => c.budget),
+        'לדף אנשי קשר שיוצא מהמשרד השאר את אלה כבויים. הבחירה נזכרת לפעם הבאה.'),
+    );
+  }
   return form;
 }
 

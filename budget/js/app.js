@@ -2492,35 +2492,70 @@ function downloadPeopleTemplate() {
   }]);
 }
 
-/** ייצוא אנשי הקשר של העסקה — עם זיהוי אוטומטי ובחירה לפני ההפקה */
+/**
+ * עמודות ייצוא אנשי הקשר של העסקה. `budget` = נתון תקציבי/פנימי: כבוי כברירת מחדל,
+ * כי הקובץ יוצא מהמשרד (דף אנשי קשר) ואסור שיישא שעות או אחוזים בלי בחירה מפורשת.
+ */
+const DEAL_CONTACT_COLS = [
+  { id: 'name',    label: 'שם',          fmt: 'text',  val: (r) => r.person.name },
+  { id: 'title',   label: 'תפקיד',       fmt: 'text',  val: (r) => r.person.title },
+  { id: 'team',    label: 'צוות',        fmt: 'text',  val: (r) => r.person.defaultTeamName },
+  { id: 'email',   label: 'דוא"ל',       fmt: 'text',  val: (r) => r.person.email },
+  { id: 'phone',   label: 'טלפון',       fmt: 'text',  val: (r) => r.person.phone },
+  { id: 'dealTeam', label: 'צוות בעסקה', fmt: 'text',  val: (r) => r.teams.join(' · ') },
+  { id: 'source',  label: 'מקור השיוך',  fmt: 'text',  budget: true, val: (r) => r.sources.join(' · ') },
+  { id: 'hours',   label: 'שעות בעסקה',  fmt: 'hours', budget: true, val: (r) => r.hours },
+  { id: 'pct',     label: '% מהצוות',    fmt: 'pct',   budget: true,
+    val: (r, teamHours) => { const total = teamHours.get(r.teams[0] || '') || 0; return total > 0 ? r.hours / total : ''; } },
+];
+
+/** הבחירה האחרונה נזכרת; בלי בחירה שמורה — רק פרטי הקשר, בלי נתוני תקציב */
+function savedContactCols() {
+  try {
+    const ids = JSON.parse(localStorage.getItem('lb_contactCols'));
+    if (Array.isArray(ids) && ids.length) return new Set(ids);
+  } catch { /* ברירת מחדל */ }
+  return new Set(DEAL_CONTACT_COLS.filter((c) => !c.budget).map((c) => c.id));
+}
+
+/** ייצוא אנשי הקשר של העסקה — עם זיהוי אוטומטי ובחירת אנשים ועמודות לפני ההפקה */
 function openDealContactsModal() {
   const snap = currentSnapshot();
   if (!snap) return;
   const rows = store.dealContacts(snap.deal.id);
   if (!rows.length) return ui.toast('אין אנשי צוות משויכים לעסקה', 'error');
-  const body = ui.renderDealContactsForm({ rows, dealName: snap.deal.name });
+  const on = savedContactCols();
+  const body = ui.renderDealContactsForm({
+    rows, dealName: snap.deal.name,
+    cols: DEAL_CONTACT_COLS.map((c) => ({ id: c.id, label: c.label, budget: !!c.budget, on: on.has(c.id) })),
+  });
   const go = btn('ייצוא לאקסל', { primary: true, iconName: 'download' });
   go.addEventListener('click', () => {
     const picked = [...body.querySelectorAll('[data-contact-pick]:checked')].map((n) => n.dataset.personId);
     const chosen = rows.filter((r) => picked.includes(r.person.id));
     if (!chosen.length) return ui.toast('לא נבחרו אנשים', 'error');
+    const colIds = [...body.querySelectorAll('[data-contact-col]:checked')].map((n) => n.dataset.contactCol);
+    const cols = DEAL_CONTACT_COLS.filter((c) => colIds.includes(c.id));
+    if (!cols.length) return ui.toast('לא נבחרו עמודות', 'error');
+    try { localStorage.setItem('lb_contactCols', JSON.stringify(cols.map((c) => c.id))); } catch { /* לא קריטי */ }
     const teamHours = new Map(snap.teams.map((t) => [t.name, t.actualHours]));
+    const tbl = {
+      t: 'table',
+      head: cols.map((c) => c.label),
+      fmt: cols.map((c) => c.fmt),
+      rows: chosen.map((r) => cols.map((c) => c.val(r, teamHours))),
+    };
+    // שורת סיכום רק כשיש עמודת שעות — בדף אנשי קשר נקי היא חסרת משמעות
+    if (cols.some((c) => c.id === 'hours') && cols.length > 1) {
+      tbl.total = cols.map((c, i) => (c.id === 'hours' ? round2(chosen.reduce((a, r) => a + r.hours, 0)) : (i === 0 ? 'סה"כ' : '')));
+    }
     downloadWorkbook(`אנשי קשר — ${snap.deal.name} — ${stamp()}`, [{
       name: 'אנשי קשר',
       blocks: [
         { t: 'title', text: `אנשי קשר — ${snap.deal.name}` },
         { t: 'sub', text: `${snap.deal.client || ''} · ${chosen.length} אנשים · הופק ב-${stamp()}` },
         { t: 'gap' },
-        { t: 'table',
-          head: [...CONTACT_HEAD, 'צוות בעסקה', 'מקור השיוך', 'שעות בעסקה', '% מהצוות'],
-          fmt: ['text', 'text', 'text', 'text', 'text', 'text', 'text', 'hours', 'pct'],
-          rows: chosen.map((r) => {
-            const team = r.teams[0] || '';
-            const total = teamHours.get(team) || 0;
-            return [r.person.name, r.person.title, r.person.defaultTeamName, r.person.email, r.person.phone,
-              r.teams.join(' · '), r.sources.join(' · '), r.hours, total > 0 ? r.hours / total : ''];
-          }),
-          total: ['סה"כ', '', '', '', '', '', '', round2(chosen.reduce((a, r) => a + r.hours, 0)), ''] },
+        tbl,
       ],
     }]);
     closeModal();
