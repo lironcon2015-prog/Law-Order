@@ -2,7 +2,7 @@
 // app-shell = network-first (פרסומים נכנסים לתוקף מיד), פונטים/אייקונים = cache-first.
 // offline עובד מלא: כל הנתונים ב-IndexedDB, ה-shell במטמון.
 
-const CACHE = 'lexbudget-v41';
+const CACHE = 'lexbudget-v42';
 
 const ASSETS = [
   './',
@@ -28,6 +28,7 @@ const ASSETS = [
   './js/xlsx-write.js',
   './js/pdf-table.js',
   './js/file-store.js',
+  './js/work-folder.js',
   './js/version.js',
   './vendor/pdf.min.js',
   './vendor/pdf.worker.min.js',

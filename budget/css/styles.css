@@ -672,6 +672,18 @@ input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var
 .inline-check { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text-2); cursor: pointer; }
 .check-row { display: flex; flex-wrap: wrap; gap: 8px 20px; }
 .modal-sub { margin: 6px 0 0; font-size: 13px; font-weight: 700; color: var(--text-2); }
+/* תיקיית העבודה: שורת מצב בסרגל הצד + פס התראה כשהנתונים אינם נשמרים לתיקייה */
+.side__wf { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 12px; border: 0; background: none; color: var(--side-text-2, rgba(255,255,255,.6)); font: inherit; font-size: 12px; text-align: right; cursor: pointer; border-radius: 8px; }
+.side__wf:hover { background: rgba(255,255,255,.06); }
+.side__wf .side__text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side__wfdot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,.3); }
+.side__wf--ok .side__wfdot { background: #3fb984; }
+.side__wf--warn .side__wfdot { background: #e5a23a; box-shadow: 0 0 0 3px rgba(229,162,58,.22); }
+.wfbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 20px; background: var(--risk-soft, #fdf3dc); color: var(--text); font-size: 14px; border-bottom: 1px solid var(--line); }
+.wfbar[hidden] { display: none; }
+.wfbar svg { flex: none; width: 18px; height: 18px; }
+.wfbar__text { flex: 1 1 260px; line-height: 1.5; }
+.wfbar--err { background: var(--over-soft, #fde8e8); }
 
 /* שדה "שקט" — נראה כטקסט עד ריחוף או פוקוס (טבלאות עריכה) */
 .qinput {

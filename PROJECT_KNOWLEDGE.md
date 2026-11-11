@@ -152,8 +152,13 @@ CRM אישי לעו"ד M&A, vanilla JS · PWA · offline-first · RTL. חי ב-`
   הקיים של הייבוא רץ עליו דרך `impDealId()/impSnap()/impRows()` ו-`withPart` — **לא** דרך `state.dealId`.
   הכתיבה משותפת: `commitProgressImport`. המיפוי (`mapping`) משותף בהפניה לכל החלקים.
 - **החלטה**: אנשים שלא זוהו בעסקה *קיימת* לא משויכים אוטומטית (סיכון לצוות שגוי) — רק בעסקה שהוקמה מהדוח.
-- **קובץ נתונים בתיקייה**: `file-store.writeDataFile` — עותק חד-כיווני של `collectBackup`, debounce 3s אחרי כל מוטציה.
-  אין מיזוג/טעינה אוטומטית; זה הבסיס לגרסת המובייל לצפייה (שלב ב').
+- **תיקיית עבודה = מקור האמת** (דרישת המשתמש 11/11: "זיכרון דפדפן מסוכן"; המודל — `team-tasks/dashboard.html`).
+  `work-folder.js` מנהל מדיניות, `file-store.js` קבצים. `db.onDataWrite` מדווח על **כל** כתיבה ל-DB (לא דרך `notify` של store —
+  הוא לא מכסה הכול). חתימת גרסה `revision|savedAt|device` ב-`meta` של הקובץ וב-`localPrefs.dataDir.sig`; `lb_wfDirty` ב-localStorage.
+  כלל: קובץ שהשתנה + אין שינוי מקומי → נטען; שניהם השתנו → המשתמש בוחר, הנדחה ל-`גיבויים/`. `applying` מונע שטעינה תיחשב שינוי.
+  **בדיקות**: `showDirectoryPicker` מוחלף ב-OPFS (`addInitScript`) + `LANG=C.UTF-8`; קריאת ידית מ-IndexedDB אחרי reload קורסת
+  בדפדפן הבדיקות (תקלת סביבה) — אישור הגישה אחרי הפעלה מחדש נבדק רק במחשב אמיתי.
+  שלב ב' (מובייל לצפייה): קורא את אותו `lexbudget-data.json`.
 - **ייצוא אנשי קשר של עסקה**: בחירת עמודות, נתוני תקציב כבויים כברירת מחדל (`lb_contactCols`).
 
 ### 5א.1 חוב טכני — LexBudget

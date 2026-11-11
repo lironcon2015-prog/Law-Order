@@ -105,12 +105,20 @@ export function openDB() {
   return dbPromise;
 }
 
+/* כל כתיבה לנתוני העבודה מדווחת למאזין אחד — כך קובץ הנתונים שבתיקיית העבודה מתעדכן
+   אחרי **כל** שינוי, בלי להסתמך על כך שכל פונקציה ב-store תזכור להודיע.
+   `localPrefs` ו-`files` מקומיים למכשיר ואינם חלק מקובץ הנתונים. */
+const LOCAL_ONLY = new Set(['localPrefs', 'files']);
+let writeListener = null;
+export function onDataWrite(fn) { writeListener = fn; }
+
 async function withStore(storeName, mode, fn) {
   const db = await openDB();
   const tx = db.transaction(storeName, mode);
   const store = tx.objectStore(storeName);
   const result = await fn(store);
   await promisifyTx(tx);
+  if (mode === 'readwrite' && writeListener && !LOCAL_ONLY.has(storeName)) writeListener(storeName);
   return result;
 }
 

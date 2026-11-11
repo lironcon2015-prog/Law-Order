@@ -11,6 +11,7 @@ import {
 } from './model.js';
 import * as ui from './ui.js';
 import * as fileStore from './file-store.js';
+import * as workFolder from './work-folder.js';
 import { readTabularFile } from './xlsx.js';
 import { downloadWorkbook, buildWorkbook } from './xlsx-write.js';
 import { pdfToSheets, isPdf } from './pdf-table.js';
@@ -138,11 +139,17 @@ async function init() {
     state.view = 'people';
   }
 
-  store.setMutationListener(() => { markDirty(); scheduleDataFile(); });
+  store.setMutationListener(() => { markDirty(); });
   ui.initTips();
   bindEvents();
   registerSW();
   render();
+
+  // תיקיית העבודה: אם הקובץ שבה חדש ממה שבדפדפן — הוא נטען עכשיו (ואז render נוסף)
+  workFolder.init({
+    onLoaded: onWorkFolderLoaded, onStatus: paintWorkFolder,
+    canLoad: canLoadFromFolder, resolveConflict: resolveWorkFolderConflict,
+  }).then(paintWorkFolder);
 
   if (store.cache.healedDeals) {
     ui.toast(`${store.cache.healedDeals} עסקאות חוברו מחדש לדרגות התעריפון`);
@@ -240,6 +247,7 @@ function renderSide() {
     deals: store.cache.deals, snapshots: state.snapshots, view: state.view,
     activeId: state.view === 'deal' ? state.dealId : null, unit: state.unit, theme: state.theme, rail: state.sideRail,
   });
+  paintWorkFolder();
 }
 
 /** רשימת התיק שליד העסקה — רק בתוך עסקה */
@@ -306,33 +314,80 @@ function refreshDealHeader() {
   renderList();
 }
 
-/* ---------- קובץ הנתונים בתיקייה (OneDrive וכד') — עותק מלא שמתעדכן אחרי כל שינוי ---------- */
+/* ============================================================
+   תיקיית העבודה — הקובץ שבתיקייה הוא מקור האמת (ראה work-folder.js)
+   ============================================================ */
 
-let dataFileTimer = null;
-let dataFileWarned = false;
+const WF_TIME = (iso) => (iso ? new Date(iso).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' }) : '');
 
-function scheduleDataFile() {
-  clearTimeout(dataFileTimer);
-  dataFileTimer = setTimeout(() => saveDataFile(), 3000);
+/** פס ההתראה מעל המסך + שורת המצב בסרגל הצד. נקרא אחרי כל render ובכל שינוי מצב */
+function paintWorkFolder() {
+  const st = workFolder.getStatus();
+  const line = document.getElementById('wf-state');
+  if (line) {
+    const tone = st.state === 'ready' ? (st.dirty || st.waiting ? 'warn' : 'ok') : st.state === 'unsup' ? '' : 'warn';
+    const text = st.state === 'ready' ? `${st.name}${st.savedAt ? ` · ${WF_TIME(st.savedAt)}` : ''}`
+      : st.state === 'prompt' ? 'נדרש אישור גישה לתיקייה'
+        : st.state === 'err' ? 'תקלה בתיקיית העבודה'
+          : st.state === 'none' ? 'אין תיקיית עבודה' : 'נתונים בדפדפן בלבד';
+    line.className = `side__wf${tone ? ` side__wf--${tone}` : ''}`;
+    line.replaceChildren(ui.el('span', { class: 'side__wfdot' }), ui.el('span', { class: 'side__text', text }));
+    line.title = st.state === 'ready' ? `הנתונים נשמרים בקובץ ${fileStore.DATA_FILE} בתיקייה "${st.name}"` : text;
+  }
+  const bar = document.getElementById('wf-bar');
+  if (!bar) return;
+  const msg = st.state === 'prompt'
+    ? [`הנתונים נשמרים בתיקייה "${st.name}". אחרי הפעלת הדפדפן נדרש אישור גישה — עד אז שינויים נשמרים בדפדפן בלבד.`, 'אישור גישה לתיקייה', 'wf-grant']
+    : st.state === 'none'
+      ? ['לא מחוברת תיקיית עבודה — הנתונים שמורים בדפדפן בלבד, ועלולים ללכת לאיבוד בניקוי נתוני גלישה.', 'חיבור תיקיית עבודה', 'wf-connect']
+      : st.state === 'err' ? [st.err, 'נסה שוב', 'wf-save']
+        : st.waiting ? ['בתיקיית העבודה יש גרסה חדשה יותר של הנתונים.', 'טען עכשיו', 'wf-save'] : null;
+  bar.hidden = !msg;
+  if (msg) {
+    bar.className = `wfbar${st.state === 'err' ? ' wfbar--err' : ''}`;
+    bar.replaceChildren(ui.icon('alert'), ui.el('span', { class: 'wfbar__text', text: msg[0] }), btn(msg[1], { action: msg[2], primary: true }));
+  }
 }
 
-/** `ask` = נקרא מלחיצת משתמש, ולכן מותר לבקש הרשאה ולדווח על התוצאה */
-async function saveDataFile({ ask = false } = {}) {
-  clearTimeout(dataFileTimer);
-  let res;
-  try {
-    res = await fileStore.writeDataFile(JSON.stringify(await store.collectBackup()), { ask });
-  } catch (err) { res = { ok: false, error: err?.message || 'הכתיבה נכשלה' }; }
-  if (res.skipped) return res;
-  if (res.ok) { dataFileWarned = false; if (ask) ui.toast('קובץ הנתונים נשמר בתיקייה'); return res; }
-  // בלי הרשאה בתוקף (הדפדפן מבקש אותה מחדש בכל הפעלה) — מתריעים פעם אחת, לא על כל שינוי
-  if (ask || !dataFileWarned) {
-    dataFileWarned = true;
-    ui.toast(res.needsPermission
-      ? 'קובץ הנתונים בתיקייה לא מתעדכן — נדרש אישור גישה: "גיבוי ושחזור" ← "שמור עכשיו"'
-      : `שמירת קובץ הנתונים נכשלה: ${res.error}`, 'error');
-  }
-  return res;
+/** שני הצדדים השתנו (או חיבור ראשון לתיקייה שכבר יש בה קובץ) — המשתמש בוחר; הצד שנדחה נשמר ב"גיבויים" */
+function resolveWorkFolderConflict({ remote, firstConnect }) {
+  if (els.modal.open) return Promise.resolve(null);   // לא קוטעים עבודה במודאל — יישאל בבדיקה הבאה
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => { if (done) return; done = true; els.modal.removeEventListener('close', onClose); closeModal(); resolve(v); };
+    const onClose = () => finish(null);
+    const body = ui.el('div', { class: 'modal-form' }, [
+      ui.el('p', { class: 'modal-text', text: firstConnect
+        ? 'בתיקייה שנבחרה כבר יש קובץ נתונים, וגם בדפדפן הזה יש נתונים. איזה מהם הוא המצב הנכון?'
+        : 'קובץ הנתונים בתיקייה השתנה (ממכשיר אחר), וגם בדפדפן הזה יש שינויים שעוד לא נשמרו לתיקייה. איזה מהם לשמור?' }),
+      ui.el('div', { class: 'facts' }, [
+        ui.el('div', { class: 'fact' }, [ui.el('span', { class: 'fact__label', text: 'בתיקייה' }), ui.el('span', { class: 'fact__value', text: `${remote.deals.length} עסקאות · ${(remote.progress || []).length} דיווחים${remote.meta?.savedAt ? ` · נשמר ${WF_TIME(remote.meta.savedAt)}` : ''}` })]),
+        ui.el('div', { class: 'fact' }, [ui.el('span', { class: 'fact__label', text: 'בדפדפן הזה' }), ui.el('span', { class: 'fact__value', text: `${store.cache.deals.length} עסקאות · ${store.cache.progress.length} דיווחים` })]),
+      ]),
+      ui.el('p', { class: 'field__hint', text: `הצד שלא ייבחר לא נמחק — הוא נשמר כקובץ בתת-התיקייה "${fileStore.BACKUP_DIR}".` }),
+    ]);
+    const useRemote = btn('טען מהתיקייה', { primary: true, iconName: 'download' });
+    useRemote.addEventListener('click', () => finish('remote'));
+    const useLocal = btn('שמור את מה שבדפדפן', { iconName: 'upload' });
+    useLocal.addEventListener('click', () => finish('local'));
+    const later = btn('לא עכשיו');
+    later.addEventListener('click', () => finish(null));
+    openModal({ title: 'שתי גרסאות של הנתונים', body, actions: [useRemote, useLocal, later] });
+    els.modal.addEventListener('close', onClose);
+  });
+}
+
+/** טעינה מהתיקייה מחליפה את כל הנתונים — לא עושים אותה באמצע הקלדה או מודאל פתוח */
+function canLoadFromFolder() {
+  if (els.modal.open) return false;
+  const a = document.activeElement;
+  return !(a && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName));
+}
+
+function onWorkFolderLoaded() {
+  if (state.dealId && !store.getDeal(state.dealId)) { state.dealId = null; state.view = 'overview'; }
+  ui.toast('הנתונים נטענו מתיקיית העבודה');
+  render();
 }
 
 function markDirty() {
@@ -1348,22 +1403,29 @@ async function onClick(e) {
     case 'backup':
       return openBackupModal();
 
-    case 'pick-data-folder':
+    case 'wf-connect':
       try {
-        const name = await fileStore.pickDataFolder();
-        const res = await saveDataFile({ ask: true });
-        if (res.ok) ui.toast(`קובץ הנתונים נשמר ב-"${name}" ויתעדכן אחרי כל שינוי`);
-      } catch (err) { if (err?.name !== 'AbortError') ui.toast(err.message || 'בחירת התיקייה נכשלה', 'error'); }
-      return openBackupModal();
+        const name = await workFolder.connect();
+        if (workFolder.getStatus().state === 'ready') ui.toast(`תיקיית העבודה "${name}" מחוברת — הנתונים נשמרים בה`);
+      } catch (err) { if (err?.name !== 'AbortError') ui.toast(err.message || 'חיבור התיקייה נכשל', 'error'); }
+      return els.modal.open && document.getElementById('wf-panel') ? openBackupModal() : null;
 
-    case 'save-data-file':
-      await saveDataFile({ ask: true });
-      return openBackupModal();
+    case 'wf-grant':
+      if (!(await workFolder.grant())) ui.toast('לא ניתנה גישה לתיקייה', 'error');
+      return els.modal.open && document.getElementById('wf-panel') ? openBackupModal() : null;
 
-    case 'forget-data-folder':
-      await fileStore.forgetDataFolder();
-      ui.toast('התיקייה נותקה — הקובץ שכבר נכתב נשאר בה');
-      return openBackupModal();
+    case 'wf-save': {
+      await workFolder.check();
+      const st = workFolder.getStatus();
+      if (st.state === 'ready' && !st.dirty && !st.waiting) ui.toast('הנתונים שמורים בתיקיית העבודה');
+      return els.modal.open && document.getElementById('wf-panel') ? openBackupModal() : null;
+    }
+
+    case 'wf-disconnect':
+      return confirmModal('ניתוק תיקיית העבודה', 'הקובץ שבתיקייה נשאר, אבל שינויים מכאן והלאה יישמרו בדפדפן בלבד — בלי גיבוי ובלי סנכרון למכשירים אחרים.', async () => {
+        await workFolder.disconnect();
+        openBackupModal();
+      }, 'נתק');
 
     case 'export-backup':
       return exportBackup();
@@ -2104,7 +2166,6 @@ function renderMultiImportModal() {
     const map = { ...(store.getSetting('matterMap', {}) || {}) };
     for (const part of m.parts) if (part.ctx) map[part.key] = part.target;
     await store.setSetting('matterMap', map);
-    scheduleDataFile();
     closeModal();
     const extra = [
       orphans ? `${orphans} ללא שיוך` : '',
@@ -2964,33 +3025,39 @@ function exportPortfolioCSV() {
    גיבוי / שחזור
    ============================================================ */
 
-async function openBackupModal() {
+function openBackupModal() {
   const stats = ui.el('div', { class: 'facts' }, [
     ui.el('div', { class: 'fact' }, [ui.el('span', { class: 'fact__label', text: 'עסקאות' }), ui.el('span', { class: 'fact__value num', text: String(store.cache.deals.length) })]),
     ui.el('div', { class: 'fact' }, [ui.el('span', { class: 'fact__label', text: 'צוותים' }), ui.el('span', { class: 'fact__value num', text: String(store.cache.teams.length) })]),
     ui.el('div', { class: 'fact' }, [ui.el('span', { class: 'fact__label', text: 'רישומי ביצוע' }), ui.el('span', { class: 'fact__value num', text: String(store.cache.entries.length) })]),
   ]);
 
-  // קובץ הנתונים בתיקייה: עותק מלא שמתעדכן לבד — תיקיית ענן (OneDrive) מסנכרנת אותו למכשירים אחרים
-  const df = await fileStore.dataFolderState();
-  const when = df.savedAt ? new Date(df.savedAt).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' }) : '';
-  const dataFile = !fileStore.supportsFolder()
-    ? [ui.el('p', { class: 'field__hint', text: 'בחירת תיקייה לקובץ הנתונים נתמכת בכרום/אדג\' במחשב. במכשיר הזה: "ייצוא גיבוי" לשמירה ו"שחזור מגיבוי" לטעינת הקובץ מהתיקייה (למשל מ-OneDrive).' })]
-    : [
-      ui.el('p', { class: 'modal-text', text: df.name
-        ? `הקובץ ${fileStore.DATA_FILE} נשמר בתיקייה "${df.name}" ומתעדכן אחרי כל שינוי.${when ? ` עדכון אחרון: ${when}.` : ''}${df.ready ? '' : ' נדרש אישור גישה מחודש — לחץ "שמור עכשיו".'}`
-        : 'בחר תיקייה (למשל בתוך OneDrive) — המערכת תשמור בה עותק מלא של הנתונים ותעדכן אותו אחרי כל שינוי. במכשיר אחר טוענים אותו ב"שחזור מגיבוי".' }),
-      ui.el('div', { class: 'form-actions form-actions--wrap' }, df.name ? [
-        btn('שמור עכשיו', { iconName: 'check', action: 'save-data-file' }),
-        btn('החלף תיקייה', { iconName: 'cloud', action: 'pick-data-folder' }),
-        btn('נתק', { action: 'forget-data-folder' }),
-      ] : [btn('בחר תיקייה לקובץ הנתונים', { iconName: 'cloud', action: 'pick-data-folder', primary: true })]),
-    ];
+  // תיקיית העבודה: הקובץ שבה הוא מקור האמת; הדפדפן רק מטמון
+  const wf = workFolder.getStatus();
+  const wfText = wf.state === 'unsup'
+    ? 'הדפדפן הזה לא תומך בגישה לתיקיות (נתמך בכרום/אדג\' במחשב). כאן הנתונים נשמרים בדפדפן בלבד — לטעינת קובץ הנתונים מהתיקייה (למשל מ-OneDrive) השתמש ב"שחזור מגיבוי".'
+    : wf.state === 'none'
+      ? 'בחר תיקייה ייעודית (למשל "LexBudget" בתוך OneDrive). כל הנתונים יישמרו בה בקובץ אחד שמתעדכן אחרי כל שינוי, עם גיבוי יומי — ומכשיר אחר שמחובר לאותה תיקייה יראה את אותם נתונים.'
+      : wf.state === 'prompt'
+        ? `מחוברת לתיקייה "${wf.name}", אבל אחרי הפעלת הדפדפן נדרש אישור גישה. עד אז שינויים נשמרים בדפדפן בלבד.`
+        : wf.state === 'err' ? wf.err
+          : `הנתונים נשמרים בקובץ ${fileStore.DATA_FILE} בתיקייה "${wf.name}"${wf.savedAt ? ` · נשמר לאחרונה ${WF_TIME(wf.savedAt)}` : ''}. גיבוי יומי של 30 הימים האחרונים בתת-התיקייה "${fileStore.BACKUP_DIR}".`;
+  const wfActions = wf.state === 'unsup' ? []
+    : wf.state === 'none' ? [btn('חיבור תיקיית עבודה', { iconName: 'cloud', action: 'wf-connect', primary: true })]
+      : [
+        wf.state === 'prompt' ? btn('אישור גישה לתיקייה', { iconName: 'check', action: 'wf-grant', primary: true })
+          : btn(wf.state === 'err' ? 'נסה שוב' : 'שמור ובדוק עכשיו', { iconName: 'refresh', action: 'wf-save' }),
+        btn('החלף תיקייה', { iconName: 'cloud', action: 'wf-connect' }),
+        btn('נתק', { action: 'wf-disconnect' }),
+      ];
+  const dataFile = [
+    ui.el('p', { class: 'modal-text', id: 'wf-panel', text: wfText }),
+    wfActions.length ? ui.el('div', { class: 'form-actions form-actions--wrap' }, wfActions) : null,
+  ];
 
   const body = ui.el('div', { class: 'modal-form' }, [
-    ui.el('p', { class: 'modal-text', text: 'הנתונים נשמרים בדפדפן של המכשיר הזה (IndexedDB) ועובדים גם ללא חיבור. כדי שיהיו זמינים במכשיר אחר — קובץ נתונים בתיקייה, או גיבוי ידני.' }),
     stats,
-    ui.el('h3', { class: 'modal-sub', text: 'קובץ נתונים בתיקייה' }),
+    ui.el('h3', { class: 'modal-sub', text: 'תיקיית העבודה' }),
     ...dataFile,
     ui.el('h3', { class: 'modal-sub', text: 'גיבוי ידני' }),
     ui.el('div', { class: 'form-actions form-actions--wrap' }, [

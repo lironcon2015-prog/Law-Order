@@ -103,6 +103,11 @@
 | `LexBudget-Offline-Lite.html` | **גרסה מופחתת להעברה** — בלי טאב הרווחיות והעלויות: `node budget/build-offline.mjs --lite` (`FEATURES.profit=false`, מודול הטאב לא נארז) |
 | `v2/build-offline.mjs` · `budget/build-offline.mjs` | סקריפטי הבנייה: `node v2/build-offline.mjs` · `node budget/build-offline.mjs` |
 
+### ⚠️ LexBudget — הנתונים חיים בתיקיית העבודה, לא בדפדפן
+הקובץ `lexbudget-data.json` בתיקייה שהמשתמש חיבר הוא **מקור האמת**; IndexedDB הוא מטמון (`budget/js/work-folder.js`).
+כל נתון חדש שנדרש לנכונות חייב להיכנס ל-`store.collectBackup`/`applyBackup` — אחרת הוא לא יגיע לקובץ.
+מה שנשמר רק ב-`localStorage`/`localPrefs` הוא העדפת תצוגה מקומית בלבד. לעולם לא לדרוס קובץ בתיקייה בלי גיבוי.
+
 ### ⚠️ קבצי האופליין — זיהוי ועדכון (לכל סשן)
 - **מיקום:** `LexLedger-Offline.html` + `LexBudget-Offline.html` בשורש ה-repo, בענף `main` **בלבד**.
   סשנים משוכפלים לרוב בלי `main` — אם קובץ לא נראה: `git fetch origin main` ואז `git show origin/main:<file>`.

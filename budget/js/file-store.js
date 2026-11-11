@@ -226,63 +226,99 @@ export async function openDocument(id) {
 
 
 /* ============================================================
-   קובץ הנתונים בתיקייה (למשל תיקיית OneDrive)
+   תיקיית העבודה — קובץ הנתונים
    ============================================================
-   הנתונים עצמם חיים ב-IndexedDB של הדפדפן. כאן נשמר **עותק מלא ומתעדכן** שלהם כקובץ JSON
-   בתיקייה שהמשתמש בחר — כדי שתיקיית ענן תסנכרן אותו, ואפשר יהיה לטעון אותו במכשיר אחר
-   ("שחזור מגיבוי"). ה-handle מקומי למכשיר (`localPrefs`), כמו תיקיית המסמכים. */
+   שכבת הקבצים בלבד (קריאה/כתיבה/גיבויים). מדיניות הסנכרון — מי גובר, מתי טוענים — ב-work-folder.js.
+   ה-handle וחתימת הגרסה האחרונה שנראתה נשמרים ב-`localPrefs` (מקומי למכשיר). */
 
-const DATA_KEY = 'dataDir';
+const WORK_KEY = 'dataDir';
 export const DATA_FILE = 'lexbudget-data.json';
+export const BACKUP_DIR = 'גיבויים';
+const BACKUP_RE = /^lexbudget-\d{4}-\d{2}-\d{2}\.json$/;
+const BACKUP_KEEP = 30;
 
-async function dataHandle() {
-  const rec = await db.get('localPrefs', DATA_KEY);
-  return rec || null;
+// הרשומה נקראת מה-DB פעם אחת ונשמרת בזיכרון — הסנכרון ניגש אליה בכל כמה שניות
+let workRec;
+export async function workFolderRec() {
+  if (workRec === undefined) workRec = (await db.get('localPrefs', WORK_KEY)) || null;
+  return workRec;
 }
 
-/** מצב קובץ הנתונים: { name, ready, savedAt } — name ריק = לא נבחרה תיקייה */
-export async function dataFolderState() {
-  const rec = await dataHandle();
-  if (!rec?.handle) return { name: '', ready: false, savedAt: '' };
-  let ready = false;
-  try { ready = (await rec.handle.queryPermission({ mode: 'readwrite' })) === 'granted'; } catch { /* נשאר false */ }
-  return { name: rec.handle.name, ready, savedAt: rec.savedAt || '' };
+async function saveRec(patch) {
+  workRec = { ...((await workFolderRec()) || {}), ...patch, key: WORK_KEY };
+  await db.put('localPrefs', workRec);
+}
+export const setWorkSig = (sig, savedAt) => saveRec({ sig, savedAt });
+
+/** 'granted' | 'prompt' | '' (אין תיקייה) — בלי לבקש הרשאה */
+export async function workFolderPermission() {
+  const rec = await workFolderRec();
+  if (!rec?.handle) return '';
+  try { return (await rec.handle.queryPermission({ mode: 'readwrite' })) === 'granted' ? 'granted' : 'prompt'; }
+  catch { return 'prompt'; }
 }
 
-/** בחירת התיקייה לקובץ הנתונים (מתוך לחיצת משתמש) */
-export async function pickDataFolder() {
-  if (!supportsFolder()) throw new Error('הדפדפן אינו תומך בבחירת תיקייה (נתמך בכרום/אדג\' במחשב)');
+/** חיבור תיקיית העבודה (מתוך לחיצת משתמש). תיקיית המסמכים, אם לא נבחרה אחרת, היא אותה תיקייה */
+export async function connectWorkFolder() {
+  if (!supportsFolder()) throw new Error('הדפדפן אינו תומך בגישה לתיקיות (נתמך בכרום/אדג\' במחשב)');
   const handle = await window.showDirectoryPicker({ id: 'lexbudget-data', mode: 'readwrite', startIn: 'documents' });
   if (!(await ensurePermission(handle))) throw new Error('לא ניתנה הרשאת כתיבה לתיקייה');
-  await db.put('localPrefs', { key: DATA_KEY, handle, savedAt: '' });
+  workRec = { key: WORK_KEY, handle, sig: '', savedAt: '' };
+  await db.put('localPrefs', workRec);
+  if (!(await storedHandle())) await db.put('localPrefs', { key: DIR_KEY, handle });
   return handle.name;
 }
 
-export async function forgetDataFolder() {
-  await db.remove('localPrefs', DATA_KEY);
+/** חידוש ההרשאה אחרי הפעלה מחדש של הדפדפן (מתוך לחיצת משתמש) */
+export async function grantWorkFolder() {
+  const rec = await workFolderRec();
+  return rec?.handle ? ensurePermission(rec.handle) : false;
 }
 
-/**
- * כותב את קובץ הנתונים. `ask` = מותר לבקש הרשאה (רק מתוך לחיצת משתמש); בשמירה אוטומטית
- * ברקע אין לחיצה, ולכן בלי הרשאה בתוקף מוחזר needsPermission ולא נזרקת שגיאה.
- * @returns {{ok:boolean, skipped?:boolean, needsPermission?:boolean, error?:string, savedAt?:string}}
- */
-export async function writeDataFile(text, { ask = false } = {}) {
-  const rec = await dataHandle();
-  if (!rec?.handle) return { ok: false, skipped: true };
+export async function forgetWorkFolder() {
+  workRec = null;
+  await db.remove('localPrefs', WORK_KEY);
+}
+
+/** @returns {{exists:boolean, text:string}} */
+export async function readWorkFile() {
+  const rec = await workFolderRec();
+  let fh;
+  try { fh = await rec.handle.getFileHandle(DATA_FILE); }
+  catch (err) { if (err?.name === 'NotFoundError') return { exists: false, text: '' }; throw err; }
+  return { exists: true, text: await (await fh.getFile()).text() };
+}
+
+async function writeText(dir, name, text) {
+  const fh = await dir.getFileHandle(name, { create: true });
+  const w = await fh.createWritable();
+  await w.write(text);
+  await w.close();
+}
+
+/** עותק בתת-התיקייה "גיבויים". שומרים רק את 30 הגיבויים היומיים האחרונים; עותקי התנגשות לא נמחקים */
+export async function writeBackupCopy(name, text) {
+  const rec = await workFolderRec();
+  const dir = await rec.handle.getDirectoryHandle(BACKUP_DIR, { create: true });
+  await writeText(dir, name, text);
+  const daily = [];
+  for await (const [entry] of dir.entries()) if (BACKUP_RE.test(entry)) daily.push(entry);
+  daily.sort();
+  for (const old of daily.slice(0, Math.max(0, daily.length - BACKUP_KEEP))) await dir.removeEntry(old).catch(() => {});
+}
+
+/** האם כבר קיים גיבוי יומי בשם הזה */
+export async function hasBackup(name) {
+  const rec = await workFolderRec();
   try {
-    const granted = ask
-      ? await ensurePermission(rec.handle)
-      : (await rec.handle.queryPermission({ mode: 'readwrite' })) === 'granted';
-    if (!granted) return { ok: false, needsPermission: true };
-    const fh = await rec.handle.getFileHandle(DATA_FILE, { create: true });
-    const w = await fh.createWritable();
-    await w.write(text);
-    await w.close();
-    const savedAt = new Date().toISOString();
-    await db.put('localPrefs', { key: DATA_KEY, handle: rec.handle, savedAt });
-    return { ok: true, savedAt };
-  } catch (err) {
-    return { ok: false, error: err?.message || 'הכתיבה נכשלה' };
-  }
+    const dir = await rec.handle.getDirectoryHandle(BACKUP_DIR);
+    await dir.getFileHandle(name);
+    return true;
+  } catch { return false; }
+}
+
+export async function writeWorkFile(text, { sig, savedAt }) {
+  const rec = await workFolderRec();
+  await writeText(rec.handle, DATA_FILE, text);
+  await saveRec({ sig, savedAt });
 }

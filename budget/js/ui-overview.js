@@ -101,6 +101,8 @@ export function renderSidebar(root, { deals, snapshots, view, activeId, unit, th
       link('go-people', 'users', 'אנשי צוות', view === 'people'),
       link('go-rates', 'coins', 'תעריפונים', view === 'rates'),
       link('backup', 'database', 'גיבוי ושחזור'),
+      // מצב תיקיית העבודה — ממולא ב-app.js (paintWorkFolder), כי הוא משתנה בלי render
+      el('button', { class: 'side__wf', id: 'wf-state', type: 'button', dataset: { action: 'backup' } }),
       el('div', { class: 'side__meta' }, [
         el('div', { class: 'side__themes', role: 'group', 'aria-label': 'ערכת צבעים' }, THEMES.map((t) => el('button', {
           class: `side__swatch side__swatch--${t.id}`, type: 'button', 'aria-label': t.label, 'aria-pressed': String(t.id === theme),
