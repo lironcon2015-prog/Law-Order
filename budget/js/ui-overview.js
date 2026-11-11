@@ -241,6 +241,7 @@ export function renderOverview(root, { snapshots, scope = 'open', unit = 'hours'
     el('div', { class: 'phead__actions' }, [
       unitSwitch(unit),
       seg([['open', 'פתוחות', 'פעילות ובהמתנה'], ['all', 'הכל', 'כולל שנסגרו ובארכיון']], scope, 'set-scope', 'scope', { label: 'אילו עסקאות להציג' }),
+      button('דוח מצרפי', { action: 'import-progress', iconName: 'upload', title: 'ייבוא דוח שעות / חשבון של כמה עסקאות — מתפצל לפי תיק' }),
       button('ייצוא', { action: 'export-portfolio', iconName: 'download', title: 'ייצוא התיק לאקסל' }),
       button('עסקה חדשה', { action: 'new-deal', iconName: 'plus', kind: 'primary' }),
     ]),

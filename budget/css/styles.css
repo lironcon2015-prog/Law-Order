@@ -671,6 +671,7 @@ textarea.input { height: auto; min-height: 84px; padding: 9px 11px; resize: vert
 input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; flex: none; }
 .inline-check { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text-2); cursor: pointer; }
 .check-row { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+.modal-sub { margin: 6px 0 0; font-size: 13px; font-weight: 700; color: var(--text-2); }
 
 /* שדה "שקט" — נראה כטקסט עד ריחוף או פוקוס (טבלאות עריכה) */
 .qinput {

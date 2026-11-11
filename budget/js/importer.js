@@ -11,6 +11,8 @@ import { num, uid, round2, normalizeSplits, allocateHours, localISO, todayISO } 
 export const TARGET_FIELDS = [
   { id: 'date',        label: 'תאריך ביצוע',  keys: ['תאריך ביצוע', 'תאריך עבודה', 'תאריך', 'date', 'יום'] },
   { id: 'billDate',    label: 'תאריך חיוב',   keys: ['תאריך חיוב', 'חודש חיוב', 'תקופת חיוב', 'תאריך חשבונית', 'billing date', 'bill date', 'invoice date', 'period'] },
+  // דוח מצרפי של כמה עסקאות: העמודה שמזהה לאיזה תיק שייכת כל שורה (ראה splitByMatter)
+  { id: 'matter',      label: 'תיק / עסקה',   keys: ['מספר תיק', 'מס תיק', 'שם תיק', 'שם התיק', 'תיק', 'matter', 'matter no', 'matter name', 'case', 'פרויקט', 'project', 'שם עסקה', 'עסקה', 'deal'] },
   { id: 'description', label: 'תיאור',        keys: ['תיאור', 'פירוט', 'נושא', 'description', 'details', 'עבודה', 'משימה', 'narrative'] },
   { id: 'teamName',    label: 'צוות',         keys: ['צוות', 'team', 'מחלקה', 'תחום', 'practice', 'department'] },
   { id: 'personName',  label: 'עורך דין / עובד', keys: ['שם עורך דין', 'עורך דין', 'עו"ד מטפל', 'עובד', 'שם עובד', 'מבצע', 'ביצע', 'איש צוות', 'timekeeper', 'lawyer', 'attorney', 'employee', 'user', 'שם'] },
@@ -244,6 +246,133 @@ export function fuzzyPersonMatch(key, candidateKeys) {
     if (initialsEq([...a].reverse(), b)) return { key: cand, exact: false };
   }
   return null;
+}
+
+/* ============================================================
+   דוח מצרפי — פיצול לפי תיק
+   ============================================================ */
+
+const MATTER_WORD = '(?:תיק|לקוח|matter|client|case|project|פרויקט|עסקה)';
+const MATTER_RE = new RegExp(`(^|[\\s:(])${MATTER_WORD}([\\s:#\\-–—.)]|$)`, 'i');
+const MATTER_PREFIX_RE = new RegExp(`^\\s*(?:מספר|מס['׳.]?|שם)?\\s*ה?${MATTER_WORD}\\s*(?:מספר|מס['׳.]?|שם|no\\.?|number|name)?\\s*[:#\\-–—.]*\\s*`, 'i');
+
+/** מפתח השוואה לשם תיק: בלי גרשיים, פיסוק ורווחים כפולים */
+export const matterKey = (s) => norm(s).replace(/[.,;:#()\[\]{}\/\\|–—-]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+const cellText = (c) => (c === null || c === undefined ? '' : String(c).trim());
+const hasPositiveHours = (row, mapping) => mapping.hours !== undefined && num(row[mapping.hours]) > 0;
+
+/**
+ * שורת כותרת-ביניים של תיק ("תיק: 1234 — רכישת אלפא") בתוך דוח מצרפי: מעט תאים, בלי שעות ובלי תאריך.
+ * @returns {{label:string, strong:boolean}|null}  strong = מופיעה בה מילה כמו "תיק"/"לקוח"
+ */
+function groupHeaderOf(row, mapping) {
+  if (!row || isTotalsRow(row)) return null;
+  const filled = [];
+  row.forEach((c, i) => { if (cellText(c)) filled.push(i); });
+  if (!filled.length || filled.length > 3) return null;
+  if (hasPositiveHours(row, mapping)) return null;
+  if (mapping.date !== undefined && toISODate(row[mapping.date])) return null;
+  const texts = filled.map((i) => cellText(row[i]));
+  if (!texts.some((t) => /[A-Za-z֐-׿0-9]{2,}/.test(t))) return null;
+  if (texts.some((t) => /^(סהכ|סה כ|סיכום|total|subtotal)(\s|$)/.test(norm(t)))) return null;
+  const strong = texts.some((t) => MATTER_RE.test(t.replace(/["'׳״]/g, '')));
+  // טקסט בודד בעמודת התיאור הוא המשך תיאור ולא כותרת תיק
+  if (!strong && filled.length === 1 && filled[0] === mapping.description) return null;
+  let label = texts.join(' ').replace(/\s+/g, ' ').trim();
+  const stripped = label.replace(MATTER_PREFIX_RE, '').trim();
+  if (stripped.length >= 2) label = stripped;
+  return { label, strong };
+}
+
+/**
+ * מפצל דוח מצרפי לקבוצות לפי תיק. שתי שיטות, לפי מה שנמצא בקובץ:
+ *  - 'column' — עמודת תיק בכל שורה (mapping.matter)
+ *  - 'header' — כותרת-ביניים מעל כל בלוק שורות (גם מעל שורת הכותרות, לבלוק הראשון)
+ * שורות חיוב שאינן משויכות לתיק **אינן נכללות באף קבוצה** — הן נספרות ב-`unassigned` בלבד.
+ * @param mode 'auto' | 'column' | 'header'
+ * @returns {{mode:'column'|'header'|'none', groups:Array<{key,label,rows,hours}>, unassigned:{rows:number,hours:number}}}
+ */
+export function splitByMatter(rows, headerRow, mapping, mode = 'auto') {
+  const groups = new Map();
+  const unassigned = { rows: 0, hours: 0 };
+  const hoursOf = (r) => (mapping.hours === undefined ? 0 : num(r[mapping.hours]));
+  const push = (label, row) => {
+    const key = matterKey(label);
+    if (!key) { if (hoursOf(row) > 0) { unassigned.rows += 1; unassigned.hours = round2(unassigned.hours + hoursOf(row)); } return; }
+    const g = groups.get(key) || { key, label: String(label).trim(), rows: [], hours: 0 };
+    g.rows.push(row);
+    g.hours = round2(g.hours + hoursOf(row));
+    groups.set(key, g);
+  };
+  const done = (m) => ({ mode: groups.size ? m : 'none', groups: [...groups.values()].filter((g) => g.hours > 0 || g.rows.length), unassigned });
+
+  const body = sheetBody(rows, headerRow);
+  const hasColumn = mapping.matter !== undefined && body.some((r) => cellText(r[mapping.matter]));
+  if (mode === 'column' || (mode === 'auto' && hasColumn)) {
+    if (mapping.matter === undefined) return done('none');
+    for (const r of body) push(cellText(r[mapping.matter]), r);
+    return done('column');
+  }
+
+  // כותרות-ביניים: אם יש בגוף הדוח כותרות "חזקות" (עם המילה תיק/לקוח) — רק הן נחשבות
+  const cands = body.map((r) => groupHeaderOf(r, mapping));
+  const anyStrong = cands.some((c) => c?.strong);
+  let current = '';
+  // הבלוק הראשון: הכותרת שלו יושבת בדרך כלל מעל שורת הכותרות
+  for (const r of (rows || []).slice(0, headerRow)) {
+    const h = groupHeaderOf(r, mapping);
+    if (h?.strong) current = h.label;
+  }
+  body.forEach((r, i) => {
+    const h = cands[i];
+    if (h && (h.strong || !anyStrong)) { current = h.label; return; }
+    if (hoursOf(r) > 0 || (mapping.personName !== undefined && cellText(r[mapping.personName]))) push(current, r);
+  });
+  for (const [k, g] of groups) if (!(g.hours > 0)) groups.delete(k);
+  return done('header');
+}
+
+/**
+ * מתאים שם תיק מהדוח לעסקה במערכת: זיכרון (שיוך ידני קודם) → מספר תיק → שם העסקה.
+ * התאמה דו-משמעית (שתי עסקאות מתאימות באותה רמה) אינה מוחזרת — המשתמש יבחר.
+ * @returns {{dealId:string, how:'memory'|'code'|'name'}|null}
+ */
+export function matchMatterToDeal(label, deals, memory = {}) {
+  const key = matterKey(label);
+  if (!key) return null;
+  const remembered = memory[key];
+  if (remembered && deals.some((d) => d.id === remembered)) return { dealId: remembered, how: 'memory' };
+  const tight = (v) => matterKey(v).replace(/\s+/g, '');
+  const keyTight = key.replace(/\s+/g, '');
+  const pick = (list, how) => (list.length === 1 ? { dealId: list[0].id, how } : null);
+  const byCode = deals.filter((d) => { const c = tight(d.code); return c.length >= 2 && keyTight.includes(c); });
+  // כמה קודים מוכלים זה בזה ("12" בתוך "123") — הארוך ביותר הוא המדויק
+  if (byCode.length > 1) {
+    const max = Math.max(...byCode.map((d) => tight(d.code).length));
+    const longest = byCode.filter((d) => tight(d.code).length === max);
+    if (longest.length === 1) return { dealId: longest[0].id, how: 'code' };
+  }
+  const code = pick(byCode, 'code');
+  if (code) return code;
+  const exact = pick(deals.filter((d) => matterKey(d.name) === key), 'name');
+  if (exact) return exact;
+  // גם לפי חלק השם בלבד ("1001 - רכישת אלפא" מול עסקה בשם "רכישת אלפא טכנולוגיות")
+  const namePart = matterKey(parseMatterLabel(label).name);
+  return pick(deals.filter((d) => {
+    const n = matterKey(d.name);
+    if (n.length < 3) return false;
+    return key.includes(n) || (key.length >= 4 && n.includes(key)) || (namePart.length >= 4 && (n.includes(namePart) || namePart.includes(n)));
+  }), 'name');
+}
+
+/** מפרק שם תיק מהדוח למספר תיק ושם — להצעת עסקה חדשה ("1234 - רכישת אלפא" → {code:'1234', name:'רכישת אלפא'}) */
+export function parseMatterLabel(label) {
+  const text = String(label || '').trim();
+  const m = /^([A-Za-z&]{0,6}[-/]?\d[\w&/-]*)\s*[-–—:|,]?\s*(.*)$/.exec(text) || /^(.*?)\s*[-–—:|,(]\s*([A-Za-z&]{0,6}[-/]?\d[\w&/-]*)\)?$/.exec(text);
+  if (!m) return { code: '', name: text };
+  const [a, b] = /^\S*\d/.test(m[1]) ? [m[1], m[2]] : [m[2], m[1]];
+  return { code: a.trim(), name: (b || '').trim() || text };
 }
 
 /**

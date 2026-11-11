@@ -12,12 +12,13 @@ import {
 import * as ui from './ui.js';
 import * as fileStore from './file-store.js';
 import { readTabularFile } from './xlsx.js';
-import { downloadWorkbook } from './xlsx-write.js';
+import { downloadWorkbook, buildWorkbook } from './xlsx-write.js';
 import { pdfToSheets, isPdf } from './pdf-table.js';
 import {
   detectHeaderRow, guessMapping, parseBudgetSheet, collectPeople,
   rowsToProgress, sheetBody, personKey, fuzzyPersonMatch, pickBestSheet,
   guessContactMapping, rowsToContacts, CONTACT_FIELDS,
+  splitByMatter, matchMatterToDeal, parseMatterLabel,
 } from './importer.js';
 
 /* ============================================================
@@ -91,6 +92,10 @@ function simState(dealId) {
 
 let els = {};
 let importCtx = null;
+// הייבוא פועל על העסקה הפתוחה — או, בדוח מצרפי, על העסקה של החלק הנוכחי (importCtx.dealId)
+const impDealId = () => importCtx?.dealId || state.dealId;
+const impSnap = () => state.snapshots.get(impDealId()) || null;
+const impRows = () => importCtx.bodyRows || sheetBody(importCtx.sheets[importCtx.sheetIndex].rows, importCtx.headerRow);
 
 /* ============================================================
    Bootstrap
@@ -133,7 +138,7 @@ async function init() {
     state.view = 'people';
   }
 
-  store.setMutationListener(() => { markDirty(); });
+  store.setMutationListener(() => { markDirty(); scheduleDataFile(); });
   ui.initTips();
   bindEvents();
   registerSW();
@@ -301,6 +306,35 @@ function refreshDealHeader() {
   renderList();
 }
 
+/* ---------- קובץ הנתונים בתיקייה (OneDrive וכד') — עותק מלא שמתעדכן אחרי כל שינוי ---------- */
+
+let dataFileTimer = null;
+let dataFileWarned = false;
+
+function scheduleDataFile() {
+  clearTimeout(dataFileTimer);
+  dataFileTimer = setTimeout(() => saveDataFile(), 3000);
+}
+
+/** `ask` = נקרא מלחיצת משתמש, ולכן מותר לבקש הרשאה ולדווח על התוצאה */
+async function saveDataFile({ ask = false } = {}) {
+  clearTimeout(dataFileTimer);
+  let res;
+  try {
+    res = await fileStore.writeDataFile(JSON.stringify(await store.collectBackup()), { ask });
+  } catch (err) { res = { ok: false, error: err?.message || 'הכתיבה נכשלה' }; }
+  if (res.skipped) return res;
+  if (res.ok) { dataFileWarned = false; if (ask) ui.toast('קובץ הנתונים נשמר בתיקייה'); return res; }
+  // בלי הרשאה בתוקף (הדפדפן מבקש אותה מחדש בכל הפעלה) — מתריעים פעם אחת, לא על כל שינוי
+  if (ask || !dataFileWarned) {
+    dataFileWarned = true;
+    ui.toast(res.needsPermission
+      ? 'קובץ הנתונים בתיקייה לא מתעדכן — נדרש אישור גישה: "גיבוי ושחזור" ← "שמור עכשיו"'
+      : `שמירת קובץ הנתונים נכשלה: ${res.error}`, 'error');
+  }
+  return res;
+}
+
 function markDirty() {
   const badge = document.getElementById('save-state');
   if (!badge) return;
@@ -394,8 +428,8 @@ function bindEvents() {
     if (!e.dataTransfer?.files?.length) return;
     e.preventDefault();
     document.body.classList.remove('dragging-file');
-    if (state.view !== 'deal') { ui.toast('בחר עסקה לפני העלאת קובץ', 'error'); return; }
-    // כל קובץ שנגרר נכנס לייבוא הדיווח (דוח שעות או חשבון — בוחרים במסך הייבוא)
+    // כל קובץ שנגרר נכנס לייבוא הדיווח (דוח שעות או חשבון — בוחרים במסך הייבוא).
+    // מחוץ לעסקה מתקבל רק דוח מצרפי — startProgressImport מזהה ומנתב
     await startProgressImport(e.dataTransfer.files[0]);
   });
 
@@ -1100,6 +1134,9 @@ async function onClick(e) {
     case 'import-progress':
       return pickFile((file) => startProgressImport(file));
 
+    case 'multi-people':
+      return openPartPeople(target.dataset.key);
+
     case 'export-progress':
       return exportProgressCSV();
 
@@ -1309,6 +1346,23 @@ async function onClick(e) {
     }
 
     case 'backup':
+      return openBackupModal();
+
+    case 'pick-data-folder':
+      try {
+        const name = await fileStore.pickDataFolder();
+        const res = await saveDataFile({ ask: true });
+        if (res.ok) ui.toast(`קובץ הנתונים נשמר ב-"${name}" ויתעדכן אחרי כל שינוי`);
+      } catch (err) { if (err?.name !== 'AbortError') ui.toast(err.message || 'בחירת התיקייה נכשלה', 'error'); }
+      return openBackupModal();
+
+    case 'save-data-file':
+      await saveDataFile({ ask: true });
+      return openBackupModal();
+
+    case 'forget-data-folder':
+      await fileStore.forgetDataFolder();
+      ui.toast('התיקייה נותקה — הקובץ שכבר נכתב נשאר בה');
       return openBackupModal();
 
     case 'export-backup':
@@ -1680,6 +1734,9 @@ function onImportChange(node) {
   if (!importCtx) return;
   const kind = node.dataset.imp;
 
+  // ---- דוח מצרפי: הגדרות משותפות ושיוך תיק→עסקה ----
+  if (importCtx.mode === 'multi') return onMultiImportChange(node, kind);
+
   // ---- ייבוא דוח שעות למעקב ----
   if (importCtx.mode === 'progress') {
     if (kind === 'sheet') {
@@ -1735,7 +1792,7 @@ function onImportChange(node) {
  * נפתח מעל מודאל הייבוא ומחזיר אליו (importCtx נשמר).
  */
 function openNewMemberModal(key) {
-  const snap = currentSnapshot();
+  const snap = impSnap();
   if (!snap || !importCtx) return;
   const person = (importCtx.people || []).find((p) => p.key === key);
   if (!person) return;
@@ -1808,29 +1865,270 @@ function openAllocationModal(key) {
    ============================================================ */
 
 async function startProgressImport(file) {
-  const snap = currentSnapshot();
-  if (!snap) return ui.toast('בחר עסקה תחילה', 'error');
-  if (!snap.teams.length) return ui.toast('צור צוותים בתקציב לפני ייבוא דוח', 'error');
-
   let sheets;
   try { sheets = await readAnyTable(file); }
   catch (err) { return ui.toast(err.message || 'קריאת הקובץ נכשלה', 'error'); }
 
   // בקובץ עם כמה טבלאות (שער חשבון, נספח הוצאות) נבחרת זו שנראית כמו דוח שעות
   const sheetIndex = pickBestSheet(sheets);
-  const headerRow = detectHeaderRow(sheets[sheetIndex].rows);
-  importCtx = {
-    mode: 'progress', file, sheets, sheetIndex,
-    headerRow: headerRow < 0 ? 0 : headerRow,
-    mapping: guessMapping(sheets[sheetIndex].rows[headerRow < 0 ? 0 : headerRow] || []),
+  const detected = detectHeaderRow(sheets[sheetIndex].rows);
+  const headerRow = detected < 0 ? 0 : detected;
+  const base = {
+    file, sheets, sheetIndex, headerRow,
+    mapping: guessMapping(sheets[sheetIndex].rows[headerRow] || []),
     cumulative: false,
     sourceKind: 'import',   // דוח שעות | חשבון (מחליף את הדוח של אותה תקופת חיוב)
     overlap: 'skip',        // חפיפה עם דיווחים קודמים: skip | replace | add
+  };
+
+  // דוח מצרפי (כמה תיקים בקובץ אחד) נקלט לכל העסקאות יחד; מחוץ לעסקה — זה המסלול היחיד
+  const inDeal = state.view === 'deal' && !!currentSnapshot();
+  const split = splitByMatter(sheets[sheetIndex].rows, headerRow, base.mapping);
+  if (split.groups.length >= 2 || (split.groups.length && !inDeal)) return startMultiImport(base);
+  if (!inDeal) return ui.toast('בחר עסקה תחילה — או העלה דוח מצרפי עם עמודת תיק / כותרות תיק', 'error');
+  startSingleImport(base);
+}
+
+function startSingleImport(base) {
+  if (!currentSnapshot()?.teams.length) return ui.toast('צור צוותים בתקציב לפני ייבוא דוח', 'error');
+  importCtx = {
+    mode: 'progress', ...base,
     // אלוקציה לכל אדם: [{ teamId, lineId, pct }] — כמה יעדים = פיצול השעות ביניהם
     peopleTeams: {}, peopleAlloc: {},
   };
   syncProgressPeople();
   renderProgressImportModal();
+}
+
+/* ---------- דוח מצרפי: כמה עסקאות בקובץ אחד ---------- */
+
+function startMultiImport(base) {
+  importCtx = { mode: 'multi', ...base, matterMode: 'auto', parts: [], splitMode: 'none', unassigned: { rows: 0, hours: 0 } };
+  rebuildParts();
+  renderMultiImportModal();
+}
+
+/** מריץ פונקציה כשהחלק (תיק אחד מהדוח) הוא הקשר הייבוא הפעיל */
+function withPart(part, fn) {
+  const parent = importCtx;
+  importCtx = part.ctx;
+  try { return fn(); } finally { importCtx = parent; }
+}
+
+/** מפצל מחדש את הדוח לתיקים (אחרי שינוי גיליון / עמודת תיק), ושומר על הבחירות שכבר נעשו */
+function rebuildParts() {
+  const m = importCtx;
+  const split = splitByMatter(m.sheets[m.sheetIndex].rows, m.headerRow, m.mapping, m.matterMode);
+  m.splitMode = split.mode;
+  m.unassigned = split.unassigned;
+  const memory = store.getSetting('matterMap', {}) || {};
+  const prev = new Map(m.parts.map((p) => [p.key, p]));
+  m.parts = split.groups.map((g) => {
+    const old = prev.get(g.key);
+    let target = old ? old.target : undefined;
+    let how = old ? old.how : '';
+    if (target === undefined) {
+      const hit = matchMatterToDeal(g.label, store.cache.deals, memory);
+      target = hit?.dealId || '';
+      how = hit?.how || '';
+    }
+    if (target && target !== 'skip' && !store.getDeal(target)) { target = ''; how = ''; }
+    return { key: g.key, label: g.label, rows: g.rows, hours: g.hours, target, how, ctx: old?.ctx || null, stats: null };
+  });
+  for (const part of m.parts) preparePart(part);
+}
+
+/** בונה לחלק הקשר ייבוא משלו מול העסקה שנבחרה לו, ומשייך בו את האנשים */
+function preparePart(part, { autoAssign = false } = {}) {
+  const m = importCtx;
+  if (!part.target || part.target === 'skip') { part.ctx = null; part.stats = null; return; }
+  const same = part.ctx && part.ctx.dealId === part.target;
+  part.ctx = {
+    mode: 'progress', parent: m, part, dealId: part.target, bodyRows: part.rows,
+    file: m.file, sheets: m.sheets, sheetIndex: m.sheetIndex, headerRow: m.headerRow,
+    mapping: m.mapping,   // משותף לכל החלקים — תיקון מיפוי באחד חל על כולם
+    cumulative: m.cumulative, sourceKind: m.sourceKind, overlap: m.overlap,
+    peopleTeams: {}, peopleAlloc: same ? part.ctx.peopleAlloc : {}, batchId: same ? part.ctx.batchId : undefined,
+  };
+  withPart(part, () => {
+    syncProgressPeople();
+    // עסקה שזה עתה הוקמה: מי שלא זוהה מוצמד לצוות הראשון לפי הדרגה/התעריף שבדוח
+    if (autoAssign) assignPeopleToTeam(impSnap()?.teams[0]?.id, { onlyMissing: true });
+  });
+  refreshPartStats(part);
+}
+
+function refreshPartStats(part) {
+  if (!part.ctx) { part.stats = null; return; }
+  const m = part.ctx.parent;
+  Object.assign(part.ctx, { cumulative: m.cumulative, sourceKind: m.sourceKind, overlap: m.overlap });
+  withPart(part, () => {
+    const res = progressPreview();
+    let list = res.records.filter((r) => r.lineId || r.teamId);
+    if (!m.cumulative && m.overlap === 'skip') list = list.filter((r) => !r.duplicate);
+    const people = importCtx.people || [];
+    part.stats = {
+      people: people.length,
+      missing: people.filter((p) => !(importCtx.peopleAlloc[p.key] || []).length).length,
+      records: list.length,
+      hours: round2(list.reduce((sum, r) => sum + num(r.hours), 0)),
+      duplicates: res.duplicates || 0,
+      noTeams: !(impSnap()?.teams.length),
+    };
+  });
+}
+
+function onMultiImportChange(node, kind) {
+  const m = importCtx;
+  if (kind === 'sheet') {
+    m.sheetIndex = Number(node.value);
+    const hr = detectHeaderRow(m.sheets[m.sheetIndex].rows);
+    m.headerRow = hr < 0 ? 0 : hr;
+    // המיפוי משותף בהפניה לכל החלקים — מתעדכן במקום
+    const next = guessMapping(m.sheets[m.sheetIndex].rows[m.headerRow] || []);
+    for (const k of Object.keys(m.mapping)) delete m.mapping[k];
+    Object.assign(m.mapping, next);
+    m.matterMode = 'auto';
+    m.parts = [];
+    rebuildParts();
+  } else if (kind === 'matterCol') {
+    if (node.value.startsWith('col:')) {
+      const col = Number(node.value.slice(4));
+      for (const [k, v] of Object.entries(m.mapping)) if (v === col) delete m.mapping[k];
+      m.mapping.matter = col;
+      m.matterMode = 'column';
+    } else {
+      m.matterMode = node.value === 'header' ? 'header' : 'auto';
+    }
+    rebuildParts();
+  } else if (kind === 'matterTarget') {
+    const part = m.parts.find((p) => p.key === node.dataset.key);
+    if (!part) return;
+    if (node.value === 'new') return openMatterDealModal(part);
+    part.target = node.value;
+    part.how = node.value && node.value !== 'skip' ? 'manual' : '';
+    preparePart(part);
+  } else if (kind === 'cumulative' || kind === 'sourceKind' || kind === 'overlap') {
+    if (kind === 'cumulative') m.cumulative = node.value === '1';
+    else if (kind === 'sourceKind') m.sourceKind = node.value === 'invoice' ? 'invoice' : 'import';
+    else m.overlap = node.value;
+    for (const part of m.parts) refreshPartStats(part);
+  } else return;
+  renderMultiImportModal();
+}
+
+/** הקמת עסקה חדשה לתיק שלא זוהה — מתוך מסך הדוח המצרפי, וחזרה אליו */
+function openMatterDealModal(part) {
+  const guess = parseMatterLabel(part.label);
+  const body = ui.renderMatterDealForm({ label: part.label, name: guess.name, code: guess.code });
+  const save = btn('הקם ושייך', { primary: true, iconName: 'check' });
+  save.addEventListener('click', async () => {
+    const f = Object.fromEntries(new FormData(body).entries());
+    const name = String(f.name || '').trim();
+    if (!name) return ui.toast('נדרש שם לעסקה', 'error');
+    const deal = await store.createDeal({ name, code: String(f.code || '').trim(), client: String(f.client || '').trim() });
+    rebuildSnapshots();
+    part.target = deal.id;
+    part.how = 'new';
+    preparePart(part, { autoAssign: true });
+    ui.toast(`העסקה "${name}" הוקמה`);
+    renderMultiImportModal();
+    render();
+  });
+  const cancel = btn('חזרה');
+  cancel.addEventListener('click', () => renderMultiImportModal());
+  openModal({ title: `עסקה חדשה · ${part.label}`, body, actions: [save, cancel] });
+}
+
+/** פותח את מסך שיוך האנשים של תיק אחד מתוך הדוח המצרפי */
+function openPartPeople(key) {
+  const part = importCtx?.mode === 'multi' ? importCtx.parts.find((p) => p.key === key) : null;
+  if (!part?.ctx) return;
+  importCtx = part.ctx;
+  renderProgressImportModal();
+}
+
+/** קובץ אקסל נפרד לתיק: שורת הכותרות + השורות של התיק בלבד — נשמר בתיקיית העסקה */
+async function matterFile(m, part) {
+  const header = m.sheets[m.sheetIndex].rows[m.headerRow] || [];
+  const width = Math.max(header.length, ...part.rows.map((r) => r.length));
+  const cols = Array.from({ length: width }, (_, i) => i);
+  const blob = await buildWorkbook([{
+    name: 'דוח',
+    blocks: [{
+      t: 'table',
+      head: cols.map((i) => String(header[i] ?? '')),
+      fmt: cols.map(() => 'text'),
+      rows: part.rows.map((r) => cols.map((i) => r[i] ?? '')),
+    }],
+  }]);
+  const base = m.file.name.replace(/\.[^.]+$/, '');
+  const safe = part.label.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, ' ').trim().slice(0, 60);
+  return new File([blob], `${base} — ${safe}.xlsx`, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
+
+function renderMultiImportModal() {
+  const m = importCtx;
+  m.confirmedPartial = false;   // כל שינוי במסך מאפס את אישור הקליטה החלקית
+  const header = m.sheets[m.sheetIndex].rows[m.headerRow] || [];
+  const body = ui.renderMultiImportPreview({
+    sheets: m.sheets, sheetIndex: m.sheetIndex, header, mapping: m.mapping,
+    matterMode: m.matterMode, splitMode: m.splitMode, parts: m.parts, unassigned: m.unassigned,
+    deals: store.cache.deals, cumulative: m.cumulative, sourceKind: m.sourceKind, overlap: m.overlap,
+  });
+  const ready = m.parts.filter((p) => p.ctx && p.stats?.records);
+  const save = btn(ready.length ? `קלוט ל-${ready.length} עסקאות` : 'קלוט', { primary: true, iconName: 'check' });
+  save.addEventListener('click', async () => {
+    if (!ready.length) return ui.toast('אין תיק עם שורות לקליטה — שייך תיקים לעסקאות', 'error');
+    // קליטה חלקית דורשת לחיצה שנייה — כדי שתיק או אדם שלא שויכו לא ייעלמו בשקט
+    const open = m.parts.filter((p) => !p.target).length;
+    const lost = m.parts.reduce((sum, p) => sum + (p.stats?.missing || 0), 0);
+    if ((open || lost) && !m.confirmedPartial) {
+      m.confirmedPartial = true;
+      return ui.toast(`${[open ? `${open} תיקים ללא עסקה` : '', lost ? `${lost} אנשים ללא שיוך` : ''].filter(Boolean).join(' ו-')} — השעות שלהם לא ייקלטו. לחץ שוב כדי לקלוט בכל זאת`, 'error');
+    }
+    const remember = els.modalBody.querySelector('[data-imp="rememberPeople"]')?.checked ?? true;
+    save.disabled = true;
+    let added = 0, orphans = 0, dupes = 0, fallback = '';
+    try {
+      for (const part of ready) {
+        refreshPartStats(part);
+        importCtx = part.ctx;
+        part.ctx.saveFile = await matterFile(m, part);
+        const res = await commitProgressImport({ remember });
+        added += res.added; orphans += res.orphans; dupes += res.skippedDupes;
+        if (res.fallbackReason) fallback = res.fallbackReason;
+      }
+    } finally { importCtx = m; }
+    // שיוך תיק→עסקה נזכר: בדוח הבא אותו שם תיק יזוהה לבד
+    const map = { ...(store.getSetting('matterMap', {}) || {}) };
+    for (const part of m.parts) if (part.ctx) map[part.key] = part.target;
+    await store.setSetting('matterMap', map);
+    scheduleDataFile();
+    closeModal();
+    const extra = [
+      orphans ? `${orphans} ללא שיוך` : '',
+      dupes ? `${dupes} כפילויות דולגו` : '',
+      m.unassigned.rows ? `${m.unassigned.rows} שורות בלי תיק לא נקלטו` : '',
+      fallback ? `הקבצים נשמרו בתוך המערכת — ${fallback}` : '',
+    ].filter(Boolean).join(' · ');
+    ui.toast(`${added} עדכונים נקלטו ל-${ready.length} עסקאות${extra ? ` · ${extra}` : ''}`);
+    render();
+  });
+  const actions = [save];
+  if (state.view === 'deal' && currentSnapshot()) {
+    const single = btn('זה דוח של עסקה אחת');
+    single.title = `קליטת כל הדוח ל"${currentSnapshot().deal.name}"`;
+    single.addEventListener('click', () => {
+      const { file, sheets, sheetIndex, headerRow, mapping, cumulative, sourceKind, overlap } = m;
+      startSingleImport({ file, sheets, sheetIndex, headerRow, mapping, cumulative, sourceKind, overlap });
+    });
+    actions.push(single);
+  }
+  const cancel = btn('ביטול');
+  cancel.addEventListener('click', closeModal);
+  actions.push(cancel);
+  openModal({ title: `ייבוא דוח מצרפי · ${m.file.name}`, body, actions, wide: true });
 }
 
 /**
@@ -1859,14 +2157,14 @@ function setImportAlloc(key, list, fixed = -1) {
 
 /** מזהה את האנשים בדוח ובונה לכל אחד אלוקציה לשורות התקציב (לפי מה שנשמר, שם, דרגה או תעריף) */
 function syncProgressPeople() {
-  const { sheets, sheetIndex, headerRow, mapping } = importCtx;
-  const rows = sheetBody(sheets[sheetIndex].rows, headerRow);
+  const { mapping } = importCtx;
+  const rows = impRows();
   importCtx.people = collectPeople(rows, mapping);
 
-  const snap = currentSnapshot();
+  const snap = impSnap();
   const memory = store.getPeopleMemory();
-  const rememberedAlloc = store.peopleAllocFor(state.dealId);   // key → [{teamId, roleName, pct}]
-  const dealAlloc = store.allocationsOf(state.dealId);          // key → [{teamId, lineId, pct}]
+  const rememberedAlloc = store.peopleAllocFor(impDealId());   // key → [{teamId, roleName, pct}]
+  const dealAlloc = store.allocationsOf(impDealId());          // key → [{teamId, lineId, pct}]
   const norm = (v) => String(v || '').trim().toLowerCase();
 
   const lines = [];
@@ -1947,14 +2245,15 @@ function syncProgressPeople() {
 }
 
 /** שיוך מהיר של כל האנשים בדוח לצוות אחד: לפי שורה על שמם, ואם אין — לפי הדרגה שבדוח */
-function assignPeopleToTeam(teamId) {
+function assignPeopleToTeam(teamId, { onlyMissing = false } = {}) {
   if (!teamId) return;
   // דרך ה-snapshot ולא ה-store: רק שם לשורה יש `rate` אפקטיבי (תעריפון + דריסה)
-  const team = currentSnapshot()?.teams.find((t) => t.id === teamId);
+  const team = impSnap()?.teams.find((t) => t.id === teamId);
   if (!team) return;
   const norm = (v) => String(v || '').trim().toLowerCase();
   const keys = team.lines.map((l) => personKey(l.personName)).filter(Boolean);
   for (const p of importCtx.people || []) {
+    if (onlyMissing && (importCtx.peopleAlloc[p.key] || []).length) continue;
     const hitKey = fuzzyPersonMatch(p.key, keys)?.key || '';
     const byPerson = hitKey ? team.lines.find((l) => personKey(l.personName) === hitKey) : null;
     const byRole = p.roleHint ? team.lines.find((l) => norm(l.roleName) === norm(p.roleHint)) : null;
@@ -1969,10 +2268,10 @@ function assignPeopleToTeam(teamId) {
 }
 
 function progressPreview() {
-  const { sheets, sheetIndex, headerRow, mapping, cumulative, peopleAlloc, file } = importCtx;
-  const rows = sheetBody(sheets[sheetIndex].rows, headerRow);
+  const { mapping, cumulative, peopleAlloc, file } = importCtx;
+  const rows = impRows();
   const sourceKind = importCtx.sourceKind || 'import';
-  const dealProgress = store.progressOf(state.dealId);
+  const dealProgress = store.progressOf(impDealId());
   // דוח מצטבר: ההפרש נמדד מול מה שכבר דווח לאותו אדם באותה שורה (לא מול סך השורה)
   const currentFor = (lineId, person) => {
     const key = personKey(person);
@@ -1986,7 +2285,7 @@ function progressPreview() {
     pct: sp.pct,
   }));
   const res = rowsToProgress(rows, mapping, {
-    dealId: state.dealId, resolve, cumulative, currentFor, source: sourceKind,
+    dealId: impDealId(), resolve, cumulative, currentFor, source: sourceKind,
     // חשבון בא להחליף את דוח השעות של אותה תקופה — הוא כפילות רק של חשבון קודם
     existing: sourceKind === 'invoice' ? dealProgress.filter((p) => p.source === 'invoice') : dealProgress.filter((p) => p.source !== 'invoice'),
     fileName: file.name, batchId: importCtx.batchId || (importCtx.batchId = uid('bat')),
@@ -1998,9 +2297,62 @@ function progressPreview() {
 }
 
 
+/**
+ * כותב את הייבוא שבהקשר הפעיל: חפיפה, זיכרון שיוכים, אלוקציה, שמירת הקובץ והדיווחים.
+ * משותף לייבוא לעסקה אחת ולכל חלק בדוח מצרפי.
+ */
+async function commitProgressImport({ remember = true } = {}) {
+  const dealId = impDealId();
+  const overlap = importCtx.overlap || 'skip';
+  let list = (importCtx.records || []).filter((r) => r.lineId || r.teamId);
+  const orphans = (importCtx.records || []).length - list.length;
+
+  // טיפול בחפיפה בין דוחות (רק במצב "שעות לתקופה"; דוח מצטבר מטפל בזה בעצמו)
+  let replaced = 0, skippedDupes = 0;
+  if (!importCtx.cumulative) {
+    if (overlap === 'skip') {
+      const before = list.length;
+      list = list.filter((r) => !r.duplicate);
+      skippedDupes = before - list.length;
+    } else if (overlap === 'replace' && importCtx.dateRange) {
+      replaced = await store.clearImportedProgressRange({
+        dealId,
+        from: importCtx.dateRange.from, to: importCtx.dateRange.to,
+        lineIds: [...new Set(list.map((r) => r.lineId).filter(Boolean))],
+      });
+    }
+  }
+  if (!list.length) return { added: 0, orphans, skippedDupes, replaced, fallbackReason: '' };
+  if (remember) {
+    const teamName = new Map(store.teamsOf(dealId).map((t) => [t.id, t.name]));
+    await store.rememberPeopleTeams((importCtx.people || []).map((p) => {
+      const splits = (importCtx.peopleAlloc[p.key] || []).map((sp) => ({
+        teamName: teamName.get(sp.teamId) || '',
+        roleName: store.findLine(sp.lineId)?.line.roleName || '',
+        pct: sp.pct,
+      })).filter((sp) => sp.teamName);
+      return { key: p.key, name: p.name, teamName: splits[0]?.teamName || '', roleName: splits[0]?.roleName || '', splits };
+    }));
+  }
+  // האלוקציה נשמרת גם ברמת העסקה — כדי שאפשר יהיה לתקן אותה בדיעבד ולייבא לפיה
+  for (const p of importCtx.people || []) {
+    await store.setAllocation(dealId, p.key, importCtx.peopleAlloc[p.key] || []);
+  }
+  // שמירת קובץ הדוח עצמו בתיקיית העסקה (או בתוך המערכת אם אין תיקייה).
+  // בדוח מצרפי נשמר הקובץ המפוצל של התיק (saveFile) ולא הדוח כולו
+  let doc = null;
+  try {
+    doc = await fileStore.saveDocument(importCtx.saveFile || importCtx.file, store.getDeal(dealId), { kind: importCtx.sourceKind === 'invoice' ? 'invoice' : 'report' });
+  } catch { /* אחסון הקובץ אינו קריטי לייבוא עצמו */ }
+  if (doc) for (const r of list) r.fileId = doc.id;
+  await store.addProgressMany(list);
+  return { added: list.length, orphans, skippedDupes, replaced, fallbackReason: doc?.fallbackReason || '' };
+}
+
 function renderProgressImportModal() {
-  const snap = currentSnapshot();
+  const snap = impSnap();
   const res = progressPreview();
+  const sub = importCtx.parent || null;   // חלק מדוח מצרפי: רק שיוך האנשים, בלי שמירה
   const body = ui.renderProgressImportPreview({
     sheets: importCtx.sheets, sheetIndex: importCtx.sheetIndex, headerRow: importCtx.headerRow,
     mapping: importCtx.mapping, people: importCtx.people, peopleAlloc: importCtx.peopleAlloc,
@@ -2008,63 +2360,35 @@ function renderProgressImportModal() {
     unmatched: res.unmatched, skipped: res.skipped, duplicates: res.duplicates,
     dateRange: res.dateRange, overlap: importCtx.overlap || 'skip',
     billPeriods: res.billPeriods || [],
-    knownPeriods: store.billPeriodsOf(state.dealId),
+    knownPeriods: store.billPeriodsOf(impDealId()),
     peopleMatch: importCtx.peopleMatch || {},
+    sub: !!sub,
   });
+
+  if (sub) {
+    const back = btn('אישור וחזרה לדוח', { primary: true, iconName: 'check' });
+    back.addEventListener('click', () => {
+      importCtx = sub;
+      // תיקון מיפוי עמודות באחד החלקים חל על כל הדוח
+      rebuildParts();
+      renderMultiImportModal();
+    });
+    return openModal({ title: `שיוך אנשים · ${importCtx.part.label} ← ${snap.deal.name}`, body, actions: [back], wide: true });
+  }
 
   const save = btn('הוסף למעקב', { primary: true, iconName: 'check' });
   save.addEventListener('click', async () => {
-    const overlap = importCtx.overlap || 'skip';
-    let list = (importCtx.records || []).filter((r) => r.lineId || r.teamId);
-    const orphans = (importCtx.records || []).length - list.length;
-
-    // טיפול בחפיפה בין דוחות (רק במצב "שעות לתקופה"; דוח מצטבר מטפל בזה בעצמו)
-    let replaced = 0, skippedDupes = 0;
-    if (!importCtx.cumulative) {
-      if (overlap === 'skip') {
-        const before = list.length;
-        list = list.filter((r) => !r.duplicate);
-        skippedDupes = before - list.length;
-      } else if (overlap === 'replace' && importCtx.dateRange) {
-        replaced = await store.clearImportedProgressRange({
-          dealId: state.dealId,
-          from: importCtx.dateRange.from, to: importCtx.dateRange.to,
-          lineIds: [...new Set(list.map((r) => r.lineId).filter(Boolean))],
-        });
-      }
-    }
-    if (!list.length) { closeModal(); return ui.toast('אף שורה לא שויכה לשורת תקציב', 'error'); }
     const remember = els.modalBody.querySelector('[data-imp="rememberPeople"]')?.checked ?? true;
-    if (remember) {
-      const teamName = new Map(store.teamsOf(state.dealId).map((t) => [t.id, t.name]));
-      await store.rememberPeopleTeams((importCtx.people || []).map((p) => {
-        const splits = (importCtx.peopleAlloc[p.key] || []).map((sp) => ({
-          teamName: teamName.get(sp.teamId) || '',
-          roleName: store.findLine(sp.lineId)?.line.roleName || '',
-          pct: sp.pct,
-        })).filter((sp) => sp.teamName);
-        return { key: p.key, name: p.name, teamName: splits[0]?.teamName || '', roleName: splits[0]?.roleName || '', splits };
-      }));
-    }
-    // האלוקציה נשמרת גם ברמת העסקה — כדי שאפשר יהיה לתקן אותה בדיעבד ולייבא לפיה
-    for (const p of importCtx.people || []) {
-      await store.setAllocation(state.dealId, p.key, importCtx.peopleAlloc[p.key] || []);
-    }
-    // שמירת קובץ הדוח עצמו בתיקיית העסקה (או בתוך המערכת אם אין תיקייה)
-    let doc = null;
-    try {
-      doc = await fileStore.saveDocument(importCtx.file, store.getDeal(state.dealId), { kind: importCtx.sourceKind === 'invoice' ? 'invoice' : 'report' });
-      if (doc.fallbackReason) ui.toast(`קובץ הדוח נשמר בתוך המערכת — ${doc.fallbackReason}`, 'error');
-    } catch { /* אחסון הקובץ אינו קריטי לייבוא עצמו */ }
-    if (doc) for (const r of list) r.fileId = doc.id;
-    await store.addProgressMany(list);
+    const res2 = await commitProgressImport({ remember });
     closeModal();
+    if (!res2.added) return ui.toast('אף שורה לא שויכה לשורת תקציב', 'error');
+    if (res2.fallbackReason) ui.toast(`קובץ הדוח נשמר בתוך המערכת — ${res2.fallbackReason}`, 'error');
     const extra = [
-      orphans ? `${orphans} ללא שיוך` : '',
-      skippedDupes ? `${skippedDupes} כפילויות דולגו` : '',
-      replaced ? `${replaced} דיווחים קודמים בטווח הוחלפו` : '',
+      res2.orphans ? `${res2.orphans} ללא שיוך` : '',
+      res2.skippedDupes ? `${res2.skippedDupes} כפילויות דולגו` : '',
+      res2.replaced ? `${res2.replaced} דיווחים קודמים בטווח הוחלפו` : '',
     ].filter(Boolean).join(' · ');
-    ui.toast(`${list.length} עדכונים נוספו למעקב${extra ? ` · ${extra}` : ''}`);
+    ui.toast(`${res2.added} עדכונים נוספו למעקב${extra ? ` · ${extra}` : ''}`);
     state.tab = 'reports';
     localStorage.setItem(LS.tab, 'reports');
     render();
@@ -2640,15 +2964,35 @@ function exportPortfolioCSV() {
    גיבוי / שחזור
    ============================================================ */
 
-function openBackupModal() {
+async function openBackupModal() {
   const stats = ui.el('div', { class: 'facts' }, [
     ui.el('div', { class: 'fact' }, [ui.el('span', { class: 'fact__label', text: 'עסקאות' }), ui.el('span', { class: 'fact__value num', text: String(store.cache.deals.length) })]),
     ui.el('div', { class: 'fact' }, [ui.el('span', { class: 'fact__label', text: 'צוותים' }), ui.el('span', { class: 'fact__value num', text: String(store.cache.teams.length) })]),
     ui.el('div', { class: 'fact' }, [ui.el('span', { class: 'fact__label', text: 'רישומי ביצוע' }), ui.el('span', { class: 'fact__value num', text: String(store.cache.entries.length) })]),
   ]);
+
+  // קובץ הנתונים בתיקייה: עותק מלא שמתעדכן לבד — תיקיית ענן (OneDrive) מסנכרנת אותו למכשירים אחרים
+  const df = await fileStore.dataFolderState();
+  const when = df.savedAt ? new Date(df.savedAt).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' }) : '';
+  const dataFile = !fileStore.supportsFolder()
+    ? [ui.el('p', { class: 'field__hint', text: 'בחירת תיקייה לקובץ הנתונים נתמכת בכרום/אדג\' במחשב. במכשיר הזה: "ייצוא גיבוי" לשמירה ו"שחזור מגיבוי" לטעינת הקובץ מהתיקייה (למשל מ-OneDrive).' })]
+    : [
+      ui.el('p', { class: 'modal-text', text: df.name
+        ? `הקובץ ${fileStore.DATA_FILE} נשמר בתיקייה "${df.name}" ומתעדכן אחרי כל שינוי.${when ? ` עדכון אחרון: ${when}.` : ''}${df.ready ? '' : ' נדרש אישור גישה מחודש — לחץ "שמור עכשיו".'}`
+        : 'בחר תיקייה (למשל בתוך OneDrive) — המערכת תשמור בה עותק מלא של הנתונים ותעדכן אותו אחרי כל שינוי. במכשיר אחר טוענים אותו ב"שחזור מגיבוי".' }),
+      ui.el('div', { class: 'form-actions form-actions--wrap' }, df.name ? [
+        btn('שמור עכשיו', { iconName: 'check', action: 'save-data-file' }),
+        btn('החלף תיקייה', { iconName: 'cloud', action: 'pick-data-folder' }),
+        btn('נתק', { action: 'forget-data-folder' }),
+      ] : [btn('בחר תיקייה לקובץ הנתונים', { iconName: 'cloud', action: 'pick-data-folder', primary: true })]),
+    ];
+
   const body = ui.el('div', { class: 'modal-form' }, [
-    ui.el('p', { class: 'modal-text', text: 'הנתונים נשמרים במכשיר בלבד (IndexedDB) ועובדים גם ללא חיבור. גיבוי לקובץ מאפשר העברה בין מכשירים.' }),
+    ui.el('p', { class: 'modal-text', text: 'הנתונים נשמרים בדפדפן של המכשיר הזה (IndexedDB) ועובדים גם ללא חיבור. כדי שיהיו זמינים במכשיר אחר — קובץ נתונים בתיקייה, או גיבוי ידני.' }),
     stats,
+    ui.el('h3', { class: 'modal-sub', text: 'קובץ נתונים בתיקייה' }),
+    ...dataFile,
+    ui.el('h3', { class: 'modal-sub', text: 'גיבוי ידני' }),
     ui.el('div', { class: 'form-actions form-actions--wrap' }, [
       btn('ייצוא גיבוי (JSON)', { iconName: 'download', action: 'export-backup' }),
       btn('שחזור מגיבוי', { iconName: 'upload', action: 'import-backup' }),

@@ -398,7 +398,7 @@ function step(n, title, { meta = null, aside = null, collapsible = false, open =
 export function renderProgressImportPreview({
   sheets, sheetIndex, headerRow, mapping, people, peopleAlloc, cumulative, sourceKind = 'import', teams, records,
   unmatched, skipped, duplicates = 0, dateRange = null, overlap = 'skip',
-  billPeriods = [], knownPeriods = [], peopleMatch = {},
+  billPeriods = [], knownPeriods = [], peopleMatch = {}, sub = false,
 }) {
   const wrap = el('div', { class: 'import' });
   const sheet = sheets[sheetIndex] || {};
@@ -453,7 +453,9 @@ export function renderProgressImportPreview({
       docBody.push(el('div', { class: 'notice notice--warn' }, [icon('alert'), el('span', { text: `כל מה שיובא בעבר לטווח ${fmtDate(dateRange.from)}–${fmtDate(dateRange.to)} (לשורות שבדוח) יימחק ויוחלף בתוכן הקובץ. הזנה ידנית לא תיפגע.` })]));
     }
   }
-  wrap.append(step(1, 'המסמך', {}, docBody));
+  // חלק מדוח מצרפי: הגדרות המסמך נקבעות במסך הדוח ומשותפות לכל התיקים
+  if (sub) wrap.append(el('div', { class: 'notice' }, [icon('info'), el('span', { text: 'כאן משייכים את האנשים של התיק הזה לשורות התקציב של העסקה. סוג המסמך והטיפול בכפילויות נקבעים במסך הדוח המצרפי.' })]));
+  else wrap.append(step(1, 'המסמך', {}, docBody));
 
   /* ---- 2. עמודות — מקופל כשהזיהוי האוטומטי מצא את המינימום (תאריך + שעות + שם) ---- */
   const rows = sheets[sheetIndex].rows;
@@ -557,4 +559,119 @@ export function renderProgressImportPreview({
     ]))),
   ]))] : [el('p', { class: 'muted', text: 'לא נמצאו שורות לקליטה — בדוק את מיפוי העמודות ואת שורת הכותרות.' })]));
   return wrap;
+}
+
+
+/* ============================================================
+   דוח מצרפי — כמה עסקאות בקובץ אחד
+   ============================================================ */
+
+const MATTER_HOW = {
+  memory: ['זכור משיוך קודם', 'info'], code: ['לפי מספר התיק', 'ok'], name: ['לפי שם העסקה', 'ok'],
+  manual: ['שיוך ידני', 'muted'], new: ['עסקה חדשה', 'info'],
+};
+
+export function renderMultiImportPreview({
+  sheets, sheetIndex, header, mapping, matterMode, splitMode, parts, unassigned, deals,
+  cumulative, sourceKind = 'import', overlap = 'skip',
+}) {
+  const wrap = el('div', { class: 'import' });
+
+  /* ---- 1. המסמך ---- */
+  const docBody = [];
+  if (sheets.length > 1) {
+    docBody.push(field('טבלה / גיליון', el('select', { class: 'select', dataset: { imp: 'sheet' } },
+      sheets.map((s, i) => el('option', { value: String(i), text: s.rows ? `${s.name} · ${s.rows.length} שורות` : s.name, selected: i === sheetIndex ? 'selected' : null })))));
+  }
+  const colValue = splitMode === 'column' && mapping.matter !== undefined ? `col:${mapping.matter}` : (matterMode === 'header' || splitMode === 'header' ? 'header' : 'auto');
+  docBody.push(el('div', { class: 'grid-3' }, [
+    field('איך מזוהה התיק', el('select', { class: 'select', dataset: { imp: 'matterCol' } }, [
+      el('option', { value: 'header', text: 'כותרת-ביניים מעל כל תיק', selected: colValue === 'header' ? 'selected' : null }),
+      ...header.map((h, i) => (String(h ?? '').trim()
+        ? el('option', { value: `col:${i}`, text: `עמודה: ${String(h).trim()}`, selected: colValue === `col:${i}` ? 'selected' : null })
+        : null)),
+    ]), 'המערכת מחפשת עמודת תיק בכל שורה, ואם אין — כותרת-ביניים מעל כל בלוק שורות. אפשר לכפות כאן אחת מהשיטות.'),
+    field('סוג המסמך', el('select', { class: 'select', dataset: { imp: 'sourceKind' } }, [
+      el('option', { value: 'import', text: 'דוח שעות', selected: sourceKind === 'invoice' ? null : 'selected' }),
+      el('option', { value: 'invoice', text: 'חשבון', selected: sourceKind === 'invoice' ? 'selected' : null }),
+    ])),
+    field('סוג הדוח', el('select', { class: 'select', dataset: { imp: 'cumulative' } }, [
+      el('option', { value: '0', text: 'שעות לתקופה', selected: cumulative ? null : 'selected' }),
+      el('option', { value: '1', text: 'סך מצטבר מתחילת העסקה', selected: cumulative ? 'selected' : null }),
+    ])),
+  ]));
+  if (!cumulative) {
+    docBody.push(field('שורות שכבר דווחו בעבר', el('select', { class: 'select', dataset: { imp: 'overlap' } }, [
+      el('option', { value: 'skip', text: 'דלג עליהן (מומלץ)', selected: overlap === 'skip' ? 'selected' : null }),
+      el('option', { value: 'replace', text: 'החלף את מה שיובא בטווח התאריכים של הדוח', selected: overlap === 'replace' ? 'selected' : null }),
+      el('option', { value: 'add', text: 'הוסף בכל זאת (ייספר פעמיים)', selected: overlap === 'add' ? 'selected' : null }),
+    ])));
+  }
+  if (unassigned.rows) {
+    docBody.push(el('div', { class: 'notice notice--warn' }, [icon('alert'), el('span', { text: `${unassigned.rows} שורות חיוב (${fmtU(unassigned.hours, 'hours')} שעות) אינן משויכות לאף תיק — הן לא ייקלטו.` })]));
+  }
+  wrap.append(step(1, 'המסמך', {}, docBody));
+
+  /* ---- 2. התיקים שבדוח ---- */
+  const open = parts.filter((p) => !p.target).length;
+  const missing = parts.reduce((s, p) => s + (p.stats?.missing || 0), 0);
+  const total = parts.reduce((s, p) => s + (p.stats?.hours || 0), 0);
+  const tbody = parts.map((p) => {
+    const st = p.stats;
+    const how = MATTER_HOW[p.how];
+    return el('tr', { class: p.target ? '' : 'row--attention' }, [
+      el('td', {}, [
+        el('span', { class: 'strong', text: p.label }),
+        how && p.target && p.target !== 'skip' ? el('span', { class: 'sub', text: how[0] }) : null,
+      ]),
+      el('td', { class: 'num', text: String(p.rows.length) }),
+      el('td', { class: 'num', text: fmtU(p.hours, 'hours') }),
+      el('td', {}, [el('select', { class: 'select select--sm', dataset: { imp: 'matterTarget', key: p.key }, 'aria-label': `עסקה לתיק ${p.label}` }, [
+        el('option', { value: '', text: '— בחר עסקה —', selected: p.target ? null : 'selected' }),
+        el('option', { value: 'new', text: '＋ עסקה חדשה…' }),
+        el('option', { value: 'skip', text: 'דלג — לא לקלוט', selected: p.target === 'skip' ? 'selected' : null }),
+        ...deals.map((d) => el('option', { value: d.id, text: [d.code, d.name].filter(Boolean).join(' · '), selected: p.target === d.id ? 'selected' : null })),
+      ])]),
+      el('td', {}, !st ? [el('span', { class: 'muted', text: '—' })] : [
+        st.noTeams ? el('span', { class: 'pill pill--over', text: 'אין צוותים בעסקה' })
+          : st.missing ? el('span', { class: 'pill pill--risk', text: `${st.missing} מתוך ${st.people} ללא שיוך` })
+            : el('span', { class: 'pill pill--ok', text: `${st.people} משויכים` }),
+        ' ',
+        button('שיוך', { action: 'multi-people', size: 'sm', dataset: { key: p.key }, title: 'שיוך האנשים של התיק לשורות התקציב' }),
+      ]),
+      el('td', { class: 'num', text: st ? fmtU(st.hours, 'hours') : '—' }),
+      el('td', { class: 'muted', text: !st ? (p.target === 'skip' ? 'לא ייקלט' : 'ממתין לשיוך')
+        : `${st.records} דיווחים${st.duplicates && overlap === 'skip' && !cumulative ? ` · ${st.duplicates} כבר דווחו` : ''}` }),
+    ]);
+  });
+  wrap.append(step(2, 'התיקים שבדוח', {
+    meta: `${parts.length} תיקים · ${fmtU(total, 'hours')} שעות ייקלטו`,
+    aside: [
+      open ? el('span', { class: 'pill pill--risk', text: `${open} תיקים ללא עסקה` }) : null,
+      missing ? el('span', { class: 'pill pill--over', text: `${missing} אנשים ללא שיוך` }) : null,
+    ],
+  }, parts.length ? [
+    el('p', { class: 'muted', text: 'כל תיק נקלט לעסקה שלו, והשורות שלו נשמרות כקובץ אקסל נפרד בתיקיית העסקה. תיק שלא זוהה — בחר לו עסקה או הקם חדשה; הבחירה נזכרת לדוח הבא.' }),
+    el('div', { class: 'tbl-scroll' }, el('table', { class: 'tbl tbl--compact' }, [
+      el('thead', {}, el('tr', {}, ['תיק בדוח', 'שורות', 'שעות בדוח', 'עסקה במערכת', 'אנשים', 'שעות לקליטה', 'מצב'].map((t) => el('th', { text: t })))),
+      el('tbody', {}, tbody),
+    ])),
+    el('label', { class: 'inline-check' }, [
+      el('input', { type: 'checkbox', checked: 'checked', dataset: { imp: 'rememberPeople' } }),
+      el('span', { text: 'לזכור את שיוך האנשים לייבוא הבא' }),
+    ]),
+  ] : [el('p', { class: 'muted', text: 'לא זוהו תיקים בדוח — בחר למעלה את העמודה שמזהה את התיק.' })]));
+  return wrap;
+}
+
+/** טופס קצר להקמת עסקה לתיק שהופיע בדוח המצרפי ואינו קיים במערכת */
+export function renderMatterDealForm({ label, name, code }) {
+  return el('form', { class: 'modal-form', id: 'matter-deal-form' }, [
+    el('p', { class: 'modal-text', text: `בדוח: "${label}". העסקה מוקמת מיד עם צוותי ברירת המחדל, והאנשים שבדוח משויכים לשורות לפי הדרגה/התעריף — אפשר לתקן ב"שיוך".` }),
+    field('שם העסקה', el('input', { class: 'input', name: 'name', value: name || '', required: 'required' })),
+    el('div', { class: 'grid-2' }, [
+      field('מספר תיק', el('input', { class: 'input', name: 'code', value: code || '' })),
+      field('לקוח', el('input', { class: 'input', name: 'client', value: '' })),
+    ]),
+  ]);
 }
