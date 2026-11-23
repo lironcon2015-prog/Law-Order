@@ -535,6 +535,10 @@ export function toast(message, tone = '') {
     node = el('div', { class: 'toast', id: 'toast', role: 'status', 'aria-live': 'polite' });
     document.body.append(node);
   }
+  // חלון פתוח (<dialog> ב-showModal) יושב בשכבה העליונה — הודעה שמחוברת ל-body מוסתרת מתחתיו.
+  // לכן היא עוברת לתוך החלון הפתוח, וחוזרת ל-body כשאין חלון.
+  const host = document.querySelector('dialog[open]') || document.body;
+  if (node.parentNode !== host) host.append(node);
   clearInterval(undoToast._tick);
   node.className = `toast ${tone ? `toast--${tone}` : ''}`.trim();
   node.replaceChildren(icon(tone === 'error' ? 'alert' : 'check'), el('span', { text: message }));
@@ -543,7 +547,7 @@ export function toast(message, tone = '') {
   toastTimer = setTimeout(() => {
     node.classList.add('gone');
     setTimeout(() => node.remove(), 320);
-  }, 3200);
+  }, tone === 'error' ? 7000 : 3200);
 }
 
 /**
@@ -556,6 +560,8 @@ export function undoToast(message, onUndo, seconds = 8) {
     node = el('div', { class: 'toast', id: 'toast', role: 'status', 'aria-live': 'polite' });
     document.body.append(node);
   }
+  const host = document.querySelector('dialog[open]') || document.body;
+  if (node.parentNode !== host) host.append(node);
   clearTimeout(toastTimer);
   clearInterval(undoToast._tick);
 

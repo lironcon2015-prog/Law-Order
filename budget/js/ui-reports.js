@@ -538,7 +538,8 @@ export function renderProgressImportPreview({
   }
 
   /* ---- 4. תצוגה מקדימה ---- */
-  const counted = cumulative || overlap !== 'skip' ? records : records.filter((r) => !r.duplicate);
+  // רק מה שבאמת ייקלט: שורה בלי שיוך לא נקלטת, וכפילות מדולגת במצב "דלג"
+  const counted = records.filter((r) => (r.lineId || r.teamId) && (cumulative || overlap !== 'skip' || !r.duplicate));
   const totalHours = counted.reduce((s, r) => s + num(r.hours), 0);
   wrap.append(step(people.length ? 4 : 3, 'תצוגה מקדימה', {
     meta: `${counted.length} דיווחים · ${fmtU(totalHours, 'hours')} שעות ייקלטו`,

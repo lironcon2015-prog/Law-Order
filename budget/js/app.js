@@ -2410,6 +2410,41 @@ async function commitProgressImport({ remember = true } = {}) {
   return { added: list.length, orphans, skippedDupes, replaced, fallbackReason: doc?.fallbackReason || '' };
 }
 
+/**
+ * למה אין מה לקלוט (אם אין) — מוצג ליד כפתור השמירה, עם תיקון בלחיצה כשיש כזה.
+ * בלי זה הכפתור "נלחץ" ושום דבר לא קורה, והסיבה קבורה בתחתית התצוגה המקדימה.
+ */
+function importBlocker(res) {
+  const records = res.records || [];
+  const assigned = records.filter((r) => r.lineId || r.teamId);
+  const skipDupes = !importCtx.cumulative && (importCtx.overlap || 'skip') === 'skip';
+  const ready = skipDupes ? assigned.filter((r) => !r.duplicate) : assigned;
+  if (ready.length) return null;
+
+  let text, fix = null;
+  if (!records.length) {
+    text = importCtx.cumulative
+      ? 'הדוח המצטבר זהה למה שכבר דווח — אין הפרש לקלוט.'
+      : 'לא זוהו בדוח שורות עם שעות — בדוק בסעיף "עמודות" איזו עמודה היא "שעות", ואת שורת הכותרות.';
+  } else if (!assigned.length) {
+    const n = (importCtx.people || []).length;
+    text = `${n === 1 ? 'האדם שבדוח לא שויך' : `אף אחד מ-${n} האנשים שבדוח לא שויך`} לשורת תקציב — שייך בסעיף "שיוך לשורות התקציב" (או "שיוך מהיר של כולם לצוות").`;
+  } else {
+    text = `כל ${assigned.length} השורות כבר דווחו בעבר (אותו אדם, תאריך ושורת תקציב), ולכן ידולגו.`;
+    fix = btn('החלף את הדיווחים הקודמים בטווח');
+    fix.title = 'מוחק את מה שיובא קודם בטווח התאריכים של הדוח, וקולט את הדוח הזה במקומו';
+    fix.addEventListener('click', () => { importCtx.overlap = 'replace'; renderProgressImportModal(); });
+  }
+  const node = document.createElement('div');
+  node.className = 'imp-block';
+  node.setAttribute('role', 'alert');
+  const span = document.createElement('span');
+  span.textContent = text;
+  node.append(span);
+  if (fix) node.append(fix);
+  return node;
+}
+
 function renderProgressImportModal() {
   const snap = impSnap();
   const res = progressPreview();
@@ -2438,6 +2473,8 @@ function renderProgressImportModal() {
   }
 
   const save = btn('הוסף למעקב', { primary: true, iconName: 'check' });
+  const block = importBlocker(res);
+  if (block) save.disabled = true;
   save.addEventListener('click', async () => {
     const remember = els.modalBody.querySelector('[data-imp="rememberPeople"]')?.checked ?? true;
     let res2;
@@ -2471,7 +2508,7 @@ function renderProgressImportModal() {
   });
   const cancel = btn('ביטול');
   cancel.addEventListener('click', closeModal);
-  openModal({ title: `ייבוא דוח שעות · ${importCtx.file.name}`, body, actions: [save, cancel], wide: true });
+  openModal({ title: `ייבוא דוח שעות · ${importCtx.file.name}`, body, actions: [block, save, cancel].filter(Boolean), wide: true });
 }
 
 function exportReviewCSV() {

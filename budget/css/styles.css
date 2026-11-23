@@ -1353,6 +1353,9 @@ svg[data-pts] { cursor: crosshair; }
 .modal__body { padding: 20px 22px; overflow-y: auto; flex: 1; min-height: 0; }
 .modal__foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 14px 22px; border-top: 1px solid var(--line); background: var(--surface-2); }
 .modal__foot:empty { display: none; }
+.imp-block { flex: 1 0 100%; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--risk-soft, #fdf3dc); color: var(--text); font-size: 14px; font-weight: 600; line-height: 1.5; }
+.imp-block > span { flex: 1 1 240px; }
+.imp-block > button { border: 1px solid var(--line-strong, var(--line)); background: var(--surface); }
 .modal-form { display: flex; flex-direction: column; gap: 16px; }
 .modal-text { font-size: 14.5px; color: var(--text-2); line-height: 1.6; }
 .checkline { display: flex; flex-wrap: wrap; gap: 8px 18px; }
