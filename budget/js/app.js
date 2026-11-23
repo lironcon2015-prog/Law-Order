@@ -2440,9 +2440,24 @@ function renderProgressImportModal() {
   const save = btn('הוסף למעקב', { primary: true, iconName: 'check' });
   save.addEventListener('click', async () => {
     const remember = els.modalBody.querySelector('[data-imp="rememberPeople"]')?.checked ?? true;
-    const res2 = await commitProgressImport({ remember });
+    let res2;
+    save.disabled = true;
+    try { res2 = await commitProgressImport({ remember }); }
+    catch (err) {
+      // בלי זה כישלון בשמירה נבלע: החלון נשאר פתוח ושום דבר לא קורה
+      console.error('ייבוא דוח נכשל', err);
+      save.disabled = false;
+      return ui.toast(`השמירה נכשלה — ${err?.message || err}`, 'error');
+    }
+    save.disabled = false;
+    // אין מה לקלוט: החלון נשאר פתוח, וההודעה אומרת למה — כפילות של דוח שכבר נקלט ≠ אנשים בלי שיוך
+    if (!res2.added) {
+      if (res2.skippedDupes) {
+        return ui.toast(`כל ${res2.skippedDupes} השורות כבר דווחו בעבר ולכן דולגו. דוח מתוקן לאותה תקופה? בחר "החלף" בשדה "שורות שכבר דווחו בעבר"`, 'error');
+      }
+      return ui.toast(res2.orphans ? `${res2.orphans} שורות לא שויכו — שייך את האנשים לשורות התקציב (סעיף 3)` : 'לא נמצאו בדוח שורות עם שעות', 'error');
+    }
     closeModal();
-    if (!res2.added) return ui.toast('אף שורה לא שויכה לשורת תקציב', 'error');
     if (res2.fallbackReason) ui.toast(`קובץ הדוח נשמר בתוך המערכת — ${res2.fallbackReason}`, 'error');
     const extra = [
       res2.orphans ? `${res2.orphans} ללא שיוך` : '',
