@@ -2171,7 +2171,7 @@ function renderMultiImportModal() {
       orphans ? `${orphans} ללא שיוך` : '',
       dupes ? `${dupes} כפילויות דולגו` : '',
       m.unassigned.rows ? `${m.unassigned.rows} שורות בלי תיק לא נקלטו` : '',
-      fallback ? `הקבצים נשמרו בתוך המערכת — ${fallback}` : '',
+      fallback ? `קבצי הדוח: ${fallback}` : '',
     ].filter(Boolean).join(' · ');
     ui.toast(`${added} עדכונים נקלטו ל-${ready.length} עסקאות${extra ? ` · ${extra}` : ''}`);
     render();
@@ -2364,6 +2364,7 @@ function progressPreview() {
  */
 async function commitProgressImport({ remember = true } = {}) {
   const dealId = impDealId();
+  const step = (name) => { importCtx.step = name; };
   const overlap = importCtx.overlap || 'skip';
   let list = (importCtx.records || []).filter((r) => r.lineId || r.teamId);
   const orphans = (importCtx.records || []).length - list.length;
@@ -2376,6 +2377,7 @@ async function commitProgressImport({ remember = true } = {}) {
       list = list.filter((r) => !r.duplicate);
       skippedDupes = before - list.length;
     } else if (overlap === 'replace' && importCtx.dateRange) {
+      step('מחיקת הדיווחים הקודמים בטווח');
       replaced = await store.clearImportedProgressRange({
         dealId,
         from: importCtx.dateRange.from, to: importCtx.dateRange.to,
@@ -2384,6 +2386,16 @@ async function commitProgressImport({ remember = true } = {}) {
     }
   }
   if (!list.length) return { added: 0, orphans, skippedDupes, replaced, fallbackReason: '' };
+
+  // 1) הנתונים עצמם — ראשונים. כל השאר (זיכרון שיוכים, עותק הקובץ) משני להם,
+  //    ואסור שתקלה או המתנה שם (למשל בקשת הרשאה לתיקייה) תעכב את הקליטה.
+  const fileId = uid('file');
+  for (const r of list) r.fileId = fileId;
+  step('שמירת הדיווחים');
+  await store.addProgressMany(list);
+
+  // 2) זיכרון השיוך לייבוא הבא + האלוקציה ברמת העסקה (לתיקון בדיעבד)
+  step('שמירת השיוכים');
   if (remember) {
     const teamName = new Map(store.teamsOf(dealId).map((t) => [t.id, t.name]));
     await store.rememberPeopleTeams((importCtx.people || []).map((p) => {
@@ -2395,19 +2407,23 @@ async function commitProgressImport({ remember = true } = {}) {
       return { key: p.key, name: p.name, teamName: splits[0]?.teamName || '', roleName: splits[0]?.roleName || '', splits };
     }));
   }
-  // האלוקציה נשמרת גם ברמת העסקה — כדי שאפשר יהיה לתקן אותה בדיעבד ולייבא לפיה
   for (const p of importCtx.people || []) {
     await store.setAllocation(dealId, p.key, importCtx.peopleAlloc[p.key] || []);
   }
-  // שמירת קובץ הדוח עצמו בתיקיית העסקה (או בתוך המערכת אם אין תיקייה).
-  // בדוח מצרפי נשמר הקובץ המפוצל של התיק (saveFile) ולא הדוח כולו
-  let doc = null;
-  try {
-    doc = await fileStore.saveDocument(importCtx.saveFile || importCtx.file, store.getDeal(dealId), { kind: importCtx.sourceKind === 'invoice' ? 'invoice' : 'report' });
-  } catch { /* אחסון הקובץ אינו קריטי לייבוא עצמו */ }
-  if (doc) for (const r of list) r.fileId = doc.id;
-  await store.addProgressMany(list);
-  return { added: list.length, orphans, skippedDupes, replaced, fallbackReason: doc?.fallbackReason || '' };
+
+  // 3) עותק קובץ הדוח בתיקיית העסקה (או בתוך המערכת). בדוח מצרפי — הקובץ המפוצל של התיק.
+  //    הכתיבה לתיקייה יכולה להמתין לאישור הרשאה של הדפדפן או לתיקיית ענן איטית —
+  //    לכן לא מחכים לה יותר מכמה שניות; היא ממשיכה ברקע ונרשמת באותו מזהה.
+  step('שמירת קובץ הדוח');
+  const saving = fileStore.saveDocument(importCtx.saveFile || importCtx.file, store.getDeal(dealId),
+    { kind: importCtx.sourceKind === 'invoice' ? 'invoice' : 'report', id: fileId, ask: false })
+    .catch((err) => ({ fallbackReason: err?.message || 'שמירת הקובץ נכשלה' }));
+  const doc = await Promise.race([saving, new Promise((res) => setTimeout(() => res({ pending: true }), 6000))]);
+  step('');
+  return {
+    added: list.length, orphans, skippedDupes, replaced,
+    fallbackReason: doc?.pending ? 'שמירת עותק הקובץ בתיקייה עדיין מתבצעת (ייתכן שהדפדפן מבקש אישור גישה)' : (doc?.fallbackReason || ''),
+  };
 }
 
 /**
@@ -2479,13 +2495,18 @@ function renderProgressImportModal() {
     const remember = els.modalBody.querySelector('[data-imp="rememberPeople"]')?.checked ?? true;
     let res2;
     save.disabled = true;
+    const ctx = importCtx;
+    // שומר: אם משהו נתקע — אומרים איפה, במקום כפתור שנלחץ ושום דבר לא קורה
+    const watchdog = setTimeout(() => {
+      if (els.modal.open && importCtx === ctx) ui.toast(`הקליטה עדיין רצה — בשלב: ${ctx.step || 'הכנה'}`, 'error');
+    }, 9000);
     try { res2 = await commitProgressImport({ remember }); }
     catch (err) {
       // בלי זה כישלון בשמירה נבלע: החלון נשאר פתוח ושום דבר לא קורה
       console.error('ייבוא דוח נכשל', err);
       save.disabled = false;
-      return ui.toast(`השמירה נכשלה — ${err?.message || err}`, 'error');
-    }
+      return ui.toast(`השמירה נכשלה (${ctx.step || 'הכנה'}) — ${err?.message || err}`, 'error');
+    } finally { clearTimeout(watchdog); }
     save.disabled = false;
     // אין מה לקלוט: החלון נשאר פתוח, וההודעה אומרת למה — כפילות של דוח שכבר נקלט ≠ אנשים בלי שיוך
     if (!res2.added) {
@@ -2495,11 +2516,11 @@ function renderProgressImportModal() {
       return ui.toast(res2.orphans ? `${res2.orphans} שורות לא שויכו — שייך את האנשים לשורות התקציב (סעיף 3)` : 'לא נמצאו בדוח שורות עם שעות', 'error');
     }
     closeModal();
-    if (res2.fallbackReason) ui.toast(`קובץ הדוח נשמר בתוך המערכת — ${res2.fallbackReason}`, 'error');
     const extra = [
       res2.orphans ? `${res2.orphans} ללא שיוך` : '',
       res2.skippedDupes ? `${res2.skippedDupes} כפילויות דולגו` : '',
       res2.replaced ? `${res2.replaced} דיווחים קודמים בטווח הוחלפו` : '',
+      res2.fallbackReason ? `קובץ הדוח: ${res2.fallbackReason}` : '',
     ].filter(Boolean).join(' · ');
     ui.toast(`${res2.added} עדכונים נוספו למעקב${extra ? ` · ${extra}` : ''}`);
     state.tab = 'reports';

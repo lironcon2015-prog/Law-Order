@@ -37,6 +37,10 @@ export async function folderReady() {
   catch { return false; }
 }
 
+async function hasPermission(handle) {
+  try { return (await handle.queryPermission({ mode: 'readwrite' })) === 'granted'; } catch { return false; }
+}
+
 async function ensurePermission(handle) {
   if (!handle) return false;
   try {
@@ -138,15 +142,17 @@ async function freeName(dir, name) {
  * לא זורק: כישלון כתיבה נופל חזרה לאחסון ב-IndexedDB.
  * @returns {{id, name, storage:'folder'|'db', dir?:string, subdir?:string}}
  */
-export async function saveDocument(file, deal, { kind = 'doc' } = {}) {
+export async function saveDocument(file, deal, { kind = 'doc', id = '', ask = true } = {}) {
   const base = {
-    id: uid('file'), name: file.name, type: file.type || '', size: file.size,
+    id: id || uid('file'), name: file.name, type: file.type || '', size: file.size,
     dealId: deal?.id || '', kind, createdAt: new Date().toISOString(),
   };
   const root = await storedHandle();
   let fallbackReason = '';
 
-  if (root && (await ensurePermission(root))) {
+  // ask=false: לא מבקשים הרשאה (בקשה שלא נענית משאירה את ה-promise תלוי לנצח) — רק הרשאה שכבר בתוקף
+  const allowed = root && (ask ? await ensurePermission(root) : await hasPermission(root));
+  if (allowed) {
     try {
       const dir = await dealDirectory(root, deal);
       const name = await freeName(dir, file.name);
@@ -162,7 +168,7 @@ export async function saveDocument(file, deal, { kind = 'doc' } = {}) {
       fallbackReason = err?.message || 'כתיבה לתיקייה נכשלה';
     }
   } else if (root) {
-    fallbackReason = 'אין הרשאת כתיבה לתיקייה';
+    fallbackReason = 'נשמר בתוך המערכת — אין כרגע הרשאת גישה לתיקיית המסמכים (ניתן לחדש במסך ההגדרות)';
   }
 
   const rec = { ...base, storage: 'db', blob: file };
