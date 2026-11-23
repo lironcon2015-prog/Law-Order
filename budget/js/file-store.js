@@ -29,13 +29,37 @@ async function legacyHandle() {
   return (await db.get('localPrefs', LEGACY_DIR_KEY).catch(() => null))?.handle || null;
 }
 
-/** התיקייה שבה נשמר קובץ מסוים: תיקיית העבודה, או — לקבצים ישנים — תיקיית המסמכים הנפרדת של פעם */
-async function rootFor(rec) {
-  const root = await storedHandle();
-  if (root && (!rec?.dir || rec.dir === root.name)) return root;
+/**
+ * מאתר קובץ שנשמר בתיקייה: קודם בתיקיית העבודה, ואז בתיקיית המסמכים הנפרדת של פעם.
+ * כך מותר להעביר את תתי-התיקיות של העסקאות מהתיקייה הישנה לתיקיית העבודה — הקובץ נמצא בכל מקרה,
+ * לפי שם תת-התיקייה ושם הקובץ (שם תיקיית השורש לא משנה).
+ * @returns {{dir:FileSystemDirectoryHandle, fh:FileSystemFileHandle} | null}
+ */
+async function locate(rec) {
+  const roots = [];
+  for (const h of [await storedHandle(), await legacyHandle()]) {
+    if (h && !(await Promise.all(roots.map((r) => r.isSameEntry(h).catch(() => false)))).some(Boolean)) roots.push(h);
+  }
+  if (!roots.length) throw new Error('לא מחוברת תיקיית עבודה — חבר אותה מהפס בראש המסך');
+  let denied = false;
+  for (const root of roots) {
+    if (!(await ensurePermission(root))) { denied = true; continue; }
+    try {
+      const dir = rec.subdir ? await root.getDirectoryHandle(rec.subdir) : root;
+      return { dir, fh: await dir.getFileHandle(rec.name) };
+    } catch { /* לא כאן — התיקייה הבאה */ }
+  }
+  if (denied) throw new Error('אין הרשאת גישה לתיקייה');
+  return null;
+}
+
+/** שם תיקיית המסמכים הנפרדת של פעם (אם הייתה ואינה תיקיית העבודה) — כדי שיהיה ברור מאיפה להעביר */
+export async function legacyFolderName() {
   const legacy = await legacyHandle();
-  if (legacy && rec?.dir === legacy.name) return legacy;
-  return root;
+  const root = await storedHandle();
+  if (!legacy) return '';
+  if (root && (await root.isSameEntry(legacy).catch(() => false))) return '';
+  return legacy.name;
 }
 
 async function hasPermission(handle) {
@@ -168,16 +192,9 @@ export async function readDocument(id) {
     if (!rec.blob) throw new Error('הקובץ אינו זמין במכשיר זה');
     return rec.blob;
   }
-  const root = await rootFor(rec);
-  if (!root) throw new Error(`התיקייה "${rec.dir || ''}" אינה מחוברת — חבר את תיקיית העבודה`);
-  if (!(await ensurePermission(root))) throw new Error('אין הרשאת גישה לתיקייה');
-  try {
-    const dir = rec.subdir ? await root.getDirectoryHandle(rec.subdir) : root;
-    const fh = await dir.getFileHandle(rec.name);
-    return await fh.getFile();
-  } catch {
-    throw new Error(`"${rec.name}" לא נמצא בתיקייה — ייתכן שהוזז או נמחק`);
-  }
+  const hit = await locate(rec);
+  if (!hit) throw new Error(`"${rec.name}" לא נמצא בתת-התיקייה "${rec.subdir || ''}" בתיקיית העבודה — ייתכן שהוזז או נמחק`);
+  return hit.fh.getFile();
 }
 
 /**
@@ -191,10 +208,9 @@ export async function deleteDocument(id) {
   let removedFile = false, reason = '';
   if (rec.storage === 'folder') {
     try {
-      const root = await rootFor(rec);
-      if (!root || !(await ensurePermission(root))) throw new Error('התיקייה אינה מחוברת');
-      const dir = rec.subdir ? await root.getDirectoryHandle(rec.subdir) : root;
-      await dir.removeEntry(rec.name);
+      const hit = await locate(rec);
+      if (!hit) throw new Error('הקובץ לא נמצא בתיקייה');
+      await hit.dir.removeEntry(rec.name);
       removedFile = true;
     } catch (err) { reason = err?.message || 'מחיקת הקובץ מהתיקייה נכשלה'; }
   }

@@ -106,7 +106,7 @@ function renderBuildRow() {
 }
 
 /** מצב תיקיית העבודה (שבה נשמרים קבצי העסקה) במסך ההגדרות, עם הפעולה שמתאימה למצב */
-export function renderFolderState(root, { state, name, dealFolder }) {
+export function renderFolderState(root, { state, name, dealFolder, legacy = '' }) {
   if (!root) return;
   root.replaceChildren();
   if (state === 'unsup') {
@@ -122,6 +122,7 @@ export function renderFolderState(root, { state, name, dealFolder }) {
       fact('מצב', status, state === 'ready' ? '' : 'warn'),
       fact('תת-התיקייה של העסקה', dealFolder || '—'),
     ]),
+    legacy ? el('p', { class: 'field__hint', text: `קבצים מלפני האיחוד נמצאים בתיקייה "${legacy}" (תיקיית המסמכים הנפרדת של פעם). הם נפתחים גם משם, ואפשר להעביר את תתי-התיקיות של העסקאות לתיקיית העבודה כמו שהן — המערכת תמצא אותם.` }) : null,
     el('div', { class: 'form-actions form-actions--wrap' }, [
       state === 'none' ? button('חיבור תיקיית עבודה', { action: 'wf-connect', iconName: 'upload' }) : null,
       state === 'prompt' ? button('אישור גישה לתיקייה', { action: 'wf-grant', iconName: 'check' }) : null,

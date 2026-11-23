@@ -291,7 +291,7 @@ async function refreshFolderState() {
   if (!box) return;
   const deal = store.getDeal(state.dealId);
   const wf = workFolder.getStatus();
-  ui.renderFolderState(box, { state: wf.state, name: wf.name, dealFolder: deal ? fileStore.dealFolderName(deal) : '' });
+  ui.renderFolderState(box, { state: wf.state, name: wf.name, dealFolder: deal ? fileStore.dealFolderName(deal) : '', legacy: await fileStore.legacyFolderName() });
 }
 
 /** מרענן את כותרת העסקה (תגיות + סרגל) בלי לרנדר מחדש את הטופס שבו המשתמש עובד */
