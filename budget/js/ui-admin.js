@@ -77,15 +77,9 @@ export function renderDealSettings(root, { snap, rateCards }) {
     ]),
   ]));
 
-  // תיקיית המסמכים — מקומית למכשיר, לא חלק מנתוני העסקה
-  extra.append(srow('תיקיית מסמכים', 'כל דוח, חשבון או מסמך שמועלה נשמר בתיקייה שתבחר, בתת-תיקייה נפרדת לכל עסקה שנוצרת אוטומטית. בלי תיקייה — הקבצים נשמרים בתוך המערכת.', [
-    el('div', { class: 'facts', id: 'docs-folder-state' }, [fact('סטטוס', 'נטען…')]),
-    el('div', { class: 'form-actions form-actions--wrap' }, [
-      button('בחר תיקייה', { action: 'pick-folder', iconName: 'upload' }),
-      button('בדוק כתיבה', { action: 'test-folder', iconName: 'check', kind: 'ghost' }),
-      button('חדש הרשאה', { action: 'reconnect-folder', iconName: 'refresh', kind: 'ghost' }),
-      button('נתק', { action: 'forget-folder', iconName: 'close', kind: 'ghost' }),
-    ]),
+  // קבצי העסקה נשמרים בתיקיית העבודה — אותו חיבור של קובץ הנתונים (מקומי למכשיר)
+  extra.append(srow('קבצי העסקה', 'כל דוח, חשבון או מסמך שמועלה נשמר בתיקיית העבודה, בתת-תיקייה של העסקה שנוצרת אוטומטית. זה אותו חיבור של קובץ הנתונים — אין תיקייה נוספת לחבר.', [
+    el('div', { id: 'docs-folder-state' }, [fact('סטטוס', 'נטען…')]),
   ], 'srow--folder'));
 
   extra.append(renderBuildRow());
@@ -111,18 +105,28 @@ function renderBuildRow() {
   ]);
 }
 
-/** מצב תיקיית המסמכים במסך ההגדרות */
-export function renderFolderState(root, { supported, name, ready, dealFolder }) {
+/** מצב תיקיית העבודה (שבה נשמרים קבצי העסקה) במסך ההגדרות, עם הפעולה שמתאימה למצב */
+export function renderFolderState(root, { state, name, dealFolder }) {
   if (!root) return;
   root.replaceChildren();
-  if (!supported) {
-    root.append(fact('סטטוס', 'הדפדפן אינו תומך — הקבצים נשמרים בתוך המערכת', 'warn'));
+  if (state === 'unsup') {
+    root.append(el('div', { class: 'facts' }, [fact('סטטוס', 'הדפדפן אינו תומך בתיקיות — הקבצים נשמרים בתוך המערכת', 'warn')]));
     return;
   }
+  const status = state === 'ready' ? 'מחוברת · הרשאה בתוקף'
+    : state === 'prompt' ? 'ממתינה לאישור גישה'
+      : state === 'err' ? 'תקלה בגישה לתיקייה' : 'לא מחוברת';
   root.append(
-    fact('תיקייה מחוברת', name || 'לא נבחרה', name ? '' : 'warn'),
-    fact('הרשאת כתיבה', name ? (ready ? 'בתוקף' : 'נדרש חידוש') : '—', name && !ready ? 'warn' : ''),
-    fact('תת-התיקייה של העסקה', dealFolder || '—'),
+    el('div', { class: 'facts' }, [
+      fact('תיקיית העבודה', name || (state === 'none' ? 'לא נבחרה' : '—'), state === 'none' ? 'warn' : ''),
+      fact('מצב', status, state === 'ready' ? '' : 'warn'),
+      fact('תת-התיקייה של העסקה', dealFolder || '—'),
+    ]),
+    el('div', { class: 'form-actions form-actions--wrap' }, [
+      state === 'none' ? button('חיבור תיקיית עבודה', { action: 'wf-connect', iconName: 'upload' }) : null,
+      state === 'prompt' ? button('אישור גישה לתיקייה', { action: 'wf-grant', iconName: 'check' }) : null,
+      state === 'ready' ? button('בדוק כתיבה', { action: 'test-folder', iconName: 'check', kind: 'ghost' }) : null,
+    ]),
   );
 }
 

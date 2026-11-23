@@ -1,7 +1,7 @@
 // file-store.js — ארכיון הקבצים של LexBudget (דוחות שעות, חשבונות, מסמכים).
 //
 // שני מצבי אחסון:
-//   'folder' — תיקייה אמיתית בדיסק שהמשתמש בחר (File System Access API).
+//   'folder' — תיקיית העבודה (אותה תיקייה של קובץ הנתונים — חיבור אחד, הרשאה אחת).
 //              המערכת פותחת בתוכה **תת-תיקייה לכל עסקה** אוטומטית.
 //              ה-handle נשמר ב-IndexedDB (`localPrefs`) ומחזיק בין הפעלות;
 //              ההרשאה מתחדשת רק מתוך לחיצת משתמש (requestPermission).
@@ -12,29 +12,30 @@
 import * as db from './db.js';
 import { uid } from './model.js';
 
-const DIR_KEY = 'docsDir';
+// חיבור תיקייה **אחד**: תיקיית העבודה (work-folder.js) היא גם תיקיית המסמכים.
+// פעם היו שני חיבורים נפרדים (מסמכים / נתונים), כל אחד עם הרשאה משלו — והחיווי הראה רק אחד מהם,
+// כך שהרשאה שפגה בשני שיתקה את ייבוא הדוחות בלי שום סימן. `docsDir` הישן נשמר רק לקריאת קבצים שנשמרו בו.
+const LEGACY_DIR_KEY = 'docsDir';
 
 export const supportsFolder = () => typeof window !== 'undefined' && 'showDirectoryPicker' in window;
 
-/* ---------- תיקיית השורש ---------- */
+/* ---------- תיקיית השורש = תיקיית העבודה ---------- */
 
 async function storedHandle() {
-  const rec = await db.get('localPrefs', DIR_KEY);
-  return rec ? rec.handle : null;
+  return (await workFolderRec())?.handle || null;
 }
 
-/** שם תיקיית השורש המחוברת (או '' אם אין) */
-export async function folderName() {
-  const h = await storedHandle();
-  return h ? h.name : '';
+async function legacyHandle() {
+  return (await db.get('localPrefs', LEGACY_DIR_KEY).catch(() => null))?.handle || null;
 }
 
-/** האם יש הרשאת כתיבה בתוקף כרגע (בלי לבקש) */
-export async function folderReady() {
-  const h = await storedHandle();
-  if (!h) return false;
-  try { return (await h.queryPermission({ mode: 'readwrite' })) === 'granted'; }
-  catch { return false; }
+/** התיקייה שבה נשמר קובץ מסוים: תיקיית העבודה, או — לקבצים ישנים — תיקיית המסמכים הנפרדת של פעם */
+async function rootFor(rec) {
+  const root = await storedHandle();
+  if (root && (!rec?.dir || rec.dir === root.name)) return root;
+  const legacy = await legacyHandle();
+  if (legacy && rec?.dir === legacy.name) return legacy;
+  return root;
 }
 
 async function hasPermission(handle) {
@@ -47,27 +48,6 @@ async function ensurePermission(handle) {
     if ((await handle.queryPermission({ mode: 'readwrite' })) === 'granted') return true;
     return (await handle.requestPermission({ mode: 'readwrite' })) === 'granted';
   } catch { return false; }
-}
-
-/** בחירת תיקיית המסמכים (מתוך לחיצת משתמש). מחזיר את שם התיקייה. */
-export async function pickFolder() {
-  if (!supportsFolder()) throw new Error('הדפדפן אינו תומך בבחירת תיקייה (נתמך בכרום/אדג\' במחשב)');
-  const handle = await window.showDirectoryPicker({ id: 'lexbudget-docs', mode: 'readwrite', startIn: 'documents' });
-  if (!(await ensurePermission(handle))) throw new Error('לא ניתנה הרשאת כתיבה לתיקייה');
-  await db.put('localPrefs', { key: DIR_KEY, handle });
-  return handle.name;
-}
-
-/** מבקש מחדש את ההרשאה לתיקייה הקיימת (מתוך לחיצת משתמש) */
-export async function reconnectFolder() {
-  const h = await storedHandle();
-  if (!h) return false;
-  return ensurePermission(h);
-}
-
-/** ניתוק התיקייה (הקבצים שכבר נכתבו נשארים בדיסק) */
-export async function forgetFolder() {
-  await db.remove('localPrefs', DIR_KEY);
 }
 
 /* ---------- תת-תיקייה לעסקה ---------- */
@@ -93,8 +73,8 @@ async function dealDirectory(root, deal) {
  */
 export async function ensureDealFolder(deal) {
   const root = await storedHandle();
-  if (!root) return { ok: false, error: 'לא מחוברת תיקייה' };
-  if (!(await ensurePermission(root))) return { ok: false, error: 'אין הרשאת כתיבה לתיקייה' };
+  if (!root) return { ok: false, error: 'לא מחוברת תיקיית עבודה' };
+  if (!(await ensurePermission(root))) return { ok: false, error: 'אין הרשאת כתיבה לתיקיית העבודה' };
   try {
     await dealDirectory(root, deal);
     return { ok: true, name: dealFolderName(deal) };
@@ -106,8 +86,8 @@ export async function ensureDealFolder(deal) {
 /** בדיקת כתיבה אמיתית: יוצר קובץ זמני בתת-התיקייה של העסקה ומוחק אותו */
 export async function testWrite(deal) {
   const root = await storedHandle();
-  if (!root) return { ok: false, error: 'לא מחוברת תיקייה' };
-  if (!(await ensurePermission(root))) return { ok: false, error: 'אין הרשאת כתיבה — לחץ "חדש הרשאה"' };
+  if (!root) return { ok: false, error: 'לא מחוברת תיקיית עבודה' };
+  if (!(await ensurePermission(root))) return { ok: false, error: 'לא ניתן אישור גישה לתיקיית העבודה' };
   try {
     const dir = await dealDirectory(root, deal);
     const name = `.lexbudget-test-${Date.now()}.txt`;
@@ -168,7 +148,7 @@ export async function saveDocument(file, deal, { kind = 'doc', id = '', ask = tr
       fallbackReason = err?.message || 'כתיבה לתיקייה נכשלה';
     }
   } else if (root) {
-    fallbackReason = 'נשמר בתוך המערכת — אין כרגע הרשאת גישה לתיקיית המסמכים (ניתן לחדש במסך ההגדרות)';
+    fallbackReason = 'נשמר בתוך המערכת — תיקיית העבודה ממתינה לאישור גישה (הפס בראש המסך)';
   }
 
   const rec = { ...base, storage: 'db', blob: file };
@@ -188,8 +168,8 @@ export async function readDocument(id) {
     if (!rec.blob) throw new Error('הקובץ אינו זמין במכשיר זה');
     return rec.blob;
   }
-  const root = await storedHandle();
-  if (!root) throw new Error(`התיקייה "${rec.dir || ''}" אינה מחוברת — חבר אותה במסך ההגדרות`);
+  const root = await rootFor(rec);
+  if (!root) throw new Error(`התיקייה "${rec.dir || ''}" אינה מחוברת — חבר את תיקיית העבודה`);
   if (!(await ensurePermission(root))) throw new Error('אין הרשאת גישה לתיקייה');
   try {
     const dir = rec.subdir ? await root.getDirectoryHandle(rec.subdir) : root;
@@ -211,7 +191,7 @@ export async function deleteDocument(id) {
   let removedFile = false, reason = '';
   if (rec.storage === 'folder') {
     try {
-      const root = await storedHandle();
+      const root = await rootFor(rec);
       if (!root || !(await ensurePermission(root))) throw new Error('התיקייה אינה מחוברת');
       const dir = rec.subdir ? await root.getDirectoryHandle(rec.subdir) : root;
       await dir.removeEntry(rec.name);
@@ -271,7 +251,6 @@ export async function connectWorkFolder() {
   if (!(await ensurePermission(handle))) throw new Error('לא ניתנה הרשאת כתיבה לתיקייה');
   workRec = { key: WORK_KEY, handle, sig: '', savedAt: '' };
   await db.put('localPrefs', workRec);
-  if (!(await storedHandle())) await db.put('localPrefs', { key: DIR_KEY, handle });
   return handle.name;
 }
 

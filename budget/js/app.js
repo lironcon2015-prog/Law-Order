@@ -290,12 +290,8 @@ async function refreshFolderState() {
   const box = document.getElementById('docs-folder-state');
   if (!box) return;
   const deal = store.getDeal(state.dealId);
-  ui.renderFolderState(box, {
-    supported: fileStore.supportsFolder(),
-    name: await fileStore.folderName(),
-    ready: await fileStore.folderReady(),
-    dealFolder: deal ? fileStore.dealFolderName(deal) : '',
-  });
+  const wf = workFolder.getStatus();
+  ui.renderFolderState(box, { state: wf.state, name: wf.name, dealFolder: deal ? fileStore.dealFolderName(deal) : '' });
 }
 
 /** מרענן את כותרת העסקה (תגיות + סרגל) בלי לרנדר מחדש את הטופס שבו המשתמש עובד */
@@ -323,6 +319,7 @@ const WF_TIME = (iso) => (iso ? new Date(iso).toLocaleString('he-IL', { dateStyl
 /** פס ההתראה מעל המסך + שורת המצב בסרגל הצד. נקרא אחרי כל render ובכל שינוי מצב */
 function paintWorkFolder() {
   const st = workFolder.getStatus();
+  refreshFolderState();   // שורת "קבצי העסקה" במסך ההגדרות מציגה את אותו חיבור
   const line = document.getElementById('wf-state');
   if (line) {
     const tone = st.state === 'ready' ? (st.dirty || st.waiting ? 'warn' : 'ok') : st.state === 'unsup' ? '' : 'warn';
@@ -882,29 +879,11 @@ async function onClick(e) {
     case 'add-team':
       return openTeamModal();
 
-    case 'pick-folder':
-      try {
-        const name = await fileStore.pickFolder();
-        // יוצרים מיד את תת-התיקייה של העסקה, כדי שיהיה ברור שהחיבור עובד
-        const res = await fileStore.ensureDealFolder(store.getDeal(state.dealId));
-        ui.toast(res.ok ? `מחובר ל-"${name}" · נוצרה התיקייה "${res.name}"` : `מחובר ל-"${name}" · ${res.error}`, res.ok ? '' : 'error');
-      } catch (err) { ui.toast(err.message || 'בחירת התיקייה בוטלה', 'error'); }
-      return refreshFolderState();
-
     case 'test-folder': {
       const res = await fileStore.testWrite(store.getDeal(state.dealId));
       ui.toast(res.ok ? `הכתיבה עובדת · ${res.name}` : `הכתיבה נכשלה: ${res.error}`, res.ok ? '' : 'error');
       return refreshFolderState();
     }
-
-    case 'reconnect-folder':
-      ui.toast(await fileStore.reconnectFolder() ? 'ההרשאה חודשה' : 'לא ניתנה הרשאה', await fileStore.folderReady() ? '' : 'error');
-      return refreshFolderState();
-
-    case 'forget-folder':
-      await fileStore.forgetFolder();
-      ui.toast('התיקייה נותקה — קבצים חדשים יישמרו בתוך המערכת');
-      return refreshFolderState();
 
     case 'clear-picks':
       state.selectedTeams.clear();
